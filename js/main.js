@@ -1,12 +1,12 @@
 /* THE HEART OF THE GAME
-   Now with AUDIO, Combat, and proper Loops!
+   Polished: Reliable Audio Startup & Logic.
 */
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
 import { World } from './world.js';
 import { Player, Island, Villager, Warrior, Projectile, Particle } from './entities.js';
-import { AudioManager } from './audio.js'; // IMPORT AUDIO
+import { AudioManager } from './audio.js';
 
 class Game {
     constructor() {
@@ -21,8 +21,9 @@ class Game {
         this.input = new InputHandler();
         this.resources = new ResourceManager();
         this.world = new World(this.worldWidth, this.worldHeight);
-        this.audio = new AudioManager(); // INIT AUDIO
-        this.audio.loadAll(); // LOAD SOUNDS
+        
+        this.audio = new AudioManager(); 
+        this.audio.loadAll(); 
         
         this.player = new Player(400, 200, 'green'); 
         this.enemyChief = new Player(5500, 200, 'blue');
@@ -39,17 +40,22 @@ class Game {
         this.hookTarget = null;
         this.gameOver = false;
 
-        // Audio unlock listener
+        // Audio unlock listener (One time click)
         window.addEventListener('click', () => this._startAudio(), { once: true });
+        // Also unlock on key press just in case
+        window.addEventListener('keydown', () => this._startAudio(), { once: true });
 
         requestAnimationFrame((ts) => this.loop(ts));
     }
 
     _startAudio() {
+        if (this.audioStarted) return;
+        this.audioStarted = true;
+        
         this.audio.resume();
         this.audio.startLoop('ambience', 0.5);
         this.audio.startLoop('music', 0.4);
-        this.audio.startLoop('fall', 0.0); // Start silent
+        this.audio.startLoop('fall', 0.0); 
     }
 
     resizeCanvas() {
@@ -94,13 +100,11 @@ class Game {
     update(dt) {
         if (this.gameOver) return;
 
-        // 1. AUDIO LOGIC (Music Pitch & Fall Wind)
+        // 1. AUDIO LOGIC
         if (this.audio.initialized) {
-            // Dynamic Music Pitch: 1.0 at ground, faster up high
             const heightRatio = 1.0 + (Math.max(0, 2000 - this.player.y) / 4000);
             this.audio.setLoopPitch('music', heightRatio);
 
-            // Falling Sound
             if (this.player.vy > 300 && !this.player.isGrounded) {
                 this.audio.setLoopVolume('fall', 0.6);
             } else {
@@ -108,11 +112,11 @@ class Game {
             }
         }
 
-        // 2. UPDATE PLAYER (Pass Audio!)
+        // 2. UPDATE PLAYER
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio);
         this.world.update(this.player);
 
-        // 3. UPDATE ENEMY SHAMAN
+        // 3. UPDATE ENEMY
         if (!this.enemyChief.dead) {
             const dx = this.player.x - this.enemyChief.x;
             const dy = this.player.y - this.enemyChief.y;
@@ -222,14 +226,11 @@ class Game {
             p.update(dt);
             let hitSomething = false;
 
-            // Check Collisions (Enemy Shaman, Player, Villagers)
-            // ... logic identical to previous, just added Sound Triggers ...
-
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
                 this.enemyChief.hp -= 5;
                 hitSomething = true;
-                this.audio.play('hit', 0.4, 0.3); // SOUND
+                this.audio.play('hit', 0.4, 0.3);
                 if (this.enemyChief.hp <= 0) {
                     this.enemyChief.dead = true;
                     this.enemyChief.respawnTimer = 5.0;
@@ -241,7 +242,7 @@ class Game {
                 this._spawnBlood(p.x, p.y);
                 this.player.hp -= 5;
                 hitSomething = true;
-                this.audio.play('hit', 0.4, 0.3); // SOUND
+                this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
                     this.player.dead = true;
                     this.player.respawnTimer = 5.0;
@@ -253,7 +254,7 @@ class Game {
                     this._spawnBlood(v.x, v.y);
                     v.hp -= 10;
                     hitSomething = true;
-                    this.audio.play('hit', 0.3, 0.3); // SOUND
+                    this.audio.play('hit', 0.3, 0.3);
                     if (v.hp <= 0) {
                          v.dead = true;
                          this._spawnBlood(v.x, v.y);
@@ -273,7 +274,7 @@ class Game {
 
                 v.update(dt, this.islands, enemies, (x, y, angle, team) => {
                     this.projectiles.push(new Projectile(x, y, angle, team));
-                }, this.worldWidth, this.worldHeight, this.audio); // PASS AUDIO
+                }, this.worldWidth, this.worldHeight, this.audio); 
             } else {
                 v.update(dt, this.islands, this.worldWidth, this.worldHeight);
             }
@@ -304,8 +305,8 @@ class Game {
                 const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
                 this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green'));
                 
-                // SOUND: SHOOT (Player)
-                this.audio.play('shoot', 0.4, 0.2);
+                // SOUND: SHOOT (Player) - NO RANDOMIZATION
+                this.audio.play('shoot', 0.4, 0.0);
             }
         }
     }
