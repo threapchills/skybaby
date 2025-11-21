@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V7: Pigs, lush forests, trails, and SHAKE!
+   Tuned: Tighter controls, HP Regen, Earth-walking.
 */
 
 export class Entity {
@@ -35,7 +35,6 @@ export class Entity {
     }
 }
 
-// --- PARTICLES ---
 export class Particle extends Entity {
     constructor(x, y, color, speed, life, size = 5) {
         super(x, y, size, size, null);
@@ -65,7 +64,6 @@ export class Particle extends Entity {
     }
 }
 
-// --- PIGGY! ---
 export class Pig extends Entity {
     constructor(x, y) {
         super(x, y, 32, 24, 'assets/sprites/pig.png'); 
@@ -84,8 +82,8 @@ export class Pig extends Entity {
         
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) {
-            this.stateTimer = Math.random() * 3 + 2; // Lazier than humans
-            this.vx = (Math.random() - 0.5) * 40; // Slower wander
+            this.stateTimer = Math.random() * 3 + 2; 
+            this.vx = (Math.random() - 0.5) * 40; 
         }
 
         if (this.onGround && this.homeIsland) {
@@ -120,7 +118,6 @@ export class Pig extends Entity {
     }
 }
 
-// --- THE PLAYER ---
 export class Player extends Entity {
     constructor(x, y, team) {
         super(x, y, 40, 40, `assets/sprites/player_${team}.png`);
@@ -135,15 +132,26 @@ export class Player extends Entity {
         this.maxFallSpeed = 800; 
         this.jumpForce = -500; 
         this.flyForce = -400; 
-        this.friction = 0.85;
+        this.friction = 0.80; // More friction (was 0.85) = tighter stops
         this.isGrounded = false;
+        this.hpRegenTimer = 0; // HP Regen
         
         this.visitedIslands = new Set();
     }
 
-    update(dt, input, resources, worldWidth, worldHeight, islands) {
+    update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
         if (this.dead) return; 
 
+        // HP REGEN (Slow)
+        if (this.hp < this.maxHp) {
+            this.hpRegenTimer += dt;
+            if (this.hpRegenTimer > 0.5) { // 2 HP per second
+                this.hp++;
+                this.hpRegenTimer = 0;
+            }
+        }
+
+        // Horizontal
         if (input && input.keys) {
             if (input.keys.a) this.vx -= 50 * dt; 
             if (input.keys.d) this.vx += 50 * dt;
@@ -151,21 +159,25 @@ export class Player extends Entity {
         this.x += this.vx * this.speed * dt;
         this.vx *= this.friction; 
 
+        // Vertical
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
+        // FLYING / JUMPING
         if (input && input.keys.space) {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
+                if(audio) audio.play('jump', 0.4, 0.1);
             } else if (resources && resources.air > 0) {
                 this.vy -= 1200 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
-                resources.air -= 30 * dt; 
+                resources.air -= 80 * dt; // INCREASED COST (was 30)
             }
         }
         this.y += this.vy * dt;
 
+        // Collisions & Earth Gathering
         this.isGrounded = false;
         if (this.vy >= 0) { 
             for (let island of islands) {
@@ -177,7 +189,19 @@ export class Player extends Entity {
                          this.y = island.y - this.h + 4; 
                          this.vy = 0;
                          this.isGrounded = true;
-                         if (this.team === 'green') this.visitedIslands.add(island);
+                         
+                         // DISCOVERY BONUS
+                         if (this.team === 'green' && !this.visitedIslands.has(island) && resources) {
+                            this.visitedIslands.add(island);
+                            resources.addEarth(20); 
+                         }
+
+                         // WALKING BONUS (New!)
+                         // If moving horizontally while grounded, add Earth
+                         if (this.team === 'green' && Math.abs(this.vx) > 2 && resources) {
+                             // 10 Earth per second while walking
+                             resources.addPassiveEarth(10 * dt);
+                         }
                     }
                 }
             }
@@ -220,7 +244,6 @@ export class Player extends Entity {
     }
 }
 
-// --- FLOATING ISLANDS ---
 export class Island extends Entity {
     constructor(x, y, w, h, team) {
         super(x, y, w, h, null);
@@ -241,14 +264,13 @@ export class Island extends Entity {
         this.hasTeepee = true;
         this.hasFireplace = Math.random() > 0.4; 
         
-        // RANDOMIZED TREES!
         this.trees = [];
-        const numTrees = 1 + Math.floor(Math.random() * (w / 80)); // Density based on width
+        const numTrees = 1 + Math.floor(Math.random() * (w / 80)); 
         for (let i = 0; i < numTrees; i++) {
             this.trees.push({
-                x: Math.random() * (w - 100), // Relative X
-                scale: 0.8 + Math.random() * 0.6, // 0.8x to 1.4x size
-                hueRotate: Math.floor(Math.random() * 40) - 20 // Slight color shift
+                x: Math.random() * (w - 100), 
+                scale: 0.8 + Math.random() * 0.6, 
+                hueRotate: Math.floor(Math.random() * 40) - 20 
             });
         }
 
@@ -270,7 +292,6 @@ export class Island extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
 
-        // BODY
         if (this.tileset.complete && this.tileset.naturalWidth > 0) {
             const sliceW = Math.floor(this.tileset.width / 3);
             const sliceH = this.tileset.height;
@@ -286,36 +307,26 @@ export class Island extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // STRUCTURES
-        // Draw TEEPEE
         if (this.hasTeepee && this.imgTeepee.complete) {
             ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 66, 96, 96);
         }
-        // Draw FIRE
         if (this.hasFireplace && this.imgFire.complete) {
             ctx.drawImage(this.imgFire, screenX + (this.w/2) - 32, screenY - 44, 64, 64);
         }
-        // Draw TREES (Loop)
         if (this.imgTree.complete) {
             this.trees.forEach(tree => {
                 ctx.save();
-                // Hue shift filter (expensive, but cool for trees)
                 ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
-                
                 const treeW = 120 * tree.scale;
                 const treeH = 150 * tree.scale;
-                // Base Y offset is -110, scaled
                 const treeY = screenY - (110 * tree.scale); 
-                
                 ctx.drawImage(this.imgTree, screenX + tree.x, treeY, treeW, treeH);
-                
                 ctx.restore();
             });
         }
     }
 }
 
-// --- VILLAGERS & WARRIORS ---
 export class Villager extends Entity {
     constructor(x, y, team) {
         const variant = Math.floor(Math.random() * 4) + 1;
@@ -425,7 +436,6 @@ export class Warrior extends Villager {
                 const lookAhead = this.vx > 0 ? 20 : -20;
                 const nextX = this.x + this.w/2 + lookAhead;
                 if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                    // Jump logic remains...
                     let canJump = false;
                     for(let other of islands) {
                         if (other === this.homeIsland) continue;
@@ -482,21 +492,18 @@ export class Projectile extends Entity {
         this.vy = Math.sin(angle) * speed;
         this.angle = angle; 
         this.life = 3.0;
-        // NEW: Trail timer
         this.trailTimer = 0;
     }
 
-    // NEW: Return particle info to spawn
     update(dt, spawnParticleCallback) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
 
-        // TRAIL EFFECT
         this.trailTimer -= dt;
         if (this.trailTimer <= 0 && spawnParticleCallback) {
-            this.trailTimer = 0.05; // Every 0.05s
+            this.trailTimer = 0.05; 
             spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
         }
     }
