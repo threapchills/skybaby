@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Procedural Generation & Mega-Gore Update!
+   Definitive V5: Socially Distanced Islands.
 */
 
 import { InputHandler } from './input.js';
@@ -69,25 +69,41 @@ class Game {
         this.islands.push(new Island(200, 1000, 600, 100, 'green')); 
         this.islands.push(new Island(5200, 1000, 600, 100, 'blue'));
 
-        // PROCEDURAL GENERATION LOOP
-        // Create 25 random islands scattered across layers
+        // PROCEDURAL GENERATION (Strict No Overlap)
+        const maxAttempts = 50; // More attempts because buffer is bigger
+        
         for (let i = 0; i < 25; i++) {
-            // Random X between bases
-            const rx = 800 + Math.random() * 4200; 
-            // Random Y layers (High, Mid, Low)
-            const ry = 500 + Math.random() * 1500;
-            // Random Width
-            const rw = 300 + Math.random() * 500; 
-            
-            // Assign team based on proximity to center
-            let team = 'neutral';
-            if (rx < 1500) team = 'green';
-            if (rx > 4500) team = 'blue';
+            let placed = false;
+            for(let attempt = 0; attempt < maxAttempts; attempt++) {
+                const rx = 800 + Math.random() * 4200; 
+                const ry = 500 + Math.random() * 1500;
+                const rw = 300 + Math.random() * 500;
+                const rh = 100;
 
-            this.islands.push(new Island(rx, ry, rw, 100, team));
+                // Check Collision with ALL existing islands
+                let overlaps = false;
+                for (let existing of this.islands) {
+                    // INCREASED BUFFER TO 300px
+                    if (rx < existing.x + existing.w + 300 && 
+                        rx + rw + 300 > existing.x &&
+                        ry < existing.y + existing.h + 300 && 
+                        ry + rh + 300 > existing.y) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+
+                if (!overlaps) {
+                    let team = 'neutral';
+                    if (rx < 1500) team = 'green';
+                    if (rx > 4500) team = 'blue';
+                    this.islands.push(new Island(rx, ry, rw, rh, team));
+                    placed = true;
+                    break;
+                }
+            }
         }
 
-        // Ensure initial visited island
         this.player.visitedIslands.add(this.islands[0]);
     }
 
@@ -287,7 +303,6 @@ class Game {
     }
 
     _spawnBlood(x, y, color='#cc0000') {
-        // SPAWN 25 BIG PARTICLES (Random size 5-12)
         for (let i=0; i<25; i++) {
             const size = 5 + Math.random() * 7;
             this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5, size));
