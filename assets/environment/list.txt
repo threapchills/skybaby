@@ -1,6 +1,0 @@
-|   |-- /environment    // Static world objects
-|   |   |-- island_tileset.png
-|   |   |-- tree_variant1.png
-|   |   |-- teepee_green.png
-|   |   |-- teepee_blue.png
-|   |   |-- fireplace_lit.png
