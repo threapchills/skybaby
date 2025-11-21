@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V5: Silent Warriors & Planted Assets.
+   Definitive V6: Giant Trees, Red Pig Blood, & Visible Fires.
 */
 
 export class Entity {
@@ -35,10 +35,9 @@ export class Entity {
     }
 }
 
-// --- PARTICLES ---
 export class Particle extends Entity {
-    constructor(x, y, color, speed, life) {
-        super(x, y, 5, 5, null);
+    constructor(x, y, color, speed, life, size = 5) {
+        super(x, y, size, size, null);
         this.color = color;
         const angle = Math.random() * Math.PI * 2;
         this.vx = Math.cos(angle) * speed;
@@ -65,7 +64,60 @@ export class Particle extends Entity {
     }
 }
 
-// --- THE PLAYER ---
+export class Pig extends Entity {
+    constructor(x, y) {
+        super(x, y, 32, 24, 'assets/sprites/pig.png'); 
+        this.hp = 10;
+        this.vx = 0;
+        this.vy = 0; 
+        this.stateTimer = 0;
+        this.onGround = false;
+        this.maxFallSpeed = 800; 
+        this.homeIsland = null;
+    }
+
+    update(dt, islands, worldWidth, worldHeight) {
+        this.vy += 500 * dt; 
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
+        
+        this.stateTimer -= dt;
+        if (this.stateTimer <= 0) {
+            this.stateTimer = Math.random() * 3 + 2; 
+            this.vx = (Math.random() - 0.5) * 40; 
+        }
+
+        if (this.onGround && this.homeIsland) {
+            const lookAhead = this.vx > 0 ? 10 : -10;
+            const nextX = this.x + this.w/2 + lookAhead;
+            if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                this.vx *= -1;
+            }
+        }
+        
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        this.onGround = false;
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                     const threshold = 10 + (this.vy * dt * 2);
+                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                         this.y = island.y - this.h;
+                         this.vy = 0;
+                         this.onGround = true;
+                         this.homeIsland = island; 
+                     }
+                }
+            }
+        }
+        
+        if (this.y > worldHeight) this.y = -50; 
+        if (this.x > worldWidth) this.x = 0;
+        if (this.x < 0) this.x = worldWidth;
+    }
+}
+
 export class Player extends Entity {
     constructor(x, y, team) {
         super(x, y, 40, 40, `assets/sprites/player_${team}.png`);
@@ -82,6 +134,7 @@ export class Player extends Entity {
         this.flyForce = -400; 
         this.friction = 0.85;
         this.isGrounded = false;
+        this.hpRegenTimer = 0;
         
         this.visitedIslands = new Set();
     }
@@ -89,7 +142,14 @@ export class Player extends Entity {
     update(dt, input, resources, worldWidth, worldHeight, islands) {
         if (this.dead) return; 
 
-        // Horizontal
+        if (this.hp < this.maxHp) {
+            this.hpRegenTimer += dt;
+            if (this.hpRegenTimer > 0.5) { 
+                this.hp++;
+                this.hpRegenTimer = 0;
+            }
+        }
+
         if (input && input.keys) {
             if (input.keys.a) this.vx -= 50 * dt; 
             if (input.keys.d) this.vx += 50 * dt;
@@ -97,7 +157,6 @@ export class Player extends Entity {
         this.x += this.vx * this.speed * dt;
         this.vx *= this.friction; 
 
-        // Vertical
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
@@ -108,12 +167,11 @@ export class Player extends Entity {
             } else if (resources && resources.air > 0) {
                 this.vy -= 1200 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
-                resources.air -= 30 * dt; 
+                resources.air -= 80 * dt; 
             }
         }
         this.y += this.vy * dt;
 
-        // Collisions
         this.isGrounded = false;
         if (this.vy >= 0) { 
             for (let island of islands) {
@@ -125,13 +183,20 @@ export class Player extends Entity {
                          this.y = island.y - this.h + 4; 
                          this.vy = 0;
                          this.isGrounded = true;
-                         if (this.team === 'green') this.visitedIslands.add(island);
+                         
+                         if (this.team === 'green' && !this.visitedIslands.has(island) && resources) {
+                            this.visitedIslands.add(island);
+                            resources.addEarth(20); 
+                         }
+
+                         if (this.team === 'green' && Math.abs(this.vx) > 2 && resources) {
+                             resources.addPassiveEarth(10 * dt);
+                         }
                     }
                 }
             }
         }
 
-        // WRAPPING
         if (this.y > worldHeight + 100) this.y = -100; 
         if (this.y < -200) this.y = worldHeight; 
         if (this.x > worldWidth) this.x = 0; 
@@ -146,7 +211,6 @@ export class Player extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
         
-        // HUD Marker
         if (this.team === 'green') {
             ctx.fillStyle = '#00ff00';
             ctx.beginPath();
@@ -170,7 +234,6 @@ export class Player extends Entity {
     }
 }
 
-// --- FLOATING ISLANDS ---
 export class Island extends Entity {
     constructor(x, y, w, h, team) {
         super(x, y, w, h, null);
@@ -182,15 +245,24 @@ export class Island extends Entity {
         this.imgTeepee = new Image();
         this.imgTeepee.src = team === 'green' ? 'assets/environment/teepee_green.png' : 'assets/environment/teepee_blue.png';
         
-        this.imgTree = new Image();
-        this.imgTree.src = 'assets/environment/tree_variant1.png';
-        
         this.imgFire = new Image();
         this.imgFire.src = 'assets/environment/fireplace_lit.png';
 
+        this.imgTree = new Image();
+        this.imgTree.src = 'assets/environment/tree_variant1.png';
+
         this.hasTeepee = true;
-        this.hasTree = true;
         this.hasFireplace = Math.random() > 0.4; 
+        
+        this.trees = [];
+        const numTrees = 1 + Math.floor(Math.random() * (w / 70)); // Denser forests
+        for (let i = 0; i < numTrees; i++) {
+            this.trees.push({
+                x: Math.random() * (w - 100), 
+                scale: 0.8 + Math.random() * 1.7, // BIGGER VARIATION (up to 2.5x!)
+                hueRotate: Math.floor(Math.random() * 40) - 20 
+            });
+        }
 
         this.vx = 0;
         this.vy = 0;
@@ -210,11 +282,10 @@ export class Island extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
 
-        // 1. DRAW ISLAND BODY
+        // ISLAND
         if (this.tileset.complete && this.tileset.naturalWidth > 0) {
             const sliceW = Math.floor(this.tileset.width / 3);
             const sliceH = this.tileset.height;
-            
             ctx.drawImage(this.tileset, 0, 0, sliceW, sliceH, screenX, screenY, sliceW, sliceH);
             const rightX = screenX + this.w - sliceW;
             const middleWidth = rightX - (screenX + sliceW);
@@ -227,20 +298,32 @@ export class Island extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // 2. DRAW STRUCTURES
+        // TEEPEE (Behind Trees & Fire)
         if (this.hasTeepee && this.imgTeepee.complete) {
             ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 66, 96, 96);
         }
-        if (this.hasFireplace && this.imgFire.complete) {
-            ctx.drawImage(this.imgFire, screenX + (this.w/2) - 32, screenY - 44, 64, 64);
+
+        // TREES (Middle Layer)
+        if (this.imgTree.complete) {
+            this.trees.forEach(tree => {
+                ctx.save();
+                ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
+                const treeW = 120 * tree.scale;
+                const treeH = 150 * tree.scale;
+                const treeY = screenY - (110 * tree.scale); // Scale Y offset too
+                ctx.drawImage(this.imgTree, screenX + tree.x, treeY, treeW, treeH);
+                ctx.restore();
+            });
         }
-        if (this.hasTree && this.imgTree.complete) {
-            ctx.drawImage(this.imgTree, screenX + this.w - 100, screenY - 110, 120, 150);
+
+        // FIREPLACE (Front Layer - Always visible!)
+        if (this.hasFireplace && this.imgFire.complete) {
+            // Increased size to 80x80 (was 64)
+            ctx.drawImage(this.imgFire, screenX + (this.w/2) - 40, screenY - 54, 80, 80);
         }
     }
 }
 
-// --- VILLAGERS & WARRIORS ---
 export class Villager extends Entity {
     constructor(x, y, team) {
         const variant = Math.floor(Math.random() * 4) + 1;
@@ -334,7 +417,6 @@ export class Warrior extends Villager {
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
                     spawnProjectileCallback(this.x, this.y, angle, this.team);
-                    // SILENCE: Removed audio play call entirely for Warriors
                 }
             } else {
                 const dir = target.x > this.x ? 1 : -1;
@@ -348,10 +430,26 @@ export class Warrior extends Villager {
             }
             
             if (this.onGround && this.homeIsland) {
-                const lookAhead = this.vx > 0 ? 10 : -10;
+                const lookAhead = this.vx > 0 ? 20 : -20;
                 const nextX = this.x + this.w/2 + lookAhead;
                 if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                    this.vx *= -1;
+                    let canJump = false;
+                    for(let other of islands) {
+                        if (other === this.homeIsland) continue;
+                        if (Math.abs((this.x + (this.vx > 0 ? 150 : -150)) - other.x) < 100 || 
+                            Math.abs((this.x + (this.vx > 0 ? 150 : -150)) - (other.x + other.w)) < 100) {
+                            if (Math.abs(other.y - this.y) < 100) {
+                                canJump = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (canJump) {
+                        this.vy = -400; 
+                        this.onGround = false;
+                    } else {
+                        this.vx *= -1; 
+                    }
                 }
             }
         }
@@ -391,13 +489,20 @@ export class Projectile extends Entity {
         this.vy = Math.sin(angle) * speed;
         this.angle = angle; 
         this.life = 3.0;
+        this.trailTimer = 0;
     }
 
-    update(dt) {
+    update(dt, spawnParticleCallback) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
+
+        this.trailTimer -= dt;
+        if (this.trailTimer <= 0 && spawnParticleCallback) {
+            this.trailTimer = 0.05; 
+            spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
+        }
     }
 
     draw(ctx, camera) {
