@@ -1,11 +1,11 @@
 /* THE HEART OF THE GAME
-   Definitive V5: Socially Distanced Islands.
+   Definitive V7: Weather, Day/Night, Pigs, & Camera Shake!
 */
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
 import { World } from './world.js';
-import { Player, Island, Villager, Warrior, Projectile, Particle } from './entities.js';
+import { Player, Island, Villager, Warrior, Projectile, Particle, Pig } from './entities.js';
 import { AudioManager } from './audio.js';
 
 class Game {
@@ -32,6 +32,7 @@ class Game {
         this.villagers = [];
         this.projectiles = [];
         this.particles = [];
+        this.pigs = []; // NEW: PIG SQUAD
 
         this._generateWorld();
 
@@ -39,6 +40,11 @@ class Game {
         this.spawnTimer = 0;
         this.hookTarget = null;
         this.gameOver = false;
+        
+        // FX VARIABLES
+        this.shake = 0;
+        this.dayTime = 0; // 0 to 1 (Day cycle)
+        this.windTimer = 0;
 
         window.addEventListener('click', () => this._startAudio(), { once: true });
         window.addEventListener('keydown', () => this._startAudio(), { once: true });
@@ -65,12 +71,10 @@ class Game {
     }
 
     _generateWorld() {
-        // STARTING BASES
         this.islands.push(new Island(200, 1000, 600, 100, 'green')); 
         this.islands.push(new Island(5200, 1000, 600, 100, 'blue'));
 
-        // PROCEDURAL GENERATION (Strict No Overlap)
-        const maxAttempts = 50; // More attempts because buffer is bigger
+        const maxAttempts = 50; 
         
         for (let i = 0; i < 25; i++) {
             let placed = false;
@@ -80,10 +84,8 @@ class Game {
                 const rw = 300 + Math.random() * 500;
                 const rh = 100;
 
-                // Check Collision with ALL existing islands
                 let overlaps = false;
                 for (let existing of this.islands) {
-                    // INCREASED BUFFER TO 300px
                     if (rx < existing.x + existing.w + 300 && 
                         rx + rw + 300 > existing.x &&
                         ry < existing.y + existing.h + 300 && 
@@ -97,7 +99,14 @@ class Game {
                     let team = 'neutral';
                     if (rx < 1500) team = 'green';
                     if (rx > 4500) team = 'blue';
-                    this.islands.push(new Island(rx, ry, rw, rh, team));
+                    const newIsland = new Island(rx, ry, rw, rh, team);
+                    this.islands.push(newIsland);
+                    
+                    // SPAWN PIGS ON RANDOM ISLANDS
+                    if (Math.random() > 0.5) {
+                        this.pigs.push(new Pig(rx + rw/2, ry - 50));
+                    }
+                    
                     placed = true;
                     break;
                 }
@@ -119,6 +128,15 @@ class Game {
 
     update(dt) {
         if (this.gameOver) return;
+
+        // FX UPDATES
+        if (this.shake > 0) this.shake -= 20 * dt;
+        if (this.shake < 0) this.shake = 0;
+        
+        this.dayTime += dt * 0.05; // Slow cycle
+        if (this.dayTime > Math.PI * 2) this.dayTime = 0;
+        
+        this._updateWeather(dt);
 
         if (this.audio.initialized) {
             const heightRatio = 1.0 + (Math.max(0, 2000 - this.player.y) / 4000);
@@ -149,7 +167,7 @@ class Game {
         this.islands.forEach(island => {
             island.update(dt); 
             const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
-            if (dist < 400 && (island.team === 'green' || island.team === 'neutral')) {
+            if (dist < 400) {
                 nearWater = true; 
                 if (island.hasFireplace) nearFire = true;
             }
@@ -168,8 +186,26 @@ class Game {
         }
 
         this._handleCombat(dt);
+        
+        // PIGS
+        this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
+        
         this.particles.forEach(p => p.update(dt));
         this.particles = this.particles.filter(p => !p.dead);
+    }
+
+    _updateWeather(dt) {
+        this.windTimer -= dt;
+        if (this.windTimer <= 0) {
+            this.windTimer = 0.2; // Spawn frequent wind particles
+            // Spawn random wind puff
+            const cx = this.world.camera.x;
+            const cy = this.world.camera.y;
+            const px = cx + Math.random() * 800;
+            const py = cy + Math.random() * 600;
+            // White, fast moving horizontal particle
+            this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', 200, 1.0, 2));
+        }
     }
 
     _checkWinConditions(dt) {
@@ -219,12 +255,12 @@ class Game {
                     my >= island.y && my <= island.y + island.h) {
                     
                     hit = true;
-                    if (this.resources.spendWater(25 * dt)) {
+                    if (this.resources.spendEarth(30 * dt)) {
                         const dx = this.player.x - island.x;
                         const dy = this.player.y - island.y;
                         const dist = Math.sqrt(dx*dx + dy*dy);
-                        island.vx += (dx / dist) * 600 * dt;
-                        island.vy += (dy / dist) * 600 * dt;
+                        island.vx += (dx / dist) * 1200 * dt;
+                        island.vy += (dy / dist) * 1200 * dt;
                     }
                     break;
                 }
@@ -238,7 +274,12 @@ class Game {
     _handleCombat(dt) {
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const p = this.projectiles[i];
-            p.update(dt);
+            
+            // Pass particle callback to projectile for trails
+            p.update(dt, (x, y, color) => {
+                this.particles.push(new Particle(x, y, color, 0, 0.5, 2));
+            });
+            
             let hitSomething = false;
 
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
@@ -249,7 +290,8 @@ class Game {
                 if (this.enemyChief.hp <= 0) {
                     this.enemyChief.dead = true;
                     this.enemyChief.respawnTimer = 5.0;
-                    this._spawnBlood(p.x, p.y);
+                    this._spawnBlood(p.x, p.y, '#cc0000', 100); // HUGE BLOOD
+                    this.shake = 20; // SHAKE!
                 }
             }
             
@@ -261,6 +303,7 @@ class Game {
                 if (this.player.hp <= 0) {
                     this.player.dead = true;
                     this.player.respawnTimer = 5.0;
+                    this.shake = 20; // SHAKE!
                 }
             }
             
@@ -273,6 +316,19 @@ class Game {
                     if (v.hp <= 0) {
                          v.dead = true;
                          this._spawnBlood(v.x, v.y);
+                    }
+                }
+            }
+
+            // PIG HIT!
+            for (let pig of this.pigs) {
+                if (!pig.dead && this._checkHit(p, pig)) {
+                    this._spawnBlood(pig.x, pig.y, '#ffaaaa'); // Pink blood?
+                    pig.hp -= 10;
+                    hitSomething = true;
+                    if (pig.hp <= 0) {
+                        pig.dead = true;
+                        this._spawnBlood(pig.x, pig.y, '#ffaaaa', 20);
                     }
                 }
             }
@@ -302,8 +358,8 @@ class Game {
                 proj.y > entity.y && proj.y < entity.y + entity.h);
     }
 
-    _spawnBlood(x, y, color='#cc0000') {
-        for (let i=0; i<25; i++) {
+    _spawnBlood(x, y, color='#cc0000', count=25) {
+        for (let i=0; i<count; i++) {
             const size = 5 + Math.random() * 7;
             this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5, size));
         }
@@ -353,11 +409,23 @@ class Game {
     }
 
     draw() {
+        // DAY NIGHT CYCLE OVERLAY
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // SHAKE APPLY
+        let sx = 0, sy = 0;
+        if (this.shake > 0) {
+            sx = (Math.random() - 0.5) * this.shake;
+            sy = (Math.random() - 0.5) * this.shake;
+        }
+        
+        this.ctx.save();
+        this.ctx.translate(sx, sy);
 
         this.world.draw(this.ctx);
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
+        this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
         this.projectiles.forEach(p => p.draw(this.ctx, this.world.camera));
         if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
         if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
@@ -373,6 +441,18 @@ class Game {
             this.ctx.stroke();
             this.ctx.setLineDash([]);
         }
+        
+        // NIGHT OVERLAY
+        // Calculate darkness based on Sin of dayTime
+        // -1 (Midnight) to 1 (Noon)
+        const sunHeight = Math.sin(this.dayTime); 
+        if (sunHeight < 0) {
+            const darkness = Math.abs(sunHeight) * 0.6; // Max 0.6 opacity
+            this.ctx.fillStyle = `rgba(0, 0, 50, ${darkness})`;
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        this.ctx.restore(); // End shake
 
         this.resources.drawUI(this.ctx);
         
