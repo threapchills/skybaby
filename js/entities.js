@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V3: Anchored Visuals & Clamped Physics.
+   Now with Sound Triggers! 🔊
 */
 
 export class Entity {
@@ -76,17 +76,19 @@ export class Player extends Entity {
         this.maxHp = 100;
         
         this.speed = 350; 
-        this.gravity = 600; // Comfortable gravity
-        this.maxFallSpeed = 800; // TERMINAL VELOCITY CAP
+        this.gravity = 600; 
+        this.maxFallSpeed = 800; 
         this.jumpForce = -500; 
         this.flyForce = -400; 
         this.friction = 0.85;
         this.isGrounded = false;
         
         this.visitedIslands = new Set();
+        this.wasGrounded = false; // For landing sound logic
     }
 
-    update(dt, input, resources, worldWidth, worldHeight, islands) {
+    // ADDED: audio param
+    update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
         if (this.dead) return; 
 
         // Horizontal
@@ -99,17 +101,19 @@ export class Player extends Entity {
 
         // Vertical
         this.vy += this.gravity * dt;
-        // CLAMP FALL SPEED
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
         if (input && input.keys.space) {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
+                // SOUND: JUMP
+                if(audio) audio.play('jump', 0.4, 0.1);
             } else if (resources && resources.air > 0) {
                 this.vy -= 1200 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
                 resources.air -= 30 * dt; 
+                // Optional: Could trigger a 'whoosh' here if we had one
             }
         }
         this.y += this.vy * dt;
@@ -120,7 +124,6 @@ export class Player extends Entity {
             for (let island of islands) {
                 if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
                     const feet = this.y + this.h;
-                    // Dynamic Threshold: Look further ahead if falling fast
                     const threshold = 10 + (this.vy * dt * 2); 
                     
                     if (feet >= island.y - 10 && feet <= island.y + threshold) {
@@ -132,6 +135,12 @@ export class Player extends Entity {
                 }
             }
         }
+
+        // SOUND: LANDING
+        if (!this.wasGrounded && this.isGrounded && audio) {
+            audio.play('land', 0.5, 0.1);
+        }
+        this.wasGrounded = this.isGrounded;
 
         // WRAPPING
         if (this.y > worldHeight + 100) this.y = -100; 
@@ -158,7 +167,6 @@ export class Player extends Entity {
             ctx.fill();
         }
 
-        // Sprite
         if (this.image && this.imageLoaded) {
             ctx.drawImage(this.image, screenX - 4, screenY - 4, 48, 48);
         } else {
@@ -166,7 +174,6 @@ export class Player extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // HP Bar
         ctx.fillStyle = 'red';
         ctx.fillRect(screenX, screenY - 10, this.w, 4);
         ctx.fillStyle = '#0f0';
@@ -231,20 +238,13 @@ export class Island extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // 2. DRAW STRUCTURES (HEAVILY LOWERED TO FIX FLOATING)
-        // We are pushing them down by an extra ~30px compared to before.
-        
-        // Teepee: 96px tall. Draw at Y - 96 + 30 (Sink 30px)
+        // 2. DRAW STRUCTURES
         if (this.hasTeepee && this.imgTeepee.complete) {
             ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 66, 96, 96);
         }
-
-        // Fireplace: 64px tall. Draw at Y - 64 + 20 (Sink 20px)
         if (this.hasFireplace && this.imgFire.complete) {
             ctx.drawImage(this.imgFire, screenX + (this.w/2) - 32, screenY - 44, 64, 64);
         }
-
-        // Tree: 150px tall. Draw at Y - 150 + 40 (Sink 40px)
         if (this.hasTree && this.imgTree.complete) {
             ctx.drawImage(this.imgTree, screenX + this.w - 100, screenY - 110, 120, 150);
         }
@@ -263,12 +263,12 @@ export class Villager extends Entity {
         this.vy = 0; 
         this.stateTimer = 0;
         this.onGround = false;
-        this.maxFallSpeed = 800; // Terminal velocity
+        this.maxFallSpeed = 800; 
     }
 
     update(dt, islands, worldWidth, worldHeight) {
         this.vy += 500 * dt; 
-        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; // CLAMP
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
         
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) {
@@ -276,7 +276,6 @@ export class Villager extends Entity {
             this.vx = (Math.random() - 0.5) * 80; 
         }
 
-        // Edge Detection
         if (this.onGround && this.homeIsland) {
             const lookAhead = this.vx > 0 ? 10 : -10;
             const nextX = this.x + this.w/2 + lookAhead;
@@ -292,7 +291,6 @@ export class Villager extends Entity {
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                     // Dynamic threshold based on speed to prevent tunneling
                      const threshold = 10 + (this.vy * dt * 2);
                      if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
                          this.y = island.y - this.h;
@@ -304,7 +302,6 @@ export class Villager extends Entity {
             }
         }
         
-        // Wrap
         if (this.y > worldHeight) this.y = -50; 
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
@@ -320,7 +317,8 @@ export class Warrior extends Villager {
         this.attackCooldown = 0;
     }
 
-    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight) {
+    // ADDED: audio param
+    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio) {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
@@ -348,6 +346,8 @@ export class Warrior extends Villager {
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
                     spawnProjectileCallback(this.x, this.y, angle, this.team);
+                    // SOUND: SHOOT (Warrior)
+                    if(audio) audio.play('shoot', 0.3, 0.2);
                 }
             } else {
                 const dir = target.x > this.x ? 1 : -1;
