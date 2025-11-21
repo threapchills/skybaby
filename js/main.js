@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   With Hookshots, Blood, and Earth Logic fixed!
+   Definitive Edition: Working Combat Loop, Blood, Hookshot, and Island Logic.
 */
 
 import { InputHandler } from './input.js';
@@ -33,6 +33,7 @@ class Game {
 
         this.lastTime = 0;
         this.spawnTimer = 0;
+        this.hookTarget = null;
 
         requestAnimationFrame((ts) => this.loop(ts));
     }
@@ -47,16 +48,21 @@ class Game {
     }
 
     _generateWorld() {
-        // BATTLEFIELD SETUP
+        // STAIRCASE LAYOUT (Easy to jump between)
+        // Green
         this.islands.push(new Island(200, 1000, 400, 100, 'green'));
         this.islands.push(new Island(700, 900, 300, 100, 'green'));
         
-        this.islands.push(new Island(1500, 1000, 400, 100, 'neutral'));
-        this.islands.push(new Island(2000, 1000, 400, 100, 'neutral'));
-        this.islands.push(new Island(2500, 900, 500, 100, 'neutral'));
+        // Neutral (Battle zone)
+        this.islands.push(new Island(1100, 900, 400, 100, 'neutral'));
+        this.islands.push(new Island(1600, 900, 400, 100, 'neutral'));
+        
+        // Blue
+        this.islands.push(new Island(2100, 900, 400, 100, 'blue'));
+        this.islands.push(new Island(2600, 900, 400, 100, 'blue'));
 
-        this.islands.push(new Island(4000, 1000, 400, 100, 'blue'));
-        this.islands.push(new Island(4500, 900, 300, 100, 'blue'));
+        // Initial Earth Logic
+        this.player.visitedIslands.add(this.islands[0]);
     }
 
     loop(timestamp) {
@@ -70,39 +76,37 @@ class Game {
     }
 
     update(dt) {
-        // 1. ENTITY UPDATES
+        // 1. ENTITIES
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands);
         this.world.update(this.player);
 
-        // AI Shaman (Cheat: Floats towards player to fight)
+        // AI Shaman (Drifts toward player)
         const dx = this.player.x - this.enemyChief.x;
         const dy = this.player.y - this.enemyChief.y;
-        this.enemyChief.x += (dx * 0.1) * dt;
-        this.enemyChief.y += (dy * 0.1) * dt;
-        this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands); // Physics for enemy too
+        this.enemyChief.x += (dx * 0.15) * dt;
+        this.enemyChief.y += (dy * 0.15) * dt;
+        this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands); 
 
-        // 2. EARTH RESOURCE (Based on visited islands)
+        // 2. EARTH RESOURCE
         this.resources.earth = Math.max(1, this.player.visitedIslands.size);
 
         // 3. MANA/FIRE REGEN
         let nearWater = false;
         let nearFire = false;
         this.islands.forEach(island => {
-            island.update(dt); // Physics for islands
+            island.update(dt); // Island physics (Hookshot)
             
-            if (island.team === 'green' || island.team === 'neutral') {
-                const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
-                if (dist < 400) {
-                    nearWater = true; 
-                    if (island.hasFireplace) nearFire = true;
-                }
+            const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
+            if (dist < 400) {
+                nearWater = true; 
+                if (island.hasFireplace) nearFire = true;
             }
         });
         this.resources.update(dt, isMoving, nearWater, nearFire);
 
         // 4. ACTIONS
         this._handleShooting(dt);
-        this._handleHookshot(dt); // NEW MECHANIC
+        this._handleHookshot(dt);
 
         // 5. SPAWNING
         this.spawnTimer += dt;
@@ -111,7 +115,7 @@ class Game {
             this.spawnTimer = 0;
         }
 
-        // 6. COMBAT LOOP
+        // 6. COMBAT
         this._handleCombat(dt);
 
         // 7. PARTICLES
@@ -120,73 +124,74 @@ class Game {
     }
 
     _handleHookshot(dt) {
-        // Right click to PULL islands
         if (this.input.mouse.rightDown) {
             const mx = this.input.mouse.x + this.world.camera.x;
             const my = this.input.mouse.y + this.world.camera.y;
 
-            // Find island under mouse
+            let hit = false;
             for (let island of this.islands) {
                 if (island.contains(mx, my, this.world.camera)) {
-                    // Found target! Pull it towards player!
-                    if (this.resources.spendWater(20 * dt)) {
+                    hit = true;
+                    if (this.resources.spendWater(25 * dt)) {
                         const dx = this.player.x - island.x;
                         const dy = this.player.y - island.y;
                         const dist = Math.sqrt(dx*dx + dy*dy);
-                        
-                        // Normalize and apply force
-                        island.vx += (dx / dist) * 500 * dt;
-                        island.vy += (dy / dist) * 500 * dt;
-                        
-                        // Visual Line
-                        this.hookTarget = {x: mx, y: my, hit: true};
+                        // Pull Force
+                        island.vx += (dx / dist) * 600 * dt;
+                        island.vy += (dy / dist) * 600 * dt;
                     }
-                    return;
+                    break;
                 }
             }
-            // Missed
-            this.hookTarget = {x: mx, y: my, hit: false};
+            this.hookTarget = {x: mx, y: my, hit: hit};
         } else {
             this.hookTarget = null;
         }
     }
 
     _handleCombat(dt) {
-        // Update Projectiles
+        // Projectiles
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const p = this.projectiles[i];
             p.update(dt);
-            
-            // Hit Enemy Shaman?
-            if (p.team === 'green' && this._checkHit(p, this.enemyChief)) {
-                this._spawnBlood(this.enemyChief.x, this.enemyChief.y);
-                this.enemyChief.hp -= 5;
-                p.dead = true;
-            }
-            // Hit Player?
-            if (p.team === 'blue' && this._checkHit(p, this.player)) {
-                this._spawnBlood(this.player.x, this.player.y);
-                this.player.hp -= 5;
-                p.dead = true;
-            }
+            let hitSomething = false;
 
-            // Hit Villagers?
+            // HIT ENEMY SHAMAN
+            if (p.team === 'green' && this._checkHit(p, this.enemyChief)) {
+                this._spawnBlood(p.x, p.y);
+                this.enemyChief.hp -= 5;
+                hitSomething = true;
+            }
+            // HIT PLAYER
+            if (p.team === 'blue' && this._checkHit(p, this.player)) {
+                this._spawnBlood(p.x, p.y);
+                this.player.hp -= 5;
+                hitSomething = true;
+            }
+            
+            // HIT VILLAGERS
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
                     v.hp -= 10;
-                    p.dead = true;
-                    if (v.hp <= 0) v.dead = true;
+                    hitSomething = true;
+                    if (v.hp <= 0) {
+                         v.dead = true;
+                         this._spawnBlood(v.x, v.y); // Extra blood on death
+                         this._spawnBlood(v.x, v.y);
+                    }
                 }
             }
+
+            if (hitSomething) p.dead = true;
             if (p.dead) this.projectiles.splice(i, 1);
         }
 
-        // Update Villagers
+        // Update Villagers/Warriors
         this.villagers.forEach(v => {
             if (v instanceof Warrior) {
                 const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
-                // Also target Enemy Shaman
+                // Add Shamans to target list
                 if (v.team === 'green') enemies.push(this.enemyChief);
                 if (v.team === 'blue') enemies.push(this.player);
 
@@ -206,8 +211,8 @@ class Game {
     }
 
     _spawnBlood(x, y) {
-        for (let i=0; i<10; i++) {
-            this.particles.push(new Particle(x, y, 'red', Math.random()*100, 0.5));
+        for (let i=0; i<8; i++) {
+            this.particles.push(new Particle(x, y, '#cc0000', Math.random()*150, 0.5 + Math.random()*0.5));
         }
     }
 
@@ -217,7 +222,7 @@ class Game {
             this.player.fireCooldown -= dt;
 
             if (this.player.fireCooldown <= 0 && this.resources.spendFire()) {
-                this.player.fireCooldown = 0.2; // Fast fire rate
+                this.player.fireCooldown = 0.2; 
                 const mx = this.input.mouse.x + this.world.camera.x;
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y+32), mx - (this.player.x+32));
@@ -227,22 +232,23 @@ class Game {
     }
 
     _spawnVillagers() {
-        // Spawn Green (Based on Earth Count)
+        // Green Spawn
         const greenPop = this.villagers.filter(v => v.team === 'green').length;
         const greenCap = this.resources.earth * 5; 
         if (greenPop < greenCap) {
+            // Only spawn on VISITED or OWNED islands
             const myIslands = this.islands.filter(i => i.team === 'green' || this.player.visitedIslands.has(i));
             if (myIslands.length > 0) {
                 const island = myIslands[Math.floor(Math.random() * myIslands.length)];
-                const unit = (Math.random() < 0.5) ? 
+                const unit = (Math.random() < 0.4) ? 
                     new Warrior(island.x + 50, island.y - 40, 'green') :
                     new Villager(island.x + 50, island.y - 40, 'green');
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
         }
-        // Spawn Blue
-        if (this.villagers.filter(v => v.team === 'blue').length < 20) {
+        // Blue Spawn
+        if (this.villagers.filter(v => v.team === 'blue').length < 30) {
             const enemyIslands = this.islands.filter(i => i.team === 'blue');
              if (enemyIslands.length > 0) {
                 const island = enemyIslands[Math.floor(Math.random() * enemyIslands.length)];
@@ -270,10 +276,12 @@ class Game {
         if (this.hookTarget) {
             this.ctx.strokeStyle = this.hookTarget.hit ? 'cyan' : 'gray';
             this.ctx.lineWidth = 2;
+            this.ctx.setLineDash([5, 5]);
             this.ctx.beginPath();
             this.ctx.moveTo(this.player.x - this.world.camera.x + 32, this.player.y - this.world.camera.y + 32);
             this.ctx.lineTo(this.hookTarget.x - this.world.camera.x, this.hookTarget.y - this.world.camera.y);
             this.ctx.stroke();
+            this.ctx.setLineDash([]);
         }
 
         this.resources.drawUI(this.ctx);
@@ -285,6 +293,8 @@ class Game {
         this.ctx.lineWidth = 2;
         this.ctx.beginPath();
         this.ctx.arc(mx, my, 10, 0, Math.PI*2);
+        this.ctx.moveTo(mx - 15, my); this.ctx.lineTo(mx + 15, my);
+        this.ctx.moveTo(mx, my - 15); this.ctx.lineTo(mx, my + 15);
         this.ctx.stroke();
     }
 }
