@@ -1,26 +1,16 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Here lives the logic for everything that moves, breathes, or floats.
-   Includes: Player, Islands, Villagers, Warriors, and Projectiles.
+   Now with proper Asset Loading and Tileset Slicing!
 */
 
-// A simple helper for rectangle collision (Axis-Aligned Bounding Box)
-function checkAABB(rect1, rect2) {
-    return (rect1.x < rect2.x + rect2.w &&
-            rect1.x + rect1.w > rect2.x &&
-            rect1.y < rect2.y + rect2.h &&
-            rect1.y + rect1.h > rect2.y);
-}
-
-// --- BASE ENTITY CLASS ---
-class Entity {
+// --- BASE ENTITY ---
+export class Entity {
     constructor(x, y, w, h, imagePath) {
         this.x = x;
         this.y = y;
         this.w = w;
         this.h = h;
-        this.dead = false; // If true, garbage collector eats it
+        this.dead = false;
         
-        // Image handling
         this.image = null;
         if (imagePath) {
             this.image = new Image();
@@ -31,11 +21,9 @@ class Entity {
     }
 
     draw(ctx, camera) {
-        // Don't draw if off-screen (Culling optimization)
+        // Culling: Don't draw if off screen
         if (this.x + this.w < camera.x || this.x > camera.x + camera.w ||
-            this.y + this.h < camera.y || this.y > camera.y + camera.h) {
-            return;
-        }
+            this.y + this.h < camera.y || this.y > camera.y + camera.h) return;
 
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
@@ -43,83 +31,100 @@ class Entity {
         if (this.image && this.imageLoaded) {
             ctx.drawImage(this.image, screenX, screenY, this.w, this.h);
         } else {
-            // Fallback rectangle if image is missing
-            ctx.fillStyle = '#ff00ff'; // Magenta error color
+            // Fallback box
+            ctx.fillStyle = '#ff00ff'; 
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
     }
 }
 
-// --- THE PLAYER (YOU!) ---
+// --- THE PLAYER ---
 export class Player extends Entity {
     constructor(x, y, team) {
-        // Standard size 64x64 for the Chieftain
         super(x, y, 64, 64, `assets/sprites/player_${team}.png`);
-        this.team = team; // 'green' or 'blue'
-        
+        this.team = team; 
         this.vx = 0;
         this.vy = 0;
-        this.speed = 300; // Pixels per second
-        this.friction = 0.9; // Air resistance
+        this.speed = 400; 
+        this.friction = 0.92;
     }
 
     update(dt, input, resources, worldWidth, worldHeight) {
-        // 1. MOVEMENT (WASD)
-        // Only process input if we have AIR (Stamina)
         let moveSpeed = this.speed;
         
-        // If out of breath, move sluggishly
-        if (resources.air <= 0) moveSpeed *= 0.2;
+        // Only slow down if AIR is completely empty
+        if (resources.air <= 0) moveSpeed *= 0.3;
 
-        if (input.keys.w) this.vy -= 20 * dt; // Acceleration
+        // Physics
+        if (input.keys.w) this.vy -= 20 * dt;
         if (input.keys.s) this.vy += 20 * dt;
         if (input.keys.a) this.vx -= 20 * dt;
         if (input.keys.d) this.vx += 20 * dt;
 
-        // Apply Velocity
         this.x += this.vx * moveSpeed * dt;
         this.y += this.vy * moveSpeed * dt;
-
-        // Apply Friction (Drag)
         this.vx *= this.friction;
         this.vy *= this.friction;
 
-        // Clamp to World Boundaries
+        // World Bounds
         if (this.x < 0) { this.x = 0; this.vx = 0; }
         if (this.y < 0) { this.y = 0; this.vy = 0; }
         if (this.x > worldWidth - this.w) { this.x = worldWidth - this.w; this.vx = 0; }
         if (this.y > worldHeight - this.h) { this.y = worldHeight - this.h; this.vy = 0; }
 
-        // 2. RESOURCE DRAIN
-        // Calculate total speed to see if we are flying fast
+        // Return movement state for AIR consumption
         const speedMagnitude = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
-        const isMoving = speedMagnitude > 0.1;
+        return speedMagnitude > 0.1; 
+    }
+
+    draw(ctx, camera) {
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
         
-        // We pass this state back to the resource manager via the main loop usually,
-        // but for now, let's return the state so Main can handle it.
-        return isMoving; 
+        if (this.image && this.imageLoaded) {
+            // SCALE FIX: Draw smaller than hitbox to look correct relative to islands
+            // Drawing at 48x48 centered inside the 64x64 box
+            const drawSize = 48; 
+            const offset = (64 - drawSize) / 2;
+            ctx.drawImage(this.image, screenX + offset, screenY + offset, drawSize, drawSize);
+        } else {
+            ctx.fillStyle = this.team === 'green' ? '#0f0' : '#00f';
+            ctx.fillRect(screenX, screenY, this.w, this.h);
+        }
     }
 }
 
-// --- FLOATING ISLANDS ---
+// --- FLOATING ISLANDS (With Tileset Slicing) ---
 export class Island extends Entity {
     constructor(x, y, w, h, team) {
-        // Use the tileset eventually, but basic setup for now
-        super(x, y, w, h, null); 
+        super(x, y, w, h, null);
         this.team = team;
         
-        // Structure Logic
-        this.hasTeepee = true;
-        this.hasFireplace = Math.random() > 0.5; // 50% chance
-        this.hasTree = true;
+        // TILES & ASSETS
+        this.tileset = new Image();
+        this.tileset.src = 'assets/environment/island_tileset.png';
+        
+        this.imgTeepee = new Image();
+        // Specific asset names as requested
+        this.imgTeepee.src = team === 'green' ? 'assets/environment/teepee_green.png' : 'assets/environment/teepee_blue.png';
+        
+        this.imgTree = new Image();
+        this.imgTree.src = 'assets/environment/tree_variant1.png';
+        
+        this.imgFire = new Image();
+        this.imgFire.src = 'assets/environment/fireplace_lit.png';
 
-        // Dragging Logic
+        // Randomize Contents
+        this.hasTeepee = true;
+        this.hasTree = true;
+        this.hasFireplace = Math.random() > 0.4; // 60% chance of fire
+
+        // Dragging State
         this.isBeingDragged = false;
         this.dragOffsetX = 0;
         this.dragOffsetY = 0;
     }
 
-    // Check if mouse is over this island
     contains(mx, my, camera) {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
@@ -128,40 +133,62 @@ export class Island extends Entity {
     }
 
     draw(ctx, camera) {
-        // Override draw to build the island from parts
         if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
 
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
 
-        // 1. Draw Soil/Grass Base
-        ctx.fillStyle = this.team === 'green' ? '#2E8B57' : '#4682B4'; // SeaGreen vs SteelBlue debug colors
-        ctx.fillRect(screenX, screenY, this.w, this.h);
-        
-        // Draw Rocky Bottom
-        ctx.fillStyle = '#696969';
-        ctx.beginPath();
-        ctx.moveTo(screenX, screenY + this.h);
-        ctx.lineTo(screenX + this.w / 2, screenY + this.h + 20); // Spike
-        ctx.lineTo(screenX + this.w, screenY + this.h);
-        ctx.fill();
+        // 1. DRAW ISLAND BODY (Sliced Tileset)
+        if (this.tileset.complete && this.tileset.naturalWidth > 0) {
+            // Assume tileset is 3 equal slices horizontally
+            const sliceW = this.tileset.width / 3;
+            const sliceH = this.tileset.height;
 
-        // 2. Draw Structures (Simple placeholders or images if we had them loaded here)
-        // We'll draw simple emojis for now if images aren't ready, just to see them!
-        ctx.font = '20px Arial';
-        
-        // Teepee
-        if (this.hasTeepee) ctx.fillText('⛺', screenX + 10, screenY - 5);
-        // Tree
-        if (this.hasTree) ctx.fillText('🌲', screenX + this.w - 30, screenY - 5);
-        // Fire
-        if (this.hasFireplace) ctx.fillText('🔥', screenX + (this.w/2) - 10, screenY - 5);
-        
+            // Left Cap
+            ctx.drawImage(this.tileset, 0, 0, sliceW, sliceH, screenX, screenY, sliceW, sliceH);
+
+            // Middle Body (Stretch to fill gap)
+            const middleWidth = this.w - (sliceW * 2);
+            if (middleWidth > 0) {
+                ctx.drawImage(this.tileset, sliceW, 0, sliceW, sliceH, screenX + sliceW, screenY, middleWidth, sliceH);
+            }
+
+            // Right Cap
+            ctx.drawImage(this.tileset, sliceW * 2, 0, sliceW, sliceH, screenX + this.w - sliceW, screenY, sliceW, sliceH);
+        } else {
+            // Fallback Green Box
+            ctx.fillStyle = this.team === 'green' ? '#2E8B57' : '#4682B4';
+            ctx.fillRect(screenX, screenY, this.w, this.h);
+        }
+
+        // 2. DRAW STRUCTURES (Spaced out nicely!)
+        // We place them relative to the island surface.
+        // Adjust Y so they sit ON the grass, not float above or sink in.
+        const groundY = screenY - 40; 
+
+        // Teepee: Left-ish
+        if (this.hasTeepee && this.imgTeepee.complete) {
+            ctx.drawImage(this.imgTeepee, screenX + 20, groundY, 64, 64);
+        }
+
+        // Fireplace: Middle (if exists) - No overlap with tent!
+        if (this.hasFireplace && this.imgFire.complete) {
+             // Center of island
+            ctx.drawImage(this.imgFire, screenX + (this.w/2) - 16, groundY + 20, 32, 32);
+        }
+
+        // Tree: Right-ish
+        if (this.hasTree && this.imgTree.complete) {
+            ctx.drawImage(this.imgTree, screenX + this.w - 70, groundY - 20, 64, 80);
+        }
+
         // Drag Highlight
         if (this.isBeingDragged) {
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 5]);
             ctx.strokeRect(screenX, screenY, this.w, this.h);
+            ctx.setLineDash([]);
         }
     }
 }
@@ -169,44 +196,32 @@ export class Island extends Entity {
 // --- VILLAGERS & WARRIORS ---
 export class Villager extends Entity {
     constructor(x, y, team) {
-        // Tiny people! 16x16 (4x smaller than standard 64px tiles)
-        // Random variant 1-4
         const variant = Math.floor(Math.random() * 4) + 1;
-        super(x, y, 16, 16, `assets/sprites/villager_${team}_${variant}.png`);
-        
+        super(x, y, 24, 24, `assets/sprites/villager_${team}_${variant}.png`); 
         this.team = team;
         this.hp = 10;
-        this.homeIsland = null; // Assigned on spawn
+        this.homeIsland = null;
         
-        // AI State
-        this.state = 'IDLE'; // IDLE, WALK
-        this.stateTimer = 0;
         this.vx = 0;
-        this.walkSpeed = 20;
+        this.stateTimer = 0;
     }
 
     update(dt) {
-        // Simple Random Walk AI
+        // Wander AI
         this.stateTimer -= dt;
-
         if (this.stateTimer <= 0) {
-            // Pick new state
-            this.stateTimer = Math.random() * 2 + 1; // 1-3 seconds
-            if (Math.random() > 0.5) {
-                this.state = 'IDLE';
-                this.vx = 0;
-            } else {
-                this.state = 'WALK';
-                this.vx = (Math.random() > 0.5 ? 1 : -1) * this.walkSpeed;
-            }
+            this.stateTimer = Math.random() * 2 + 1;
+            // Random move left or right
+            this.vx = (Math.random() - 0.5) * 40; 
         }
-
-        // Move
         this.x += this.vx * dt;
 
-        // Stay on Island (Simple bounds check if we knew the island)
+        // Stay on Island
         if (this.homeIsland) {
-            if (this.x < this.homeIsland.x) { this.x = this.homeIsland.x; this.vx *= -1; }
+            if (this.x < this.homeIsland.x) { 
+                this.x = this.homeIsland.x; 
+                this.vx *= -1; 
+            }
             if (this.x > this.homeIsland.x + this.homeIsland.w - this.w) {
                 this.x = this.homeIsland.x + this.homeIsland.w - this.w;
                 this.vx *= -1;
@@ -218,37 +233,40 @@ export class Villager extends Entity {
 export class Warrior extends Villager {
     constructor(x, y, team) {
         super(x, y, team);
-        this.image = new Image();
+        this.w = 32; 
+        this.h = 32; // Warriors slightly bigger/tougher looking
         this.image.src = `assets/sprites/warrior_${team}.png`;
-        this.hp = 30; // Tougher
-        this.attackRange = 150;
+        this.hp = 30;
         this.attackCooldown = 0;
     }
 
     update(dt, enemies, spawnProjectileCallback) {
-        super.update(dt); // Keep walking logic
-
-        // Combat Logic
+        super.update(dt); // Keep walking
+        
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
 
-        if (this.attackCooldown <= 0) {
-            // Look for enemies
-            for (let enemy of enemies) {
-                // Check distance
-                const dx = enemy.x - this.x;
-                const dy = enemy.y - this.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
+        if (this.attackCooldown <= 0 && enemies.length > 0) {
+            // Find nearest enemy
+            let nearestDist = 400; // Attack range
+            let target = null;
 
-                if (dist < this.attackRange) {
-                    // ATTACK!
-                    this.attackCooldown = 2.0; // 2 seconds between throws
-                    
-                    // Create Projectile
-                    // Calculate angle
-                    const angle = Math.atan2(dy, dx);
-                    spawnProjectileCallback(this.x, this.y, angle, this.team);
-                    break; // Attack one at a time
+            enemies.forEach(e => {
+                const dx = e.x - this.x;
+                const dy = e.y - this.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    target = e;
                 }
+            });
+
+            if (target) {
+                // Attack!
+                this.attackCooldown = 2.0; // Time between throws
+                const dx = target.x - this.x;
+                const dy = target.y - this.y;
+                const angle = Math.atan2(dy, dx);
+                spawnProjectileCallback(this.x, this.y, angle, this.team);
             }
         }
     }
@@ -257,12 +275,12 @@ export class Warrior extends Villager {
 // --- PROJECTILES ---
 export class Projectile extends Entity {
     constructor(x, y, angle, team) {
-        super(x, y, 8, 8, null); // 8x8 dot
+        super(x, y, 16, 16, team === 'green' ? 'assets/sprites/projectile_fire.png' : 'assets/sprites/projectile_arrow.png');
         this.team = team;
-        this.speed = 200;
-        this.vx = Math.cos(angle) * this.speed;
-        this.vy = Math.sin(angle) * this.speed;
-        this.life = 2.0; // Dies after 2 seconds
+        const speed = 350;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.life = 2.0; // Seconds before disappearing
     }
 
     update(dt) {
@@ -270,15 +288,5 @@ export class Projectile extends Entity {
         this.y += this.vy * dt;
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
-    }
-
-    draw(ctx, camera) {
-        const screenX = this.x - camera.x;
-        const screenY = this.y - camera.y;
-        
-        ctx.fillStyle = this.team === 'green' ? 'orange' : 'red'; // Fireball vs Enemy Spear color
-        ctx.beginPath();
-        ctx.arc(screenX + 4, screenY + 4, 4, 0, Math.PI*2);
-        ctx.fill();
     }
 }
