@@ -1,5 +1,5 @@
-/* THE HEART OF THE GAME (Main Entry Point)
-   Full Screen, Big World, Lots of Islands!
+/* THE HEART OF THE GAME
+   Orchestrates Physics, Battles, and Moving Islands!
 */
 
 import { InputHandler } from './input.js';
@@ -12,21 +12,18 @@ class Game {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
         
-        // --- FULL SCREEN SETUP ---
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
 
-        // --- BIG WORLD SETUP ---
         this.worldWidth = 6000; 
-        this.worldHeight = 3000;
+        this.worldHeight = 2000;
 
         this.input = new InputHandler();
         this.resources = new ResourceManager();
         this.world = new World(this.worldWidth, this.worldHeight);
         
-        // Entities
-        this.player = new Player(400, 400, 'green');
-        this.enemyChief = new Player(5000, 400, 'blue'); // Far right start
+        this.player = new Player(400, 200, 'green'); // Start in air
+        this.enemyChief = new Player(5000, 200, 'blue');
 
         this.islands = [];
         this.villagers = [];
@@ -38,7 +35,6 @@ class Game {
         this.spawnTimer = 0;
         this.dragTarget = null;
 
-        // Start Loop
         requestAnimationFrame((ts) => this.loop(ts));
     }
 
@@ -52,40 +48,28 @@ class Game {
     }
 
     _generateWorld() {
-        // --- GENERATE A RICH WORLD ---
-        // We need enough islands for a proper war!
+        // GENERATE BATTLEFIELD
+        // 1. GREEN (Left)
+        this.islands.push(new Island(200, 1000, 400, 100, 'green'));
+        this.islands.push(new Island(700, 900, 300, 100, 'green'));
         
-        // 1. GREEN EMPIRE (Left side)
-        this.islands.push(new Island(200, 1000, 400, 100, 'green')); // Base
-        this.islands.push(new Island(700, 800, 300, 100, 'green'));
-        this.islands.push(new Island(300, 1500, 350, 100, 'green'));
-        this.islands.push(new Island(900, 1300, 300, 100, 'green'));
+        // 2. NEUTRAL BATTLEGROUND (Middle)
+        // Place them close so units can shoot each other!
+        this.islands.push(new Island(1500, 1000, 400, 100, 'neutral'));
+        this.islands.push(new Island(2000, 1000, 400, 100, 'neutral'));
+        this.islands.push(new Island(2500, 900, 500, 100, 'neutral'));
 
-        // 2. NEUTRAL ZONE (Middle - Contestable)
-        this.islands.push(new Island(1800, 1000, 300, 100, 'neutral'));
-        this.islands.push(new Island(2400, 600, 400, 100, 'neutral'));
-        this.islands.push(new Island(2200, 1600, 350, 100, 'neutral'));
-        this.islands.push(new Island(3000, 1200, 500, 100, 'neutral')); // Big central island
+        // 3. BLUE (Right)
+        this.islands.push(new Island(4000, 1000, 400, 100, 'blue'));
+        this.islands.push(new Island(4500, 900, 300, 100, 'blue'));
 
-        // 3. BLUE EMPIRE (Right side - Enemies)
-        this.islands.push(new Island(4500, 1000, 400, 100, 'blue')); // Base
-        this.islands.push(new Island(4000, 800, 300, 100, 'blue'));
-        this.islands.push(new Island(4800, 1500, 350, 100, 'blue'));
-        this.islands.push(new Island(4200, 1300, 300, 100, 'blue'));
-
-        // Initial earth count update
         this.resources.earth = this.islands.filter(i => i.team === 'green').length;
     }
 
     loop(timestamp) {
         const dt = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
-
-        // Prevent crazy jumps if tab is inactive
-        if (dt > 0.1) { 
-            requestAnimationFrame((ts) => this.loop(ts)); 
-            return; 
-        }
+        if (dt > 0.1) { requestAnimationFrame((ts) => this.loop(ts)); return; }
 
         this.update(dt);
         this.draw();
@@ -93,30 +77,30 @@ class Game {
     }
 
     update(dt) {
-        // 1. PLAYER
-        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight);
+        // 1. PLAYER PHYSICS
+        // We pass 'this.islands' so the player can land on them!
+        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands);
         this.world.update(this.player);
 
-        // 2. ENEMY AI (Simple wander patrol)
-        this.enemyChief.x += Math.sin(Date.now()/1000) * 2; 
-        this.enemyChief.y += Math.cos(Date.now()/1500) * 2;
+        // 2. ENEMY AI (Cheats: Flies to player)
+        const dx = this.player.x - this.enemyChief.x;
+        const dy = this.player.y - this.enemyChief.y;
+        this.enemyChief.x += (dx * 0.05) * dt; // drift towards player
+        this.enemyChief.y += (dy * 0.05) * dt;
 
-        // 3. RESOURCE REGEN CHECKS
+        // 3. RESOURCES
         let nearWater = false;
         let nearFire = false;
         
-        // Check proximity to Friendly/Neutral islands
         this.islands.forEach(island => {
             if (island.team === 'green' || island.team === 'neutral') {
-                // Distance to center of island
-                const dx = (island.x + island.w/2) - (this.player.x + 32);
-                const dy = (island.y + island.h/2) - (this.player.y + 32);
-                const dist = Math.sqrt(dx*dx + dy*dy);
+                const idx = (island.x + island.w/2) - (this.player.x + 32);
+                const idy = (island.y + island.h/2) - (this.player.y + 32);
+                const dist = Math.sqrt(idx*idx + idy*idy);
                 
-                // Recovery Radius
                 if (dist < 350) {
-                    nearWater = true; // Standing near island refills water
-                    if (island.hasFireplace) nearFire = true; // Fire refills ammo
+                    nearWater = true; 
+                    if (island.hasFireplace) nearFire = true;
                 }
             }
         });
@@ -125,28 +109,26 @@ class Game {
         // 4. SHOOTING
         this._handleShooting(dt);
 
-        // 5. DRAGGING
+        // 5. MOVING ISLANDS (Drag Logic)
         this._handleIslandDragging(dt);
 
         // 6. SPAWNING
         this.spawnTimer += dt;
-        if (this.spawnTimer > 4.0) { // Spawn wave every 4 seconds
+        if (this.spawnTimer > 3.0) { 
             this._spawnVillagers(); 
             this.spawnTimer = 0;
         }
 
-        // 7. UPDATE ENTITIES & COMBAT
-        // Villagers & Warriors
+        // 7. ENTITIES & COMBAT
         this.villagers.forEach(v => {
             if (v instanceof Warrior) {
-                // Warriors need list of alive enemies
                 const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
-                v.update(dt, enemies, (x, y, angle, team) => {
-                    // Spawn projectile callback
+                // Pass 'islands' to update for gravity
+                v.update(dt, this.islands, enemies, (x, y, angle, team) => {
                     this.projectiles.push(new Projectile(x, y, angle, team));
                 });
             } else {
-                v.update(dt);
+                v.update(dt, this.islands);
             }
         });
 
@@ -155,37 +137,30 @@ class Game {
             const p = this.projectiles[i];
             p.update(dt);
             
-            // Check collision with Villagers
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead) {
-                    // AABB Hit Test
-                    if (p.x > v.x && p.x < v.x + v.w &&
-                        p.y > v.y && p.y < v.y + v.h) {
-                        
+                    // Hitbox check
+                    if (p.x > v.x && p.x < v.x + v.w && p.y > v.y && p.y < v.y + v.h) {
                         v.hp -= 10;
                         p.dead = true;
                         if (v.hp <= 0) v.dead = true;
                     }
                 }
             }
-            // Remove dead projectiles
             if (p.dead) this.projectiles.splice(i, 1);
         }
 
-        // Cleanup dead bodies
         this.villagers = this.villagers.filter(v => !v.dead);
     }
 
     _handleShooting(dt) {
         if (this.input.mouse.leftDown) {
-            // Basic cooldown
             if (!this.player.fireCooldown) this.player.fireCooldown = 0;
             this.player.fireCooldown -= dt;
 
             if (this.player.fireCooldown <= 0 && this.resources.spendFire()) {
-                this.player.fireCooldown = 0.5; // Fire rate
+                this.player.fireCooldown = 0.5; 
                 
-                // Aiming Logic
                 const mouseWorldX = this.input.mouse.x + this.world.camera.x;
                 const mouseWorldY = this.input.mouse.y + this.world.camera.y;
                 const dx = mouseWorldX - (this.player.x + 32);
@@ -203,9 +178,7 @@ class Game {
 
         if (this.input.mouse.rightDown) {
             if (!this.dragTarget) {
-                // Try grab
                 for (let island of this.islands) {
-                    // Can only drag GREEN islands
                     if (island.team === 'green' && island.contains(mouseWorldX, mouseWorldY, this.world.camera)) {
                         this.dragTarget = island;
                         island.isBeingDragged = true;
@@ -215,19 +188,16 @@ class Game {
                     }
                 }
             } else {
-                // Dragging...
                 const moveCost = 10 * dt;
                 if (this.resources.spendWater(moveCost)) {
                     this.dragTarget.x = mouseWorldX - this.dragTarget.dragOffsetX;
                     this.dragTarget.y = mouseWorldY - this.dragTarget.dragOffsetY;
                 } else {
-                    // Dropped due to lack of mana
                     this.dragTarget.isBeingDragged = false;
                     this.dragTarget = null;
                 }
             }
         } else {
-            // Released
             if (this.dragTarget) {
                 this.dragTarget.isBeingDragged = false;
                 this.dragTarget = null;
@@ -236,33 +206,31 @@ class Game {
     }
 
     _spawnVillagers() {
-        // GREEN TEAM SPAWN
         const greenPop = this.villagers.filter(v => v.team === 'green').length;
-        const greenCap = this.resources.earth * 5; // Pop limit based on islands
+        const greenCap = this.resources.earth * 5; 
         
+        // Spawn Green
         if (greenPop < greenCap) {
             const myIslands = this.islands.filter(i => i.team === 'green');
             if (myIslands.length > 0) {
                 const island = myIslands[Math.floor(Math.random() * myIslands.length)];
-                // 30% Warrior Chance
-                const unit = (Math.random() < 0.3) ? 
-                    new Warrior(island.x + 50, island.y, 'green') :
-                    new Villager(island.x + 50, island.y, 'green');
+                const unit = (Math.random() < 0.4) ? // 40% Warriors
+                    new Warrior(island.x + 50, island.y - 40, 'green') :
+                    new Villager(island.x + 50, island.y - 40, 'green');
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
         }
 
-        // BLUE TEAM SPAWN (AI)
+        // Spawn Blue
         const bluePop = this.villagers.filter(v => v.team === 'blue').length;
-        if (bluePop < 20) { // AI gets flat cap for now
+        if (bluePop < 30) { 
             const enemyIslands = this.islands.filter(i => i.team === 'blue');
             if (enemyIslands.length > 0) {
                 const island = enemyIslands[Math.floor(Math.random() * enemyIslands.length)];
-                // AI prefers Warriors (50% chance)
                 const unit = (Math.random() < 0.5) ?
-                    new Warrior(island.x + 50, island.y, 'blue') :
-                    new Villager(island.x + 50, island.y, 'blue');
+                    new Warrior(island.x + 50, island.y - 40, 'blue') :
+                    new Villager(island.x + 50, island.y - 40, 'blue');
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
@@ -270,13 +238,9 @@ class Game {
     }
 
     draw() {
-        // Clear
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // World
         this.world.draw(this.ctx);
-
-        // Entities (Islands -> Projectiles -> Units -> Players)
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.projectiles.forEach(p => p.draw(this.ctx, this.world.camera));
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
@@ -284,10 +248,7 @@ class Game {
         this.enemyChief.draw(this.ctx, this.world.camera);
         this.player.draw(this.ctx, this.world.camera);
 
-        // UI
         this.resources.drawUI(this.ctx);
-
-        // Cursor
         this._drawCursor();
     }
 
