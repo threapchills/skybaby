@@ -1,11 +1,12 @@
 /* THE HEART OF THE GAME
-   Polished Edition: Varied Islands, Win/Respawn Logic, and No Crashes.
+   Now with AUDIO, Combat, and proper Loops!
 */
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
 import { World } from './world.js';
 import { Player, Island, Villager, Warrior, Projectile, Particle } from './entities.js';
+import { AudioManager } from './audio.js'; // IMPORT AUDIO
 
 class Game {
     constructor() {
@@ -20,6 +21,8 @@ class Game {
         this.input = new InputHandler();
         this.resources = new ResourceManager();
         this.world = new World(this.worldWidth, this.worldHeight);
+        this.audio = new AudioManager(); // INIT AUDIO
+        this.audio.loadAll(); // LOAD SOUNDS
         
         this.player = new Player(400, 200, 'green'); 
         this.enemyChief = new Player(5500, 200, 'blue');
@@ -36,7 +39,17 @@ class Game {
         this.hookTarget = null;
         this.gameOver = false;
 
+        // Audio unlock listener
+        window.addEventListener('click', () => this._startAudio(), { once: true });
+
         requestAnimationFrame((ts) => this.loop(ts));
+    }
+
+    _startAudio() {
+        this.audio.resume();
+        this.audio.startLoop('ambience', 0.5);
+        this.audio.startLoop('music', 0.4);
+        this.audio.startLoop('fall', 0.0); // Start silent
     }
 
     resizeCanvas() {
@@ -49,18 +62,18 @@ class Game {
     }
 
     _generateWorld() {
-        // 1. GREEN BASE (Varied Sizes)
-        this.islands.push(new Island(200, 1000, 600, 100, 'green')); // Big Home
+        // 1. GREEN BASE
+        this.islands.push(new Island(200, 1000, 600, 100, 'green')); 
         this.islands.push(new Island(900, 800, 300, 100, 'green'));
         this.islands.push(new Island(400, 1400, 400, 100, 'green'));
 
-        // 2. NEUTRAL WILDS (Scattered)
+        // 2. NEUTRAL WILDS
         this.islands.push(new Island(1500, 1000, 300, 100, 'neutral'));
-        this.islands.push(new Island(2000, 700, 500, 100, 'neutral')); // High ground
+        this.islands.push(new Island(2000, 700, 500, 100, 'neutral')); 
         this.islands.push(new Island(2400, 1200, 400, 100, 'neutral'));
-        this.islands.push(new Island(3000, 900, 800, 100, 'neutral')); // The Bridge
+        this.islands.push(new Island(3000, 900, 800, 100, 'neutral')); 
 
-        // 3. BLUE BASE (Right)
+        // 3. BLUE BASE
         this.islands.push(new Island(4500, 1000, 600, 100, 'blue'));
         this.islands.push(new Island(5200, 800, 300, 100, 'blue'));
         this.islands.push(new Island(4800, 1400, 400, 100, 'blue'));
@@ -81,30 +94,41 @@ class Game {
     update(dt) {
         if (this.gameOver) return;
 
-        // 1. UPDATE PLAYER
-        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands);
+        // 1. AUDIO LOGIC (Music Pitch & Fall Wind)
+        if (this.audio.initialized) {
+            // Dynamic Music Pitch: 1.0 at ground, faster up high
+            const heightRatio = 1.0 + (Math.max(0, 2000 - this.player.y) / 4000);
+            this.audio.setLoopPitch('music', heightRatio);
+
+            // Falling Sound
+            if (this.player.vy > 300 && !this.player.isGrounded) {
+                this.audio.setLoopVolume('fall', 0.6);
+            } else {
+                this.audio.setLoopVolume('fall', 0.0);
+            }
+        }
+
+        // 2. UPDATE PLAYER (Pass Audio!)
+        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio);
         this.world.update(this.player);
 
-        // 2. UPDATE ENEMY SHAMAN (AI)
+        // 3. UPDATE ENEMY SHAMAN
         if (!this.enemyChief.dead) {
             const dx = this.player.x - this.enemyChief.x;
             const dy = this.player.y - this.enemyChief.y;
             this.enemyChief.x += (dx * 0.15) * dt;
             this.enemyChief.y += (dy * 0.15) * dt;
-            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands); 
+            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null); 
         }
 
-        // 3. RESPAWN LOGIC & WIN CONDITIONS
+        // 4. GAME LOGIC
         this._checkWinConditions(dt);
-
-        // 4. RESOURCES & PHYSICS
         this.resources.earth = Math.max(1, this.player.visitedIslands.size);
         
         let nearWater = false;
         let nearFire = false;
         this.islands.forEach(island => {
             island.update(dt); 
-            // Check proximity for Regen
             const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
             if (dist < 400 && (island.team === 'green' || island.team === 'neutral')) {
                 nearWater = true; 
@@ -113,20 +137,17 @@ class Game {
         });
         this.resources.update(dt, isMoving, nearWater, nearFire);
 
-        // 5. ACTIONS
         if (!this.player.dead) {
             this._handleShooting(dt);
             this._handleHookshot(dt);
         }
 
-        // 6. SPAWNING
         this.spawnTimer += dt;
         if (this.spawnTimer > 4.0) { 
             this._spawnVillagers(); 
             this.spawnTimer = 0;
         }
 
-        // 7. COMBAT & PARTICLES
         this._handleCombat(dt);
         this.particles.forEach(p => p.update(dt));
         this.particles = this.particles.filter(p => !p.dead);
@@ -136,16 +157,15 @@ class Game {
         const greenCount = this.villagers.filter(v => v.team === 'green').length;
         const blueCount = this.villagers.filter(v => v.team === 'blue').length;
 
-        // PLAYER RESPAWN
         if (this.player.dead) {
             if (greenCount > 0) {
                 this.player.respawnTimer -= dt;
                 if (this.player.respawnTimer <= 0) {
                     this.player.dead = false;
                     this.player.hp = 100;
-                    this.player.x = this.islands[0].x; // Respawn at home
+                    this.player.x = this.islands[0].x; 
                     this.player.y = this.islands[0].y - 100;
-                    this._spawnBlood(this.player.x, this.player.y, '#00ff00'); // Spawn effect
+                    this._spawnBlood(this.player.x, this.player.y, '#00ff00');
                 }
             } else {
                 this.gameOver = true;
@@ -153,7 +173,6 @@ class Game {
             }
         }
 
-        // ENEMY RESPAWN
         if (this.enemyChief.dead) {
             if (blueCount > 0) {
                 this.enemyChief.respawnTimer -= dt;
@@ -172,14 +191,11 @@ class Game {
 
     _handleHookshot(dt) {
         if (this.input.mouse.rightDown) {
-            // Convert to World Coordinates
             const mx = this.input.mouse.x + this.world.camera.x;
             const my = this.input.mouse.y + this.world.camera.y;
 
             let hit = false;
             for (let island of this.islands) {
-                // CRASH FIX: Ensure we check contains against WORLD coordinates properly
-                // Island.contains expects WORLD coords now, which we fixed in Entity logic
                 if (mx >= island.x && mx <= island.x + island.w &&
                     my >= island.y && my <= island.y + island.h) {
                     
@@ -206,10 +222,14 @@ class Game {
             p.update(dt);
             let hitSomething = false;
 
+            // Check Collisions (Enemy Shaman, Player, Villagers)
+            // ... logic identical to previous, just added Sound Triggers ...
+
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
                 this.enemyChief.hp -= 5;
                 hitSomething = true;
+                this.audio.play('hit', 0.4, 0.3); // SOUND
                 if (this.enemyChief.hp <= 0) {
                     this.enemyChief.dead = true;
                     this.enemyChief.respawnTimer = 5.0;
@@ -221,6 +241,7 @@ class Game {
                 this._spawnBlood(p.x, p.y);
                 this.player.hp -= 5;
                 hitSomething = true;
+                this.audio.play('hit', 0.4, 0.3); // SOUND
                 if (this.player.hp <= 0) {
                     this.player.dead = true;
                     this.player.respawnTimer = 5.0;
@@ -232,6 +253,7 @@ class Game {
                     this._spawnBlood(v.x, v.y);
                     v.hp -= 10;
                     hitSomething = true;
+                    this.audio.play('hit', 0.3, 0.3); // SOUND
                     if (v.hp <= 0) {
                          v.dead = true;
                          this._spawnBlood(v.x, v.y);
@@ -251,7 +273,7 @@ class Game {
 
                 v.update(dt, this.islands, enemies, (x, y, angle, team) => {
                     this.projectiles.push(new Projectile(x, y, angle, team));
-                }, this.worldWidth, this.worldHeight);
+                }, this.worldWidth, this.worldHeight, this.audio); // PASS AUDIO
             } else {
                 v.update(dt, this.islands, this.worldWidth, this.worldHeight);
             }
@@ -281,12 +303,14 @@ class Game {
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
                 this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green'));
+                
+                // SOUND: SHOOT (Player)
+                this.audio.play('shoot', 0.4, 0.2);
             }
         }
     }
 
     _spawnVillagers() {
-        // Green
         const greenPop = this.villagers.filter(v => v.team === 'green').length;
         const greenCap = this.resources.earth * 5; 
         if (greenPop < greenCap) {
@@ -300,7 +324,6 @@ class Game {
                 this.villagers.push(unit);
             }
         }
-        // Blue
         if (this.villagers.filter(v => v.team === 'blue').length < 30) {
             const enemyIslands = this.islands.filter(i => i.team === 'blue');
              if (enemyIslands.length > 0) {
@@ -338,7 +361,6 @@ class Game {
 
         this.resources.drawUI(this.ctx);
         
-        // Cursor
         const mx = this.input.mouse.x;
         const my = this.input.mouse.y;
         this.ctx.strokeStyle = 'white';
