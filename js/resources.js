@@ -1,48 +1,46 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Updated: Universal Fire, Earth Slider, and Balanced Costs.
+   Tuned: Expensive Flight, Walking for Earth.
 */
 
 export class ResourceManager {
     constructor() {
-        // EARTH: Now a float (0-100) for smooth depletion
-        this.earth = 100; 
+        this.earth = 20; // Start with a little bit
         this.maxEarth = 100;
 
-        // AIR: Stamina for flying.
         this.air = 100;
         this.maxAir = 100;
-        this.airRegenRate = 40; 
-        this.airDepletionRate = 15; 
+        this.airRegenRate = 30; 
+        this.airDepletionRate = 60; // TRIPLED COST (was 15-20ish)
 
-        // WATER: Mana for general magic (unused currently, but kept for future)
         this.water = 100;
         this.maxWater = 100;
         this.waterRegenRate = 20;
 
-        // FIRE: Ammo.
         this.fire = 5;
         this.maxFire = 10;
         this.fireRegenTimer = 0; 
     }
 
     update(dt, isMoving, isNearWaterSource, isNearFireSource) {
-        // --- AIR LOGIC ---
+        // AIR
         if (isMoving) {
-            this.air -= this.airDepletionRate * dt;
-        } else {
-            this.air += this.airRegenRate * dt;
+            // Moving in air costs air (handled in Player update really, but we track regen here)
+            // We actually handle air drain in Player.update for flight, 
+            // but if we want general movement tiredness we could do it here.
+            // For now, we just regen if NOT flying.
         }
-        if (this.air < 0) this.air = 0;
+        // Air regen is handled by the fact we only drain when flying.
+        // So we always try to regen unless maxed.
+        this.air += this.airRegenRate * dt;
         if (this.air > this.maxAir) this.air = this.maxAir;
 
-        // --- WATER LOGIC ---
+        // WATER
         if (isNearWaterSource) {
             this.water += this.waterRegenRate * dt;
             if (this.water > this.maxWater) this.water = this.maxWater;
         }
 
-        // --- FIRE LOGIC (Universal Source) ---
-        // Regenerate faster (0.25s per ammo) if near ANY fire
+        // FIRE
         if (isNearFireSource && this.fire < this.maxFire) {
             this.fireRegenTimer += dt;
             if (this.fireRegenTimer > 0.25) { 
@@ -53,10 +51,8 @@ export class ResourceManager {
             this.fireRegenTimer = 0;
         }
 
-        // --- EARTH LOGIC (Regen) ---
-        // Earth refills slowly over time if you own islands, faster if you explore
-        // (Handled via 'addEarth' calls in player collision for exploration bursts)
-        this.earth += 2 * dt; // Passive trickle
+        // EARTH: No passive trickle anymore. It comes from walking.
+        // We just clamp it here.
         if (this.earth > this.maxEarth) this.earth = this.maxEarth;
     }
 
@@ -76,6 +72,13 @@ export class ResourceManager {
         return false;
     }
 
+    // Called when walking
+    addPassiveEarth(amount) {
+        this.earth += amount;
+        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
+    }
+
+    // Called when discovering new land
     addEarth(amount) {
         this.earth += amount;
         if (this.earth > this.maxEarth) this.earth = this.maxEarth;
@@ -94,18 +97,14 @@ export class ResourceManager {
         ctx.shadowBlur = 4;
         ctx.lineWidth = 2;
 
-        // EARTH (Now a Bar)
         this._drawBar(ctx, startX, startY, this.earth, this.maxEarth, "#8B4513", "#3e2723", "EARTH");
 
-        // AIR
         let yPos = startY + padding;
         this._drawBar(ctx, startX, yPos, this.air, this.maxAir, "#FFFFFF", "#87CEEB", "AIR");
 
-        // WATER
         yPos += padding;
         this._drawBar(ctx, startX, yPos, this.water, this.maxWater, "#00BFFF", "#00008B", "WATER");
 
-        // FIRE
         yPos += padding;
         ctx.fillStyle = "#FF4500"; 
         ctx.fillText("FIRE:", startX, yPos + 10);
@@ -117,11 +116,11 @@ export class ResourceManager {
             ctx.arc(pipX, pipY, 6, 0, Math.PI * 2);
             
             if (i < this.fire) {
-                ctx.fillStyle = "#FFD700"; // Lit
+                ctx.fillStyle = "#FFD700"; 
                 ctx.fill();
                 ctx.stroke();
             } else {
-                ctx.strokeStyle = "#555"; // Empty
+                ctx.strokeStyle = "#555"; 
                 ctx.stroke();
             }
         }
