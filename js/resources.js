@@ -1,29 +1,28 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Balanced for actual fun, not just frustration!
+   Updated: Universal Fire, Earth Slider, and Balanced Costs.
 */
 
 export class ResourceManager {
     constructor() {
-        // EARTH: Islands owned.
-        this.earth = 1; 
+        // EARTH: Now a float (0-100) for smooth depletion
+        this.earth = 100; 
+        this.maxEarth = 100;
 
         // AIR: Stamina for flying.
-        // Increased Regen so you aren't grounded constantly.
         this.air = 100;
         this.maxAir = 100;
-        this.airRegenRate = 40; // Much faster recovery!
-        this.airDepletionRate = 15; // Slower drain!
+        this.airRegenRate = 40; 
+        this.airDepletionRate = 15; 
 
-        // WATER: Mana for moving islands.
+        // WATER: Mana for general magic (unused currently, but kept for future)
         this.water = 100;
         this.maxWater = 100;
         this.waterRegenRate = 20;
 
         // FIRE: Ammo.
-        // Starts with 5 so you can shoot immediately.
         this.fire = 5;
         this.maxFire = 10;
-        this.fireRegenTimer = 0; // Internal timer for fire pacing
+        this.fireRegenTimer = 0; 
     }
 
     update(dt, isMoving, isNearWaterSource, isNearFireSource) {
@@ -33,7 +32,6 @@ export class ResourceManager {
         } else {
             this.air += this.airRegenRate * dt;
         }
-        // Clamp Air
         if (this.air < 0) this.air = 0;
         if (this.air > this.maxAir) this.air = this.maxAir;
 
@@ -43,22 +41,28 @@ export class ResourceManager {
             if (this.water > this.maxWater) this.water = this.maxWater;
         }
 
-        // --- FIRE LOGIC ---
-        // Regenerate one fireball every 0.5 seconds if near a fire source
+        // --- FIRE LOGIC (Universal Source) ---
+        // Regenerate faster (0.25s per ammo) if near ANY fire
         if (isNearFireSource && this.fire < this.maxFire) {
             this.fireRegenTimer += dt;
-            if (this.fireRegenTimer > 0.5) {
+            if (this.fireRegenTimer > 0.25) { 
                 this.fire++;
                 this.fireRegenTimer = 0;
             }
         } else {
             this.fireRegenTimer = 0;
         }
+
+        // --- EARTH LOGIC (Regen) ---
+        // Earth refills slowly over time if you own islands, faster if you explore
+        // (Handled via 'addEarth' calls in player collision for exploration bursts)
+        this.earth += 2 * dt; // Passive trickle
+        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
     }
 
-    spendWater(amount) {
-        if (this.water >= amount) {
-            this.water -= amount;
+    spendEarth(amount) {
+        if (this.earth >= amount) {
+            this.earth -= amount;
             return true;
         }
         return false;
@@ -72,11 +76,14 @@ export class ResourceManager {
         return false;
     }
 
+    addEarth(amount) {
+        this.earth += amount;
+        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
+    }
+
     drawUI(ctx) {
         ctx.save();
         
-        const barWidth = 200;
-        const barHeight = 20;
         const startX = 20;
         const startY = 30;
         const padding = 30; 
@@ -87,9 +94,8 @@ export class ResourceManager {
         ctx.shadowBlur = 4;
         ctx.lineWidth = 2;
 
-        // EARTH
-        ctx.fillStyle = "#8B4513"; 
-        ctx.fillText(`EARTH (Islands): ${this.earth}`, startX, startY);
+        // EARTH (Now a Bar)
+        this._drawBar(ctx, startX, startY, this.earth, this.maxEarth, "#8B4513", "#3e2723", "EARTH");
 
         // AIR
         let yPos = startY + padding;
