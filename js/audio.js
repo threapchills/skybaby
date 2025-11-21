@@ -1,5 +1,5 @@
 /* THE CONDUCTOR (Audio Engine)
-   Handles loops, one-shots, and dynamic pitch shifting!
+   Polished: Reliable Music & Consistent Gunshots!
 */
 
 export class AudioManager {
@@ -16,7 +16,6 @@ export class AudioManager {
             'music': 'assets/sounds/music.ogg'
         };
         
-        // State tracking for loops
         this.loops = {};
         this.isMuted = false;
         this.initialized = false;
@@ -25,7 +24,7 @@ export class AudioManager {
     async loadAll() {
         const promises = Object.entries(this.files).map(([key, url]) => this._loadBuffer(key, url));
         await Promise.all(promises);
-        console.log("🎵 Audio Loaded & Ready to Rock!");
+        console.log("🎵 Audio Loaded & Ready!");
     }
 
     async _loadBuffer(key, url) {
@@ -35,16 +34,19 @@ export class AudioManager {
             const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
             this.sounds[key] = audioBuffer;
         } catch (e) {
-            console.warn(`⚠️ Sound file missing or broken: ${url}`);
+            console.warn(`⚠️ Sound file missing: ${url}`);
         }
     }
 
-    // Call this on first user interaction (Click/Key) to unlock browser audio
     resume() {
         if (this.ctx.state === 'suspended') {
-            this.ctx.resume();
+            this.ctx.resume().then(() => {
+                console.log("🔊 Audio Context Resumed!");
+                this.initialized = true;
+            });
+        } else {
+            this.initialized = true;
         }
-        this.initialized = true;
     }
 
     play(name, vol = 1.0, pitchVar = 0.0) {
@@ -53,7 +55,7 @@ export class AudioManager {
         const source = this.ctx.createBufferSource();
         source.buffer = this.sounds[name];
         
-        // Pitch Randomization
+        // Pitch Randomization (Optional)
         if (pitchVar > 0) {
             const variance = (Math.random() * pitchVar * 2) - pitchVar;
             source.playbackRate.value = 1.0 + variance;
@@ -68,7 +70,12 @@ export class AudioManager {
     }
 
     startLoop(name, vol = 1.0) {
-        if (!this.sounds[name] || this.loops[name]) return; // Already playing?
+        if (!this.sounds[name]) {
+            // If sound isn't loaded yet, try again in 100ms
+            setTimeout(() => this.startLoop(name, vol), 100);
+            return;
+        }
+        if (this.loops[name]) return; // Already playing
 
         const source = this.ctx.createBufferSource();
         source.buffer = this.sounds[name];
@@ -81,13 +88,12 @@ export class AudioManager {
         gainNode.connect(this.ctx.destination);
         source.start(0);
 
-        // Store reference to stop/modulate later
-        this.loops[name] = { source, gain: gainNode, baseRate: 1.0 };
+        this.loops[name] = { source, gain: gainNode };
     }
 
     setLoopVolume(name, vol) {
         if (this.loops[name]) {
-            // Smooth fade to prevent clicking
+            // Smooth fade (0.1s)
             this.loops[name].gain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.1);
         }
     }
