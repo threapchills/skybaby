@@ -1,1 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sky Spirit: Tribal Skies</title>
+    
+    <!-- The War Paint (Styles) -->
+    <link rel="stylesheet" href="style.css">
 
+    <!-- Fallback styles just in case the CSS file is playing hide and seek -->
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            text-align: center;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars on the body */
+        }
+        #loading-text {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- The Vision Container -->
+    <div id="game-container">
+        <!-- The Window to the Spirit World -->
+        <!-- We set it to 800x600 as per the Design Doc -->
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        
+        <!-- A little text to show before the spirits awaken -->
+        <div id="loading-text">Summoning the Sky Spirits...</div>
+    </div>
+
+    <!-- The Brains of the Operation -->
+    <!-- We use type="module" so we can import classes cleanly in our JS files! -->
+    <script type="module" src="js/main.js"></script>
+
+</body>
+</html>
