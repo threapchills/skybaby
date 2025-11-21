@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Polished: Reliable Audio Startup & Logic.
+   Procedural Generation & Mega-Gore Update!
 */
 
 import { InputHandler } from './input.js';
@@ -40,9 +40,7 @@ class Game {
         this.hookTarget = null;
         this.gameOver = false;
 
-        // Audio unlock listener (One time click)
         window.addEventListener('click', () => this._startAudio(), { once: true });
-        // Also unlock on key press just in case
         window.addEventListener('keydown', () => this._startAudio(), { once: true });
 
         requestAnimationFrame((ts) => this.loop(ts));
@@ -51,7 +49,6 @@ class Game {
     _startAudio() {
         if (this.audioStarted) return;
         this.audioStarted = true;
-        
         this.audio.resume();
         this.audio.startLoop('ambience', 0.5);
         this.audio.startLoop('music', 0.4);
@@ -68,22 +65,29 @@ class Game {
     }
 
     _generateWorld() {
-        // 1. GREEN BASE
+        // STARTING BASES
         this.islands.push(new Island(200, 1000, 600, 100, 'green')); 
-        this.islands.push(new Island(900, 800, 300, 100, 'green'));
-        this.islands.push(new Island(400, 1400, 400, 100, 'green'));
+        this.islands.push(new Island(5200, 1000, 600, 100, 'blue'));
 
-        // 2. NEUTRAL WILDS
-        this.islands.push(new Island(1500, 1000, 300, 100, 'neutral'));
-        this.islands.push(new Island(2000, 700, 500, 100, 'neutral')); 
-        this.islands.push(new Island(2400, 1200, 400, 100, 'neutral'));
-        this.islands.push(new Island(3000, 900, 800, 100, 'neutral')); 
+        // PROCEDURAL GENERATION LOOP
+        // Create 25 random islands scattered across layers
+        for (let i = 0; i < 25; i++) {
+            // Random X between bases
+            const rx = 800 + Math.random() * 4200; 
+            // Random Y layers (High, Mid, Low)
+            const ry = 500 + Math.random() * 1500;
+            // Random Width
+            const rw = 300 + Math.random() * 500; 
+            
+            // Assign team based on proximity to center
+            let team = 'neutral';
+            if (rx < 1500) team = 'green';
+            if (rx > 4500) team = 'blue';
 
-        // 3. BLUE BASE
-        this.islands.push(new Island(4500, 1000, 600, 100, 'blue'));
-        this.islands.push(new Island(5200, 800, 300, 100, 'blue'));
-        this.islands.push(new Island(4800, 1400, 400, 100, 'blue'));
+            this.islands.push(new Island(rx, ry, rw, 100, team));
+        }
 
+        // Ensure initial visited island
         this.player.visitedIslands.add(this.islands[0]);
     }
 
@@ -100,11 +104,9 @@ class Game {
     update(dt) {
         if (this.gameOver) return;
 
-        // 1. AUDIO LOGIC
         if (this.audio.initialized) {
             const heightRatio = 1.0 + (Math.max(0, 2000 - this.player.y) / 4000);
             this.audio.setLoopPitch('music', heightRatio);
-
             if (this.player.vy > 300 && !this.player.isGrounded) {
                 this.audio.setLoopVolume('fall', 0.6);
             } else {
@@ -112,11 +114,9 @@ class Game {
             }
         }
 
-        // 2. UPDATE PLAYER
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio);
         this.world.update(this.player);
 
-        // 3. UPDATE ENEMY
         if (!this.enemyChief.dead) {
             const dx = this.player.x - this.enemyChief.x;
             const dy = this.player.y - this.enemyChief.y;
@@ -125,7 +125,6 @@ class Game {
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null); 
         }
 
-        // 4. GAME LOGIC
         this._checkWinConditions(dt);
         this.resources.earth = Math.max(1, this.player.visitedIslands.size);
         
@@ -288,8 +287,10 @@ class Game {
     }
 
     _spawnBlood(x, y, color='#cc0000') {
-        for (let i=0; i<8; i++) {
-            this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5));
+        // SPAWN 25 BIG PARTICLES (Random size 5-12)
+        for (let i=0; i<25; i++) {
+            const size = 5 + Math.random() * 7;
+            this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5, size));
         }
     }
 
@@ -304,8 +305,6 @@ class Game {
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
                 this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green'));
-                
-                // SOUND: SHOOT (Player) - NO RANDOMIZATION
                 this.audio.play('shoot', 0.4, 0.0);
             }
         }
