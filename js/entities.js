@@ -1,484 +1,533 @@
-/* THE HEART OF THE GAME
-   Definitive V7: Weather, Day/Night, Pigs, & Camera Shake!
+/* THE CAST OF CHARACTERS (Entities)
+   Definitive V8: SURGICAL FIX - Player Speed Tamed.
 */
 
-import { InputHandler } from './input.js';
-import { ResourceManager } from './resources.js';
-import { World } from './world.js';
-import { Player, Island, Villager, Warrior, Projectile, Particle, Pig } from './entities.js';
-import { AudioManager } from './audio.js';
-
-class Game {
-    constructor() {
-        this.canvas = document.getElementById('gameCanvas');
-        this.ctx = this.canvas.getContext('2d');
-        this.resizeCanvas();
-        window.addEventListener('resize', () => this.resizeCanvas());
-
-        this.worldWidth = 6000; 
-        this.worldHeight = 3000;
-
-        this.input = new InputHandler();
-        this.resources = new ResourceManager();
-        this.world = new World(this.worldWidth, this.worldHeight);
+export class Entity {
+    constructor(x, y, w, h, imagePath) {
+        this.x = x;
+        this.y = y;
+        this.w = w;
+        this.h = h;
+        this.dead = false;
         
-        this.audio = new AudioManager(); 
-        this.audio.loadAll(); 
-        
-        this.player = new Player(400, 200, 'green'); 
-        this.enemyChief = new Player(5500, 200, 'blue');
-
-        this.islands = [];
-        this.villagers = [];
-        this.projectiles = [];
-        this.particles = [];
-        this.pigs = []; 
-
-        this._generateWorld();
-
-        this.lastTime = 0;
-        this.spawnTimer = 0;
-        this.hookTarget = null;
-        this.gameOver = false;
-        
-        this.shake = 0;
-        this.dayTime = 0; 
-        this.windTimer = 0;
-        this.pulseTime = 0; // New pulse timer for islands
-
-        window.addEventListener('click', () => this._startAudio(), { once: true });
-        window.addEventListener('keydown', () => this._startAudio(), { once: true });
-
-        requestAnimationFrame((ts) => this.loop(ts));
-    }
-
-    _startAudio() {
-        if (this.audioStarted) return;
-        this.audioStarted = true;
-        this.audio.resume();
-        this.audio.startLoop('ambience', 0.5);
-        this.audio.startLoop('music', 0.4);
-        this.audio.startLoop('fall', 0.0); 
-    }
-
-    resizeCanvas() {
-        this.canvas.width = window.innerWidth;
-        this.canvas.height = window.innerHeight;
-        if (this.world) {
-            this.world.camera.w = this.canvas.width;
-            this.world.camera.h = this.canvas.height;
+        this.image = null;
+        if (imagePath) {
+            this.image = new Image();
+            this.image.src = imagePath;
+            this.imageLoaded = false;
+            this.image.onload = () => { this.imageLoaded = true; };
         }
     }
 
-    _generateWorld() {
-        this.islands.push(new Island(200, 1000, 600, 100, 'green')); 
-        this.islands.push(new Island(5200, 1000, 600, 100, 'blue'));
+    draw(ctx, camera) {
+        if (this.x + this.w < camera.x || this.x > camera.x + camera.w ||
+            this.y + this.h < camera.y || this.y > camera.y + camera.h) return;
 
-        const maxAttempts = 50; 
-        
-        for (let i = 0; i < 25; i++) {
-            let placed = false;
-            for(let attempt = 0; attempt < maxAttempts; attempt++) {
-                const rx = 800 + Math.random() * 4200; 
-                const ry = 500 + Math.random() * 1500;
-                const rw = 300 + Math.random() * 500;
-                const rh = 100;
+        const screenX = Math.floor(this.x - camera.x);
+        const screenY = Math.floor(this.y - camera.y);
 
-                let overlaps = false;
-                for (let existing of this.islands) {
-                    if (rx < existing.x + existing.w + 300 && 
-                        rx + rw + 300 > existing.x &&
-                        ry < existing.y + existing.h + 300 && 
-                        ry + rh + 300 > existing.y) {
-                        overlaps = true;
-                        break;
-                    }
-                }
-
-                if (!overlaps) {
-                    let team = 'neutral';
-                    if (rx < 1500) team = 'green';
-                    if (rx > 4500) team = 'blue';
-                    const newIsland = new Island(rx, ry, rw, rh, team);
-                    this.islands.push(newIsland);
-                    
-                    if (Math.random() > 0.5) {
-                        this.pigs.push(new Pig(rx + rw/2, ry - 50));
-                    }
-                    
-                    placed = true;
-                    break;
-                }
-            }
-        }
-
-        this.player.visitedIslands.add(this.islands[0]);
-    }
-
-    loop(timestamp) {
-        const dt = (timestamp - this.lastTime) / 1000;
-        this.lastTime = timestamp;
-        if (dt > 0.1) { requestAnimationFrame((ts) => this.loop(ts)); return; }
-
-        this.update(dt);
-        this.draw();
-        requestAnimationFrame((ts) => this.loop(ts));
-    }
-
-    update(dt) {
-        if (this.gameOver) return;
-
-        if (this.shake > 0) this.shake -= 20 * dt;
-        if (this.shake < 0) this.shake = 0;
-        
-        this.dayTime += dt * 0.05; 
-        if (this.dayTime > Math.PI * 2) this.dayTime = 0;
-        
-        this.pulseTime += dt * 5; // Pulse speed
-
-        this._updateWeather(dt);
-
-        if (this.audio.initialized) {
-            const heightRatio = 1.0 + (Math.max(0, 2000 - this.player.y) / 4000);
-            this.audio.setLoopPitch('music', heightRatio);
-            if (this.player.vy > 300 && !this.player.isGrounded) {
-                this.audio.setLoopVolume('fall', 0.6);
-            } else {
-                this.audio.setLoopVolume('fall', 0.0);
-            }
-        }
-
-        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio);
-        this.world.update(this.player);
-
-        if (!this.enemyChief.dead) {
-            const dx = this.player.x - this.enemyChief.x;
-            const dy = this.player.y - this.enemyChief.y;
-            this.enemyChief.x += (dx * 0.15) * dt;
-            this.enemyChief.y += (dy * 0.15) * dt;
-            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null); 
-        }
-
-        this._checkWinConditions(dt);
-        this.resources.earth = Math.max(1, this.player.visitedIslands.size);
-        
-        let nearWater = false;
-        let nearFire = false;
-        this.islands.forEach(island => {
-            island.update(dt); 
-            const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
-            if (dist < 400) {
-                nearWater = true; 
-                if (island.hasFireplace) nearFire = true;
-            }
-        });
-        this.resources.update(dt, isMoving, nearWater, nearFire);
-
-        if (!this.player.dead) {
-            this._handleShooting(dt);
-            this._handleHookshot(dt);
-        }
-
-        this.spawnTimer += dt;
-        if (this.spawnTimer > 4.0) { 
-            this._spawnVillagers(); 
-            this.spawnTimer = 0;
-        }
-
-        this._handleCombat(dt);
-        this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
-        this.particles.forEach(p => p.update(dt));
-        this.particles = this.particles.filter(p => !p.dead);
-    }
-
-    _updateWeather(dt) {
-        this.windTimer -= dt;
-        if (this.windTimer <= 0) {
-            this.windTimer = 0.15; 
-            const cx = this.world.camera.x;
-            const cy = this.world.camera.y;
-            const px = cx + Math.random() * 900; // Slightly wider spawn
-            const py = cy + Math.random() * 600;
-            // Thicker, more visible wind
-            this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.5)', 250, 1.2, 3));
-        }
-    }
-
-    _checkWinConditions(dt) {
-        const greenCount = this.villagers.filter(v => v.team === 'green').length;
-        const blueCount = this.villagers.filter(v => v.team === 'blue').length;
-
-        if (this.player.dead) {
-            if (greenCount > 0) {
-                this.player.respawnTimer -= dt;
-                if (this.player.respawnTimer <= 0) {
-                    this.player.dead = false;
-                    this.player.hp = 100;
-                    this.player.x = this.islands[0].x; 
-                    this.player.y = this.islands[0].y - 100;
-                    this._spawnBlood(this.player.x, this.player.y, '#00ff00');
-                }
-            } else {
-                this.gameOver = true;
-                alert("DEFEAT! Your tribe has fallen.");
-            }
-        }
-
-        if (this.enemyChief.dead) {
-            if (blueCount > 0) {
-                this.enemyChief.respawnTimer -= dt;
-                if (this.enemyChief.respawnTimer <= 0) {
-                    this.enemyChief.dead = false;
-                    this.enemyChief.hp = 100;
-                    this.enemyChief.x = this.islands[this.islands.length-1].x;
-                    this.enemyChief.y = this.islands[this.islands.length-1].y - 100;
-                }
-            } else {
-                this.gameOver = true;
-                alert("VICTORY! You have conquered the skies!");
-            }
-        }
-    }
-
-    _handleHookshot(dt) {
-        if (this.input.mouse.rightDown) {
-            const mx = this.input.mouse.x + this.world.camera.x;
-            const my = this.input.mouse.y + this.world.camera.y;
-
-            let hit = false;
-            for (let island of this.islands) {
-                if (mx >= island.x && mx <= island.x + island.w &&
-                    my >= island.y && my <= island.y + island.h) {
-                    
-                    hit = true;
-                    this.selectedIsland = island; // Track selected for pulse FX
-                    if (this.resources.spendEarth(30 * dt)) {
-                        const dx = this.player.x - island.x;
-                        const dy = this.player.y - island.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy);
-                        island.vx += (dx / dist) * 1200 * dt;
-                        island.vy += (dy / dist) * 1200 * dt;
-                    }
-                    break;
-                }
-            }
-            this.hookTarget = {x: mx, y: my, hit: hit};
+        if (this.image && this.imageLoaded) {
+            ctx.drawImage(this.image, screenX, screenY, this.w, this.h);
         } else {
-            this.hookTarget = null;
-            this.selectedIsland = null;
-        }
-    }
-
-    _handleCombat(dt) {
-        for (let i = this.projectiles.length - 1; i >= 0; i--) {
-            const p = this.projectiles[i];
-            
-            p.update(dt, (x, y, color) => {
-                this.particles.push(new Particle(x, y, color, 0, 0.5, 2));
-            });
-            
-            let hitSomething = false;
-
-            if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
-                this._spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= 5;
-                hitSomething = true;
-                this.audio.play('hit', 0.4, 0.3);
-                if (this.enemyChief.hp <= 0) {
-                    this.enemyChief.dead = true;
-                    this.enemyChief.respawnTimer = 5.0;
-                    this._spawnBlood(p.x, p.y, '#cc0000', 100); 
-                    this.shake = 40; 
-                }
-            }
-            
-            if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
-                this._spawnBlood(p.x, p.y);
-                this.player.hp -= 5;
-                hitSomething = true;
-                this.audio.play('hit', 0.4, 0.3);
-                if (this.player.hp <= 0) {
-                    this.player.dead = true;
-                    this.player.respawnTimer = 5.0;
-                    this.shake = 40; 
-                }
-            }
-            
-            for (let v of this.villagers) {
-                if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
-                    this._spawnBlood(v.x, v.y);
-                    v.hp -= 10;
-                    hitSomething = true;
-                    this.audio.play('hit', 0.3, 0.3);
-                    if (v.hp <= 0) {
-                         v.dead = true;
-                         this._spawnBlood(v.x, v.y);
-                    }
-                }
-            }
-
-            for (let pig of this.pigs) {
-                if (!pig.dead && this._checkHit(p, pig)) {
-                    this._spawnBlood(pig.x, pig.y, '#cc0000'); // RED BLOOD
-                    pig.hp -= 10;
-                    hitSomething = true;
-                    if (pig.hp <= 0) {
-                        pig.dead = true;
-                        this._spawnBlood(pig.x, pig.y, '#cc0000', 20);
-                    }
-                }
-            }
-
-            if (hitSomething) p.dead = true;
-            if (p.dead) this.projectiles.splice(i, 1);
-        }
-
-        this.villagers.forEach(v => {
-            if (v instanceof Warrior) {
-                const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
-                if (v.team === 'green' && !this.enemyChief.dead) enemies.push(this.enemyChief);
-                if (v.team === 'blue' && !this.player.dead) enemies.push(this.player);
-
-                v.update(dt, this.islands, enemies, (x, y, angle, team) => {
-                    this.projectiles.push(new Projectile(x, y, angle, team));
-                }, this.worldWidth, this.worldHeight, this.audio); 
-            } else {
-                v.update(dt, this.islands, this.worldWidth, this.worldHeight);
-            }
-        });
-        this.villagers = this.villagers.filter(v => !v.dead);
-    }
-
-    _checkHit(proj, entity) {
-        return (proj.x > entity.x && proj.x < entity.x + entity.w &&
-                proj.y > entity.y && proj.y < entity.y + entity.h);
-    }
-
-    _spawnBlood(x, y, color='#cc0000', count=25) {
-        for (let i=0; i<count; i++) {
-            const size = 5 + Math.random() * 7;
-            this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5, size));
-        }
-    }
-
-    _handleShooting(dt) {
-        if (this.input.mouse.leftDown) {
-            if (!this.player.fireCooldown) this.player.fireCooldown = 0;
-            this.player.fireCooldown -= dt;
-
-            if (this.player.fireCooldown <= 0 && this.resources.spendFire()) {
-                this.player.fireCooldown = 0.2; 
-                const mx = this.input.mouse.x + this.world.camera.x;
-                const my = this.input.mouse.y + this.world.camera.y;
-                const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
-                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green'));
-                this.audio.play('shoot', 0.4, 0.0);
-            }
-        }
-    }
-
-    _spawnVillagers() {
-        const greenPop = this.villagers.filter(v => v.team === 'green').length;
-        const greenCap = this.resources.earth * 5; 
-        if (greenPop < greenCap) {
-            const myIslands = this.islands.filter(i => i.team === 'green' || this.player.visitedIslands.has(i));
-            if (myIslands.length > 0) {
-                const island = myIslands[Math.floor(Math.random() * myIslands.length)];
-                const unit = (Math.random() < 0.4) ? 
-                    new Warrior(island.x + 50, island.y - 40, 'green') :
-                    new Villager(island.x + 50, island.y - 40, 'green');
-                unit.homeIsland = island;
-                this.villagers.push(unit);
-            }
-        }
-        if (this.villagers.filter(v => v.team === 'blue').length < 30) {
-            const enemyIslands = this.islands.filter(i => i.team === 'blue');
-             if (enemyIslands.length > 0) {
-                const island = enemyIslands[Math.floor(Math.random() * enemyIslands.length)];
-                const unit = (Math.random() < 0.5) ? 
-                    new Warrior(island.x + 50, island.y - 40, 'blue') :
-                    new Villager(island.x + 50, island.y - 40, 'blue');
-                unit.homeIsland = island;
-                this.villagers.push(unit);
-            }
-        }
-    }
-
-    draw() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        let sx = 0, sy = 0;
-        if (this.shake > 0) {
-            sx = (Math.random() - 0.5) * this.shake;
-            sy = (Math.random() - 0.5) * this.shake;
-        }
-        
-        this.ctx.save();
-        this.ctx.translate(sx, sy);
-
-        this.world.draw(this.ctx);
-        
-        // Pulse FX for selected island
-        if (this.selectedIsland) {
-            const pulse = 1 + Math.sin(this.pulseTime) * 0.05;
-            this.ctx.save();
-            this.ctx.translate(this.selectedIsland.x + this.selectedIsland.w/2 - this.world.camera.x, 
-                               this.selectedIsland.y + this.selectedIsland.h/2 - this.world.camera.y);
-            this.ctx.scale(pulse, pulse);
-            this.ctx.translate(-(this.selectedIsland.x + this.selectedIsland.w/2 - this.world.camera.x), 
-                               -(this.selectedIsland.y + this.selectedIsland.h/2 - this.world.camera.y));
-            this.selectedIsland.draw(this.ctx, this.world.camera);
-            this.ctx.restore();
-        } else {
-            // Draw other islands normally
-            this.islands.forEach(i => {
-                if (i !== this.selectedIsland) i.draw(this.ctx, this.world.camera);
-            });
-        }
-
-        this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
-        this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
-        this.projectiles.forEach(p => p.draw(this.ctx, this.world.camera));
-        if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
-        if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
-        this.particles.forEach(p => p.draw(this.ctx, this.world.camera));
-
-        if (this.hookTarget) {
-            this.ctx.strokeStyle = this.hookTarget.hit ? 'cyan' : 'gray';
-            this.ctx.lineWidth = 2;
-            this.ctx.setLineDash([5, 5]);
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.player.x - this.world.camera.x + 20, this.player.y - this.world.camera.y + 20);
-            this.ctx.lineTo(this.hookTarget.x - this.world.camera.x, this.hookTarget.y - this.world.camera.y);
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
-        }
-        
-        const sunHeight = Math.sin(this.dayTime); 
-        if (sunHeight < 0) {
-            const darkness = Math.abs(sunHeight) * 0.75; 
-            this.ctx.fillStyle = `rgba(0, 0, 50, ${darkness})`;
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        }
-
-        this.ctx.restore(); 
-
-        this.resources.drawUI(this.ctx);
-        
-        const mx = this.input.mouse.x;
-        const my = this.input.mouse.y;
-        this.ctx.strokeStyle = 'white';
-        this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
-        this.ctx.arc(mx, my, 10, 0, Math.PI*2);
-        this.ctx.stroke();
-
-        if (this.player.dead) {
-            this.ctx.fillStyle = 'red';
-            this.ctx.font = '30px Arial';
-            this.ctx.fillText(`RESPAWNING IN ${Math.ceil(this.player.respawnTimer)}...`, this.canvas.width/2 - 100, this.canvas.height/2);
+            ctx.fillStyle = '#ff00ff'; 
+            ctx.fillRect(screenX, screenY, this.w, this.h);
         }
     }
 }
 
-window.onload = () => { new Game(); };
+export class Particle extends Entity {
+    constructor(x, y, color, speed, life, size = 5) {
+        super(x, y, size, size, null);
+        this.color = color;
+        const angle = Math.random() * Math.PI * 2;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed - 50; 
+        this.life = life;
+        this.maxLife = life;
+    }
+
+    update(dt) {
+        this.vy += 500 * dt; 
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+    }
+
+    draw(ctx, camera) {
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+        ctx.globalAlpha = this.life / this.maxLife;
+        ctx.fillStyle = this.color;
+        ctx.fillRect(screenX, screenY, this.w, this.h);
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+export class Pig extends Entity {
+    constructor(x, y) {
+        super(x, y, 32, 24, 'assets/sprites/pig.png'); 
+        this.hp = 10;
+        this.vx = 0;
+        this.vy = 0; 
+        this.stateTimer = 0;
+        this.onGround = false;
+        this.maxFallSpeed = 800; 
+        this.homeIsland = null;
+    }
+
+    update(dt, islands, worldWidth, worldHeight) {
+        this.vy += 500 * dt; 
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
+        
+        this.stateTimer -= dt;
+        if (this.stateTimer <= 0) {
+            this.stateTimer = Math.random() * 3 + 2; 
+            this.vx = (Math.random() - 0.5) * 40; 
+        }
+
+        if (this.onGround && this.homeIsland) {
+            const lookAhead = this.vx > 0 ? 10 : -10;
+            const nextX = this.x + this.w/2 + lookAhead;
+            if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                this.vx *= -1;
+            }
+        }
+        
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        this.onGround = false;
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                     const threshold = 10 + (this.vy * dt * 2);
+                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                         this.y = island.y - this.h;
+                         this.vy = 0;
+                         this.onGround = true;
+                         this.homeIsland = island; 
+                     }
+                }
+            }
+        }
+        
+        if (this.y > worldHeight) this.y = -50; 
+        if (this.x > worldWidth) this.x = 0;
+        if (this.x < 0) this.x = worldWidth;
+    }
+}
+
+export class Player extends Entity {
+    constructor(x, y, team) {
+        super(x, y, 40, 40, `assets/sprites/player_${team}.png`);
+        this.team = team; 
+        this.vx = 0;
+        this.vy = 0;
+        this.hp = 100; 
+        this.maxHp = 100;
+        
+        // --- PHYSICS SURGERY ---
+        this.speed = 200; // Capped Max Speed
+        this.acceleration = 25; // LOW acceleration for weight
+        this.gravity = 600; 
+        this.maxFallSpeed = 800; 
+        this.jumpForce = -500; 
+        this.flyForce = -400; 
+        this.friction = 0.90; // Higher friction = smoother glide to stop
+        this.isGrounded = false;
+        this.hpRegenTimer = 0;
+        
+        this.visitedIslands = new Set();
+    }
+
+    update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
+        if (this.dead) return; 
+
+        // HP Regen
+        if (this.hp < this.maxHp) {
+            this.hpRegenTimer += dt;
+            if (this.hpRegenTimer > 0.5) { 
+                this.hp++;
+                this.hpRegenTimer = 0;
+            }
+        }
+
+        // MOVEMENT PHYSICS
+        if (input && input.keys) {
+            if (input.keys.a) this.vx -= this.acceleration * dt * 10; // Scale by dt
+            if (input.keys.d) this.vx += this.acceleration * dt * 10;
+        }
+        
+        // Apply Friction
+        this.vx *= this.friction; 
+
+        // CLAMP HORIZONTAL SPEED
+        // This prevents the "Zoomies"
+        if (this.vx > 5) this.vx = 5; // Max speed in arbitrary units
+        if (this.vx < -5) this.vx = -5;
+
+        // Apply to Position (Scale by speed multiplier)
+        this.x += this.vx * (this.speed / 5) * dt; // Normalized
+
+        // Vertical
+        this.vy += this.gravity * dt;
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
+
+        if (input && input.keys.space) {
+            if (this.isGrounded) {
+                this.vy = this.jumpForce;
+                this.isGrounded = false;
+                if(audio) audio.play('jump', 0.4, 0.1);
+            } else if (resources && resources.air > 0) {
+                this.vy -= 1200 * dt; 
+                if (this.vy < this.flyForce) this.vy = this.flyForce;
+                resources.air -= 80 * dt; 
+            }
+        }
+        this.y += this.vy * dt;
+
+        // Collisions
+        this.isGrounded = false;
+        if (this.vy >= 0) { 
+            for (let island of islands) {
+                if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
+                    const feet = this.y + this.h;
+                    const threshold = 10 + (this.vy * dt * 2); 
+                    
+                    if (feet >= island.y - 10 && feet <= island.y + threshold) {
+                         this.y = island.y - this.h + 4; 
+                         this.vy = 0;
+                         this.isGrounded = true;
+                         
+                         if (this.team === 'green' && !this.visitedIslands.has(island) && resources) {
+                            this.visitedIslands.add(island);
+                            resources.addEarth(20); 
+                         }
+
+                         // Earth Walk Regen
+                         if (this.team === 'green' && Math.abs(this.vx) > 0.5 && resources) {
+                             resources.addPassiveEarth(10 * dt);
+                         }
+                    }
+                }
+            }
+        }
+
+        if (this.y > worldHeight + 100) this.y = -100; 
+        if (this.y < -200) this.y = worldHeight; 
+        if (this.x > worldWidth) this.x = 0; 
+        if (this.x < -this.w) this.x = worldWidth; 
+
+        return (Math.abs(this.vx) > 0.1 || Math.abs(this.vy) > 0.1); 
+    }
+    
+    draw(ctx, camera) {
+        if (this.dead) return;
+
+        const screenX = Math.floor(this.x - camera.x);
+        const screenY = Math.floor(this.y - camera.y);
+        
+        if (this.team === 'green') {
+            ctx.fillStyle = '#00ff00';
+            ctx.beginPath();
+            ctx.moveTo(screenX + this.w/2, screenY - 25);
+            ctx.lineTo(screenX + this.w/2 - 10, screenY - 35);
+            ctx.lineTo(screenX + this.w/2 + 10, screenY - 35);
+            ctx.fill();
+        }
+
+        if (this.image && this.imageLoaded) {
+            ctx.drawImage(this.image, screenX - 4, screenY - 4, 48, 48);
+        } else {
+            ctx.fillStyle = this.team === 'green' ? '#0f0' : '#00f';
+            ctx.fillRect(screenX, screenY, this.w, this.h);
+        }
+
+        ctx.fillStyle = 'red';
+        ctx.fillRect(screenX, screenY - 10, this.w, 4);
+        ctx.fillStyle = '#0f0';
+        ctx.fillRect(screenX, screenY - 10, this.w * (this.hp / this.maxHp), 4);
+    }
+}
+
+export class Island extends Entity {
+    constructor(x, y, w, h, team) {
+        super(x, y, w, h, null);
+        this.team = team;
+        
+        this.tileset = new Image();
+        this.tileset.src = 'assets/environment/island_tileset.png';
+        
+        this.imgTeepee = new Image();
+        this.imgTeepee.src = team === 'green' ? 'assets/environment/teepee_green.png' : 'assets/environment/teepee_blue.png';
+        
+        this.imgFire = new Image();
+        this.imgFire.src = 'assets/environment/fireplace_lit.png';
+
+        this.imgTree = new Image();
+        this.imgTree.src = 'assets/environment/tree_variant1.png';
+
+        this.hasTeepee = true;
+        this.hasFireplace = Math.random() > 0.4; 
+        
+        this.trees = [];
+        const numTrees = 1 + Math.floor(Math.random() * (w / 70)); 
+        for (let i = 0; i < numTrees; i++) {
+            this.trees.push({
+                x: Math.random() * (w - 100), 
+                scale: 0.8 + Math.random() * 1.7, 
+                hueRotate: Math.floor(Math.random() * 40) - 20 
+            });
+        }
+
+        this.vx = 0;
+        this.vy = 0;
+        this.friction = 0.90; 
+    }
+
+    update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.vx *= this.friction;
+        this.vy *= this.friction;
+    }
+
+    draw(ctx, camera) {
+        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
+
+        const screenX = Math.floor(this.x - camera.x);
+        const screenY = Math.floor(this.y - camera.y);
+
+        if (this.tileset.complete && this.tileset.naturalWidth > 0) {
+            const sliceW = Math.floor(this.tileset.width / 3);
+            const sliceH = this.tileset.height;
+            ctx.drawImage(this.tileset, 0, 0, sliceW, sliceH, screenX, screenY, sliceW, sliceH);
+            const rightX = screenX + this.w - sliceW;
+            const middleWidth = rightX - (screenX + sliceW);
+            if (middleWidth > 0) {
+                ctx.drawImage(this.tileset, sliceW, 0, sliceW, sliceH, screenX + sliceW, screenY, middleWidth + 2, sliceH);
+            }
+            ctx.drawImage(this.tileset, sliceW * 2, 0, sliceW, sliceH, rightX, screenY, sliceW, sliceH);
+        } else {
+            ctx.fillStyle = this.team === 'green' ? '#2E8B57' : '#4682B4';
+            ctx.fillRect(screenX, screenY, this.w, this.h);
+        }
+
+        if (this.hasTeepee && this.imgTeepee.complete) {
+            ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 66, 96, 96);
+        }
+        if (this.imgTree.complete) {
+            this.trees.forEach(tree => {
+                ctx.save();
+                ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
+                const treeW = 120 * tree.scale;
+                const treeH = 150 * tree.scale;
+                const treeY = screenY - (110 * tree.scale); 
+                ctx.drawImage(this.imgTree, screenX + tree.x, treeY, treeW, treeH);
+                ctx.restore();
+            });
+        }
+        if (this.hasFireplace && this.imgFire.complete) {
+            ctx.drawImage(this.imgFire, screenX + (this.w/2) - 40, screenY - 54, 80, 80);
+        }
+    }
+}
+
+export class Villager extends Entity {
+    constructor(x, y, team) {
+        const variant = Math.floor(Math.random() * 4) + 1;
+        super(x, y, 24, 24, `assets/sprites/villager_${team}_${variant}.png`); 
+        this.team = team;
+        this.hp = 20;
+        this.homeIsland = null;
+        this.vx = 0;
+        this.vy = 0; 
+        this.stateTimer = 0;
+        this.onGround = false;
+        this.maxFallSpeed = 800; 
+    }
+
+    update(dt, islands, worldWidth, worldHeight) {
+        this.vy += 500 * dt; 
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
+        
+        this.stateTimer -= dt;
+        if (this.stateTimer <= 0) {
+            this.stateTimer = Math.random() * 2 + 1;
+            this.vx = (Math.random() - 0.5) * 80; 
+        }
+
+        if (this.onGround && this.homeIsland) {
+            const lookAhead = this.vx > 0 ? 10 : -10;
+            const nextX = this.x + this.w/2 + lookAhead;
+            if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                this.vx *= -1;
+            }
+        }
+        
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        this.onGround = false;
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                     const threshold = 10 + (this.vy * dt * 2);
+                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                         this.y = island.y - this.h;
+                         this.vy = 0;
+                         this.onGround = true;
+                         this.homeIsland = island; 
+                     }
+                }
+            }
+        }
+        
+        if (this.y > worldHeight) this.y = -50; 
+        if (this.x > worldWidth) this.x = 0;
+        if (this.x < 0) this.x = worldWidth;
+    }
+}
+
+export class Warrior extends Villager {
+    constructor(x, y, team) {
+        super(x, y, team);
+        this.w = 32; this.h = 32; 
+        this.image.src = `assets/sprites/warrior_${team}.png`;
+        this.hp = 50; 
+        this.attackCooldown = 0;
+    }
+
+    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio) {
+        this.vy += 500 * dt;
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
+
+        let target = null;
+        let nearestDist = 1000; 
+
+        if (enemies.length > 0) {
+            enemies.forEach(e => {
+                const dx = e.x - this.x;
+                const dy = e.y - this.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    target = e;
+                }
+            });
+        }
+
+        if (target) {
+            if (nearestDist < 400) {
+                this.vx = 0; 
+                if (this.attackCooldown <= 0) {
+                    this.attackCooldown = 1.5;
+                    const dx = target.x - this.x;
+                    const dy = (target.y - 20) - this.y; 
+                    const angle = Math.atan2(dy, dx);
+                    spawnProjectileCallback(this.x, this.y, angle, this.team);
+                }
+            } else {
+                const dir = target.x > this.x ? 1 : -1;
+                this.vx = dir * 90; 
+            }
+        } else {
+            this.stateTimer -= dt;
+            if (this.stateTimer <= 0) {
+                this.stateTimer = Math.random() * 2 + 1;
+                this.vx = (Math.random() - 0.5) * 60;
+            }
+            
+            if (this.onGround && this.homeIsland) {
+                const lookAhead = this.vx > 0 ? 20 : -20;
+                const nextX = this.x + this.w/2 + lookAhead;
+                if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                    let canJump = false;
+                    for(let other of islands) {
+                        if (other === this.homeIsland) continue;
+                        if (Math.abs((this.x + (this.vx > 0 ? 150 : -150)) - other.x) < 100 || 
+                            Math.abs((this.x + (this.vx > 0 ? 150 : -150)) - (other.x + other.w)) < 100) {
+                            if (Math.abs(other.y - this.y) < 100) {
+                                canJump = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (canJump) {
+                        this.vy = -400; 
+                        this.onGround = false;
+                    } else {
+                        this.vx *= -1; 
+                    }
+                }
+            }
+        }
+
+        this.attackCooldown -= dt;
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        this.onGround = false;
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                     const threshold = 10 + (this.vy * dt * 2);
+                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                         this.y = island.y - this.h;
+                         this.vy = 0;
+                         this.onGround = true;
+                         this.homeIsland = island;
+                     }
+                }
+            }
+        }
+
+        if (this.y > worldHeight) this.y = -50;
+        if (this.x > worldWidth) this.x = 0;
+        if (this.x < 0) this.x = worldWidth;
+    }
+}
+
+export class Projectile extends Entity {
+    constructor(x, y, angle, team) {
+        super(x, y, 32, 10, 'assets/sprites/projectile_arrow.png'); 
+        this.team = team;
+        const speed = 600; 
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.angle = angle; 
+        this.life = 3.0;
+        this.trailTimer = 0;
+    }
+
+    update(dt, spawnParticleCallback) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+
+        this.trailTimer -= dt;
+        if (this.trailTimer <= 0 && spawnParticleCallback) {
+            this.trailTimer = 0.05; 
+            spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
+        }
+    }
+
+    draw(ctx, camera) {
+        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        ctx.rotate(this.angle);
+        if (this.image && this.imageLoaded) {
+            ctx.drawImage(this.image, 0, 0, this.w, this.h);
+        } else {
+            ctx.fillStyle = 'yellow';
+            ctx.fillRect(0, 0, this.w, this.h);
+        }
+        ctx.restore();
+    }
+}
