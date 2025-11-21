@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Now with Sound Triggers! 🔊
+   Juice Edition: Chunkier Blood & Better Particle Physics!
 */
 
 export class Entity {
@@ -35,10 +35,10 @@ export class Entity {
     }
 }
 
-// --- PARTICLES ---
+// --- PARTICLES (NOW JUMBO SIZED!) ---
 export class Particle extends Entity {
-    constructor(x, y, color, speed, life) {
-        super(x, y, 5, 5, null);
+    constructor(x, y, color, speed, life, size = 5) {
+        super(x, y, size, size, null);
         this.color = color;
         const angle = Math.random() * Math.PI * 2;
         this.vx = Math.cos(angle) * speed;
@@ -48,7 +48,7 @@ export class Particle extends Entity {
     }
 
     update(dt) {
-        this.vy += 500 * dt; 
+        this.vy += 600 * dt; // Heavier gravity for blood chunks
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.life -= dt;
@@ -84,10 +84,8 @@ export class Player extends Entity {
         this.isGrounded = false;
         
         this.visitedIslands = new Set();
-        this.wasGrounded = false; // For landing sound logic
     }
 
-    // ADDED: audio param
     update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
         if (this.dead) return; 
 
@@ -107,13 +105,11 @@ export class Player extends Entity {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
-                // SOUND: JUMP
                 if(audio) audio.play('jump', 0.4, 0.1);
             } else if (resources && resources.air > 0) {
                 this.vy -= 1200 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
                 resources.air -= 30 * dt; 
-                // Optional: Could trigger a 'whoosh' here if we had one
             }
         }
         this.y += this.vy * dt;
@@ -135,12 +131,6 @@ export class Player extends Entity {
                 }
             }
         }
-
-        // SOUND: LANDING
-        if (!this.wasGrounded && this.isGrounded && audio) {
-            audio.play('land', 0.5, 0.1);
-        }
-        this.wasGrounded = this.isGrounded;
 
         // WRAPPING
         if (this.y > worldHeight + 100) this.y = -100; 
@@ -221,7 +211,6 @@ export class Island extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
 
-        // 1. DRAW ISLAND BODY
         if (this.tileset.complete && this.tileset.naturalWidth > 0) {
             const sliceW = Math.floor(this.tileset.width / 3);
             const sliceH = this.tileset.height;
@@ -238,7 +227,7 @@ export class Island extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // 2. DRAW STRUCTURES
+        // STRUCTURES SINK FIX
         if (this.hasTeepee && this.imgTeepee.complete) {
             ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 66, 96, 96);
         }
@@ -317,7 +306,6 @@ export class Warrior extends Villager {
         this.attackCooldown = 0;
     }
 
-    // ADDED: audio param
     update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio) {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
@@ -346,7 +334,6 @@ export class Warrior extends Villager {
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
                     spawnProjectileCallback(this.x, this.y, angle, this.team);
-                    // SOUND: SHOOT (Warrior)
                     if(audio) audio.play('shoot', 0.3, 0.2);
                 }
             } else {
