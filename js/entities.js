@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Polished: Planted Assets, Player Indicators, and wrapping logic.
+   Definitive Edition V2: Gravity Fixed, Assets Planted, Edge Detection Added.
 */
 
 export class Entity {
@@ -42,13 +42,13 @@ export class Particle extends Entity {
         this.color = color;
         const angle = Math.random() * Math.PI * 2;
         this.vx = Math.cos(angle) * speed;
-        this.vy = Math.sin(angle) * speed - 100; 
+        this.vy = Math.sin(angle) * speed - 50; 
         this.life = life;
         this.maxLife = life;
     }
 
     update(dt) {
-        this.vy += 800 * dt; 
+        this.vy += 400 * dt; // Lower gravity for particles too
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.life -= dt;
@@ -68,7 +68,6 @@ export class Particle extends Entity {
 // --- THE PLAYER ---
 export class Player extends Entity {
     constructor(x, y, team) {
-        // Reduced hitbox size for Shaman (was 64)
         super(x, y, 40, 40, `assets/sprites/player_${team}.png`);
         this.team = team; 
         this.vx = 0;
@@ -77,18 +76,17 @@ export class Player extends Entity {
         this.maxHp = 100;
         
         this.speed = 350; 
-        this.gravity = 900; 
-        this.jumpForce = -550; 
-        this.flyForce = -450; 
+        this.gravity = 500; // Reduced from 900 for floaty feel
+        this.jumpForce = -450; 
+        this.flyForce = -350; 
         this.friction = 0.85;
         this.isGrounded = false;
-        this.respawnTimer = 0; // For logic in main
         
         this.visitedIslands = new Set();
     }
 
     update(dt, input, resources, worldWidth, worldHeight, islands) {
-        if (this.dead) return; // Don't move if dead
+        if (this.dead) return; 
 
         // Horizontal
         if (input && input.keys) {
@@ -106,9 +104,9 @@ export class Player extends Entity {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
             } else if (resources && resources.air > 0) {
-                this.vy -= 1500 * dt; 
+                this.vy -= 1000 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
-                resources.air -= 40 * dt; 
+                resources.air -= 30 * dt; 
             }
         }
         this.y += this.vy * dt;
@@ -117,10 +115,13 @@ export class Player extends Entity {
         this.isGrounded = false;
         if (this.vy >= 0) { 
             for (let island of islands) {
+                // Horizontal Overlap
                 if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
+                    // Vertical Hit - Widened check to prevent tunneling
                     const feet = this.y + this.h;
-                    if (feet >= island.y && feet <= island.y + 30) {
-                         this.y = island.y - this.h + 4; 
+                    // If feet are near the surface (or slightly below due to fast fall)
+                    if (feet >= island.y - 10 && feet <= island.y + 40) {
+                         this.y = island.y - this.h + 4; // Sink 4px into grass
                          this.vy = 0;
                          this.isGrounded = true;
                          if (this.team === 'green') this.visitedIslands.add(island);
@@ -144,7 +145,7 @@ export class Player extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
         
-        // 1. Draw HUD Marker (Triangle) for Player only
+        // HUD Marker
         if (this.team === 'green') {
             ctx.fillStyle = '#00ff00';
             ctx.beginPath();
@@ -154,16 +155,15 @@ export class Player extends Entity {
             ctx.fill();
         }
 
-        // 2. Draw Sprite (Scaled nicely)
+        // Sprite
         if (this.image && this.imageLoaded) {
-            // Draw at 48x48 (Slightly bigger than hitbox 40x40)
             ctx.drawImage(this.image, screenX - 4, screenY - 4, 48, 48);
         } else {
             ctx.fillStyle = this.team === 'green' ? '#0f0' : '#00f';
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // 3. HP Bar
+        // HP Bar
         ctx.fillStyle = 'red';
         ctx.fillRect(screenX, screenY - 10, this.w, 4);
         ctx.fillStyle = '#0f0';
@@ -228,21 +228,20 @@ export class Island extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // 2. DRAW STRUCTURES (FIXED OFFSET)
-        // We push them down (increase Y) so the bottom of the sprite sits in the grass.
-        // Grass surface is roughly screenY.
+        // 2. DRAW STRUCTURES (PLANTED FIRMLY ON GROUND)
+        // Formula: screenY (top of island) - spriteHeight + SinkAmount (positive = down)
         
-        // Teepee: 96px tall. Draw at Y - 80 to sink 16px.
+        // Teepee: 96px tall. Draw at Y - 96 + 10 (sink 10px)
         if (this.hasTeepee && this.imgTeepee.complete) {
-            ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 80, 96, 96);
+            ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 86, 96, 96);
         }
 
-        // Fireplace: 64px tall. Draw at Y - 50 to sink 14px.
+        // Fireplace: 64px tall. Draw at Y - 64 + 10
         if (this.hasFireplace && this.imgFire.complete) {
-            ctx.drawImage(this.imgFire, screenX + (this.w/2) - 32, screenY - 50, 64, 64);
+            ctx.drawImage(this.imgFire, screenX + (this.w/2) - 32, screenY - 54, 64, 64);
         }
 
-        // Tree: 150px tall. Draw at Y - 135 to sink 15px.
+        // Tree: 150px tall. Draw at Y - 150 + 15 (sink 15px)
         if (this.hasTree && this.imgTree.complete) {
             ctx.drawImage(this.imgTree, screenX + this.w - 100, screenY - 135, 120, 150);
         }
@@ -260,33 +259,50 @@ export class Villager extends Entity {
         this.vx = 0;
         this.vy = 0; 
         this.stateTimer = 0;
+        this.onGround = false;
     }
 
     update(dt, islands, worldWidth, worldHeight) {
-        this.vy += 900 * dt; // Gravity
+        this.vy += 400 * dt; // Graceful gravity (was 900)
         
+        // Wander Logic with EDGE DETECTION
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) {
             this.stateTimer = Math.random() * 2 + 1;
             this.vx = (Math.random() - 0.5) * 80; 
         }
+
+        // EDGE DETECTION: Look ahead
+        if (this.onGround && this.homeIsland) {
+            const lookAhead = this.vx > 0 ? 10 : -10;
+            const nextX = this.x + this.w/2 + lookAhead;
+            // If next step is outside home island bounds, turn back!
+            if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                this.vx *= -1;
+            }
+        }
         
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
+        // Collision
+        this.onGround = false;
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                     if (this.y + this.h >= island.y && this.y + this.h <= island.y + 25) {
+                     // Widened collision band
+                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + 30) {
                          this.y = island.y - this.h;
                          this.vy = 0;
+                         this.onGround = true;
+                         this.homeIsland = island; // Update home island
                      }
                 }
             }
         }
         
         // Wrap
-        if (this.y > worldHeight) this.y = -50; // Wrap bottom to top
+        if (this.y > worldHeight) this.y = -50; 
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
     }
@@ -302,7 +318,7 @@ export class Warrior extends Villager {
     }
 
     update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight) {
-        this.vy += 900 * dt;
+        this.vy += 400 * dt; // Graceful gravity
 
         let target = null;
         let nearestDist = 1000; 
@@ -320,6 +336,7 @@ export class Warrior extends Villager {
         }
 
         if (target) {
+            // Ignore edge detection if charging an enemy
             if (nearestDist < 400) {
                 this.vx = 0; 
                 if (this.attackCooldown <= 0) {
@@ -334,10 +351,19 @@ export class Warrior extends Villager {
                 this.vx = dir * 90; 
             }
         } else {
+            // No enemy? Use standard wander + edge detection
             this.stateTimer -= dt;
             if (this.stateTimer <= 0) {
                 this.stateTimer = Math.random() * 2 + 1;
                 this.vx = (Math.random() - 0.5) * 60;
+            }
+            
+            if (this.onGround && this.homeIsland) {
+                const lookAhead = this.vx > 0 ? 10 : -10;
+                const nextX = this.x + this.w/2 + lookAhead;
+                if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                    this.vx *= -1;
+                }
             }
         }
 
@@ -346,12 +372,15 @@ export class Warrior extends Villager {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
+        this.onGround = false;
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                     if (this.y + this.h >= island.y && this.y + this.h <= island.y + 25) {
+                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + 30) {
                          this.y = island.y - this.h;
                          this.vy = 0;
+                         this.onGround = true;
+                         this.homeIsland = island;
                      }
                 }
             }
