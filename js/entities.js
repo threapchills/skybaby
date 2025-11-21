@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Juice Edition: Chunkier Blood & Better Particle Physics!
+   Definitive V5: Silent Warriors (Green & Blue) & Planted Assets.
 */
 
 export class Entity {
@@ -35,10 +35,10 @@ export class Entity {
     }
 }
 
-// --- PARTICLES (NOW JUMBO SIZED!) ---
+// --- PARTICLES ---
 export class Particle extends Entity {
-    constructor(x, y, color, speed, life, size = 5) {
-        super(x, y, size, size, null);
+    constructor(x, y, color, speed, life) {
+        super(x, y, 5, 5, null);
         this.color = color;
         const angle = Math.random() * Math.PI * 2;
         this.vx = Math.cos(angle) * speed;
@@ -48,7 +48,7 @@ export class Particle extends Entity {
     }
 
     update(dt) {
-        this.vy += 600 * dt; // Heavier gravity for blood chunks
+        this.vy += 500 * dt; 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.life -= dt;
@@ -86,7 +86,7 @@ export class Player extends Entity {
         this.visitedIslands = new Set();
     }
 
-    update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
+    update(dt, input, resources, worldWidth, worldHeight, islands) {
         if (this.dead) return; 
 
         // Horizontal
@@ -105,7 +105,6 @@ export class Player extends Entity {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
-                if(audio) audio.play('jump', 0.4, 0.1);
             } else if (resources && resources.air > 0) {
                 this.vy -= 1200 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
@@ -211,6 +210,7 @@ export class Island extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
 
+        // 1. DRAW ISLAND BODY
         if (this.tileset.complete && this.tileset.naturalWidth > 0) {
             const sliceW = Math.floor(this.tileset.width / 3);
             const sliceH = this.tileset.height;
@@ -227,7 +227,7 @@ export class Island extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // STRUCTURES SINK FIX
+        // 2. DRAW STRUCTURES (SUNK INTO GROUND)
         if (this.hasTeepee && this.imgTeepee.complete) {
             ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 66, 96, 96);
         }
@@ -334,7 +334,7 @@ export class Warrior extends Villager {
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
                     spawnProjectileCallback(this.x, this.y, angle, this.team);
-                    if(audio) audio.play('shoot', 0.3, 0.2);
+                    // SILENCE: Removed audio play call entirely for Warriors
                 }
             } else {
                 const dir = target.x > this.x ? 1 : -1;
