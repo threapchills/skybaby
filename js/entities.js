@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V9: Aggressive Blue Shaman & Weakened Player Regen.
+   Definitive V9: SURGICAL UPDATE - Tent Conversion!
 */
 
 export class Entity {
@@ -136,40 +136,18 @@ export class Player extends Entity {
         this.friction = 0.90; 
         this.isGrounded = false;
         this.hpRegenTimer = 0;
-        this.fireCooldown = 0; // For AI shooting
         
         this.visitedIslands = new Set();
     }
 
-    update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
+    update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
         if (this.dead) return; 
 
-        // HP REGEN (Nerfed: 2.0s delay)
         if (this.hp < this.maxHp) {
             this.hpRegenTimer += dt;
             if (this.hpRegenTimer > 2.0) { 
                 this.hp++;
                 this.hpRegenTimer = 0;
-            }
-        }
-
-        // AI LOGIC (If this is the Blue Shaman)
-        if (this.team === 'blue' && enemy) {
-            // Shoot at player if close!
-            this.fireCooldown -= dt;
-            const dx = enemy.x - this.x;
-            const dy = enemy.y - this.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            
-            if (dist < 500 && this.fireCooldown <= 0) {
-                // FIRE!
-                this.fireCooldown = 1.0; // 1 sec fire rate
-                const angle = Math.atan2(dy, dx);
-                // We need to return a "shoot" action to Main...
-                // Or we can cheat and return a projectile object directly?
-                // Better: Main loop handles this via callback or property check.
-                // Let's set a flag 'wantsToShoot'
-                this.shootRequest = { x: this.x, y: this.y, angle: angle };
             }
         }
 
@@ -214,7 +192,10 @@ export class Player extends Entity {
                          
                          if (this.team === 'green' && !this.visitedIslands.has(island) && resources) {
                             this.visitedIslands.add(island);
-                            // Earth logic moved to Main count
+                         }
+
+                         if (this.team === 'green' && Math.abs(this.vx) > 0.5 && resources) {
+                             resources.addPassiveEarth(10 * dt);
                          }
                     }
                 }
@@ -258,6 +239,12 @@ export class Player extends Entity {
     }
 }
 
+// --- ENEMY SHAMAN (Extends Player for Movement, Adds AI) ---
+// Simplified version for main.js to use directly, 
+// but here we can just use Player class and handle logic in Main/Entity
+// Wait, 'Player' is used for both Green and Blue shamans in main.js.
+// So the update() method above handles both. Perfect.
+
 export class Island extends Entity {
     constructor(x, y, w, h, team) {
         super(x, y, w, h, null);
@@ -267,7 +254,8 @@ export class Island extends Entity {
         this.tileset.src = 'assets/environment/island_tileset.png';
         
         this.imgTeepee = new Image();
-        this.imgTeepee.src = team === 'green' ? 'assets/environment/teepee_green.png' : 'assets/environment/teepee_blue.png';
+        // Default based on team, but will update dynamically!
+        this._updateTeepeeImage();
         
         this.imgFire = new Image();
         this.imgFire.src = 'assets/environment/fireplace_lit.png';
@@ -277,6 +265,7 @@ export class Island extends Entity {
 
         this.hasTeepee = true;
         this.hasFireplace = Math.random() > 0.4; 
+        this.conversionTimer = 0; // Prevent flickering
         
         this.trees = [];
         const numTrees = 1 + Math.floor(Math.random() * (w / 70)); 
@@ -293,11 +282,61 @@ export class Island extends Entity {
         this.friction = 0.90; 
     }
 
-    update(dt) {
+    _updateTeepeeImage() {
+        if (this.team === 'green') {
+            this.imgTeepee.src = 'assets/environment/teepee_green.png';
+        } else if (this.team === 'blue') {
+            this.imgTeepee.src = 'assets/environment/teepee_blue.png';
+        } else {
+            // Neutral? Maybe grey? For now use green as placeholder or random
+            // Actually neutral islands usually don't have tents in our spawn logic, but if they do:
+            this.imgTeepee.src = 'assets/environment/teepee_green.png'; // Default
+        }
+    }
+
+    // NEW: Conversion Logic
+    update(dt, player, enemyChief) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.vx *= this.friction;
         this.vy *= this.friction;
+
+        if (this.conversionTimer > 0) {
+            this.conversionTimer -= dt;
+            return;
+        }
+
+        // TENT CONVERSION
+        if (this.hasTeepee) {
+            const range = 150; // Distance to trigger flip
+            
+            // Player (Green) flips Blue -> Green
+            if (player && !player.dead) {
+                const dx = (this.x + this.w/2) - player.x;
+                const dy = (this.y + this.h/2) - player.y;
+                if (Math.sqrt(dx*dx + dy*dy) < range) {
+                    if (this.team !== 'green') {
+                        this.team = 'green';
+                        this._updateTeepeeImage();
+                        this.conversionTimer = 2.0; // Cooldown
+                        // TODO: Play a conversion sound?
+                    }
+                }
+            }
+
+            // Enemy (Blue) flips Green -> Blue
+            if (enemyChief && !enemyChief.dead) {
+                const dx = (this.x + this.w/2) - enemyChief.x;
+                const dy = (this.y + this.h/2) - enemyChief.y;
+                if (Math.sqrt(dx*dx + dy*dy) < range) {
+                    if (this.team !== 'blue') {
+                        this.team = 'blue';
+                        this._updateTeepeeImage();
+                        this.conversionTimer = 2.0;
+                    }
+                }
+            }
+        }
     }
 
     draw(ctx, camera) {
