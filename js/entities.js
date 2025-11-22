@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V9: SURGICAL UPDATE - Tent Conversion!
+   Definitive Fix: Tent Conversion & Silent Warriors.
 */
 
 export class Entity {
@@ -136,11 +136,12 @@ export class Player extends Entity {
         this.friction = 0.90; 
         this.isGrounded = false;
         this.hpRegenTimer = 0;
+        this.fireCooldown = 0; 
         
         this.visitedIslands = new Set();
     }
 
-    update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
+    update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
         if (this.dead) return; 
 
         if (this.hp < this.maxHp) {
@@ -148,6 +149,19 @@ export class Player extends Entity {
             if (this.hpRegenTimer > 2.0) { 
                 this.hp++;
                 this.hpRegenTimer = 0;
+            }
+        }
+
+        if (this.team === 'blue' && enemy) {
+            this.fireCooldown -= dt;
+            const dx = enemy.x - this.x;
+            const dy = enemy.y - this.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist < 500 && this.fireCooldown <= 0) {
+                this.fireCooldown = 1.0; 
+                const angle = Math.atan2(dy, dx);
+                this.shootRequest = { x: this.x, y: this.y, angle: angle };
             }
         }
 
@@ -192,6 +206,7 @@ export class Player extends Entity {
                          
                          if (this.team === 'green' && !this.visitedIslands.has(island) && resources) {
                             this.visitedIslands.add(island);
+                            resources.addEarth(20); 
                          }
 
                          if (this.team === 'green' && Math.abs(this.vx) > 0.5 && resources) {
@@ -239,12 +254,6 @@ export class Player extends Entity {
     }
 }
 
-// --- ENEMY SHAMAN (Extends Player for Movement, Adds AI) ---
-// Simplified version for main.js to use directly, 
-// but here we can just use Player class and handle logic in Main/Entity
-// Wait, 'Player' is used for both Green and Blue shamans in main.js.
-// So the update() method above handles both. Perfect.
-
 export class Island extends Entity {
     constructor(x, y, w, h, team) {
         super(x, y, w, h, null);
@@ -254,7 +263,6 @@ export class Island extends Entity {
         this.tileset.src = 'assets/environment/island_tileset.png';
         
         this.imgTeepee = new Image();
-        // Default based on team, but will update dynamically!
         this._updateTeepeeImage();
         
         this.imgFire = new Image();
@@ -265,7 +273,7 @@ export class Island extends Entity {
 
         this.hasTeepee = true;
         this.hasFireplace = Math.random() > 0.4; 
-        this.conversionTimer = 0; // Prevent flickering
+        this.conversionTimer = 0; 
         
         this.trees = [];
         const numTrees = 1 + Math.floor(Math.random() * (w / 70)); 
@@ -288,14 +296,11 @@ export class Island extends Entity {
         } else if (this.team === 'blue') {
             this.imgTeepee.src = 'assets/environment/teepee_blue.png';
         } else {
-            // Neutral? Maybe grey? For now use green as placeholder or random
-            // Actually neutral islands usually don't have tents in our spawn logic, but if they do:
-            this.imgTeepee.src = 'assets/environment/teepee_green.png'; // Default
+            this.imgTeepee.src = 'assets/environment/teepee_green.png'; // Default fallback
         }
     }
 
-    // NEW: Conversion Logic
-    update(dt, player, enemyChief) {
+    update(dt, player, enemyChief, audio) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.vx *= this.friction;
@@ -306,33 +311,45 @@ export class Island extends Entity {
             return;
         }
 
-        // TENT CONVERSION
+        // TENT CONVERSION LOGIC
         if (this.hasTeepee) {
-            const range = 150; // Distance to trigger flip
+            const range = 100; // Close proximity to tent center
             
-            // Player (Green) flips Blue -> Green
+            // 1. Check Player (Green) Capturing
             if (player && !player.dead) {
-                const dx = (this.x + this.w/2) - player.x;
-                const dy = (this.y + this.h/2) - player.y;
-                if (Math.sqrt(dx*dx + dy*dy) < range) {
+                // Tent is roughly at x+20
+                const tentX = this.x + 20 + 48; // +48 is half width of tent
+                const tentY = this.y - 20; // Roughly tent base
+                
+                const dx = (player.x + player.w/2) - tentX;
+                const dy = (player.y + player.h/2) - tentY;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+
+                if (dist < range) {
                     if (this.team !== 'green') {
                         this.team = 'green';
                         this._updateTeepeeImage();
-                        this.conversionTimer = 2.0; // Cooldown
-                        // TODO: Play a conversion sound?
+                        this.conversionTimer = 2.0;
+                        if (audio) audio.play('teepee', 0.6, 0.1);
                     }
                 }
             }
 
-            // Enemy (Blue) flips Green -> Blue
+            // 2. Check Enemy (Blue) Capturing
             if (enemyChief && !enemyChief.dead) {
-                const dx = (this.x + this.w/2) - enemyChief.x;
-                const dy = (this.y + this.h/2) - enemyChief.y;
-                if (Math.sqrt(dx*dx + dy*dy) < range) {
+                const tentX = this.x + 20 + 48;
+                const tentY = this.y - 20;
+                
+                const dx = (enemyChief.x + enemyChief.w/2) - tentX;
+                const dy = (enemyChief.y + enemyChief.h/2) - tentY;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+
+                if (dist < range) {
                     if (this.team !== 'blue') {
                         this.team = 'blue';
                         this._updateTeepeeImage();
                         this.conversionTimer = 2.0;
+                        if (audio) audio.play('teepee', 0.6, 0.1);
                     }
                 }
             }
@@ -473,6 +490,7 @@ export class Warrior extends Villager {
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
                     spawnProjectileCallback(this.x, this.y, angle, this.team);
+                    // SILENCE: No audio play here
                 }
             } else {
                 const dir = target.x > this.x ? 1 : -1;
