@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive Fix: Tent Conversion & Silent Warriors.
+   Definitive V12: Physics Fixed (No more zoomies), Silent Warriors, Tent Conversion.
 */
 
 export class Entity {
@@ -127,13 +127,15 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        this.speed = 200; 
-        this.acceleration = 25;
+        // --- PHYSICS TUNING (RESET TO SANITY) ---
+        this.maxSpeed = 250; // Cap horizontal speed
+        this.acceleration = 1500; // Force applied per second
+        this.friction = 0.85; // Velocity retention per frame
         this.gravity = 600; 
         this.maxFallSpeed = 800; 
         this.jumpForce = -500; 
         this.flyForce = -400; 
-        this.friction = 0.90; 
+        
         this.isGrounded = false;
         this.hpRegenTimer = 0;
         this.fireCooldown = 0; 
@@ -144,6 +146,7 @@ export class Player extends Entity {
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
         if (this.dead) return; 
 
+        // HP REGEN
         if (this.hp < this.maxHp) {
             this.hpRegenTimer += dt;
             if (this.hpRegenTimer > 2.0) { 
@@ -152,6 +155,7 @@ export class Player extends Entity {
             }
         }
 
+        // AI LOGIC (Blue Shaman)
         if (this.team === 'blue' && enemy) {
             this.fireCooldown -= dt;
             const dx = enemy.x - this.x;
@@ -165,20 +169,28 @@ export class Player extends Entity {
             }
         }
 
+        // --- PHYSICS CORE ---
+        // Apply Acceleration
         if (input && input.keys) {
-            if (input.keys.a) this.vx -= this.acceleration * dt * 10; 
-            if (input.keys.d) this.vx += this.acceleration * dt * 10;
+            if (input.keys.a) this.vx -= this.acceleration * dt; 
+            if (input.keys.d) this.vx += this.acceleration * dt;
         }
         
+        // Apply Friction
         this.vx *= this.friction; 
-        if (this.vx > 5) this.vx = 5; 
-        if (this.vx < -5) this.vx = -5;
 
-        this.x += this.vx * (this.speed / 5) * dt; 
+        // Cap Horizontal Speed
+        if (this.vx > this.maxSpeed) this.vx = this.maxSpeed;
+        if (this.vx < -this.maxSpeed) this.vx = -this.maxSpeed;
 
+        // Apply Velocity to Position
+        this.x += this.vx * dt; 
+
+        // Vertical Physics
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
+        // Jumping / Flying
         if (input && input.keys.space) {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
@@ -192,6 +204,7 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
+        // Collisions & Earth Gathering
         this.isGrounded = false;
         if (this.vy >= 0) { 
             for (let island of islands) {
@@ -209,7 +222,7 @@ export class Player extends Entity {
                             resources.addEarth(20); 
                          }
 
-                         if (this.team === 'green' && Math.abs(this.vx) > 0.5 && resources) {
+                         if (this.team === 'green' && Math.abs(this.vx) > 10 && resources) { // Threshold for walking
                              resources.addPassiveEarth(10 * dt);
                          }
                     }
@@ -217,6 +230,7 @@ export class Player extends Entity {
             }
         }
 
+        // Wrapping
         if (this.y > worldHeight + 100) this.y = -100; 
         if (this.y < -200) this.y = worldHeight; 
         if (this.x > worldWidth) this.x = 0; 
@@ -296,7 +310,7 @@ export class Island extends Entity {
         } else if (this.team === 'blue') {
             this.imgTeepee.src = 'assets/environment/teepee_blue.png';
         } else {
-            this.imgTeepee.src = 'assets/environment/teepee_green.png'; // Default fallback
+            this.imgTeepee.src = 'assets/environment/teepee_green.png'; 
         }
     }
 
@@ -311,40 +325,32 @@ export class Island extends Entity {
             return;
         }
 
-        // TENT CONVERSION LOGIC
         if (this.hasTeepee) {
-            const range = 100; // Close proximity to tent center
+            const range = 150; 
             
-            // 1. Check Player (Green) Capturing
+            // Player Conversion
             if (player && !player.dead) {
-                // Tent is roughly at x+20
-                const tentX = this.x + 20 + 48; // +48 is half width of tent
-                const tentY = this.y - 20; // Roughly tent base
-                
+                const tentX = this.x + 20 + 48; 
+                const tentY = this.y - 20; 
                 const dx = (player.x + player.w/2) - tentX;
                 const dy = (player.y + player.h/2) - tentY;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-
-                if (dist < range) {
+                if (Math.sqrt(dx*dx + dy*dy) < range) {
                     if (this.team !== 'green') {
                         this.team = 'green';
                         this._updateTeepeeImage();
-                        this.conversionTimer = 2.0;
-                        if (audio) audio.play('teepee', 0.6, 0.1);
+                        this.conversionTimer = 2.0; 
+                        if (audio) audio.play('teepee', 0.6, 0.1); 
                     }
                 }
             }
 
-            // 2. Check Enemy (Blue) Capturing
+            // Enemy Conversion
             if (enemyChief && !enemyChief.dead) {
                 const tentX = this.x + 20 + 48;
                 const tentY = this.y - 20;
-                
                 const dx = (enemyChief.x + enemyChief.w/2) - tentX;
                 const dy = (enemyChief.y + enemyChief.h/2) - tentY;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-
-                if (dist < range) {
+                if (Math.sqrt(dx*dx + dy*dy) < range) {
                     if (this.team !== 'blue') {
                         this.team = 'blue';
                         this._updateTeepeeImage();
@@ -490,7 +496,7 @@ export class Warrior extends Villager {
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
                     spawnProjectileCallback(this.x, this.y, angle, this.team);
-                    // SILENCE: No audio play here
+                    // SILENCE: No audio play call here
                 }
             } else {
                 const dir = target.x > this.x ? 1 : -1;
