@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Definitive V7: Weather, Day/Night, Pigs, & Camera Shake!
+   Definitive V8: Free Dragging, Aggressive Shaman, Draw Fixes.
 */
 
 import { InputHandler } from './input.js';
@@ -44,7 +44,7 @@ class Game {
         this.shake = 0;
         this.dayTime = 0; 
         this.windTimer = 0;
-        this.pulseTime = 0; // New pulse timer for islands
+        this.pulseTime = 0; 
 
         window.addEventListener('click', () => this._startAudio(), { once: true });
         window.addEventListener('keydown', () => this._startAudio(), { once: true });
@@ -134,7 +134,7 @@ class Game {
         this.dayTime += dt * 0.05; 
         if (this.dayTime > Math.PI * 2) this.dayTime = 0;
         
-        this.pulseTime += dt * 5; // Pulse speed
+        this.pulseTime += dt * 5; 
 
         this._updateWeather(dt);
 
@@ -148,7 +148,7 @@ class Game {
             }
         }
 
-        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio);
+        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief);
         this.world.update(this.player);
 
         if (!this.enemyChief.dead) {
@@ -156,11 +156,21 @@ class Game {
             const dy = this.player.y - this.enemyChief.y;
             this.enemyChief.x += (dx * 0.15) * dt;
             this.enemyChief.y += (dy * 0.15) * dt;
-            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null); 
+            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player); 
+            
+            // ENEMY SHAMAN SHOOTING CHECK
+            if (this.enemyChief.shootRequest) {
+                this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue'));
+                this.enemyChief.shootRequest = null; // Consumed
+            }
         }
 
         this._checkWinConditions(dt);
-        this.resources.earth = Math.max(1, this.player.visitedIslands.size);
+        
+        // STATS UPDATE
+        const islandCount = this.player.visitedIslands.size;
+        const villagerCount = this.villagers.filter(v => v.team === 'green').length;
+        this.resources.updateStats(islandCount, villagerCount);
         
         let nearWater = false;
         let nearFire = false;
@@ -197,9 +207,8 @@ class Game {
             this.windTimer = 0.15; 
             const cx = this.world.camera.x;
             const cy = this.world.camera.y;
-            const px = cx + Math.random() * 900; // Slightly wider spawn
+            const px = cx + Math.random() * 900; 
             const py = cy + Math.random() * 600;
-            // Thicker, more visible wind
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.5)', 250, 1.2, 3));
         }
     }
@@ -251,14 +260,15 @@ class Game {
                     my >= island.y && my <= island.y + island.h) {
                     
                     hit = true;
-                    this.selectedIsland = island; // Track selected for pulse FX
-                    if (this.resources.spendEarth(30 * dt)) {
-                        const dx = this.player.x - island.x;
-                        const dy = this.player.y - island.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy);
-                        island.vx += (dx / dist) * 1200 * dt;
-                        island.vy += (dy / dist) * 1200 * dt;
-                    }
+                    this.selectedIsland = island;
+                    
+                    // FREE PULLING
+                    const dx = this.player.x - island.x;
+                    const dy = this.player.y - island.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    island.vx += (dx / dist) * 1200 * dt;
+                    island.vy += (dy / dist) * 1200 * dt;
+                    
                     break;
                 }
             }
@@ -294,7 +304,7 @@ class Game {
             
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= 5;
+                this.player.hp -= 10; // DAMAGE BUFF (Was 5)
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
@@ -319,7 +329,7 @@ class Game {
 
             for (let pig of this.pigs) {
                 if (!pig.dead && this._checkHit(p, pig)) {
-                    this._spawnBlood(pig.x, pig.y, '#cc0000'); // RED BLOOD
+                    this._spawnBlood(pig.x, pig.y, '#cc0000'); 
                     pig.hp -= 10;
                     hitSomething = true;
                     if (pig.hp <= 0) {
@@ -405,6 +415,7 @@ class Game {
     }
 
     draw() {
+        // DAY NIGHT CYCLE
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
         let sx = 0, sy = 0;
@@ -418,22 +429,22 @@ class Game {
 
         this.world.draw(this.ctx);
         
-        // Pulse FX for selected island
+        // Draw ALL islands
+        // We draw the selected one LAST so it is on top
+        this.islands.forEach(i => {
+            if (i !== this.selectedIsland) i.draw(this.ctx, this.world.camera);
+        });
         if (this.selectedIsland) {
             const pulse = 1 + Math.sin(this.pulseTime) * 0.05;
             this.ctx.save();
-            this.ctx.translate(this.selectedIsland.x + this.selectedIsland.w/2 - this.world.camera.x, 
-                               this.selectedIsland.y + this.selectedIsland.h/2 - this.world.camera.y);
+            // Center pivot
+            const cx = this.selectedIsland.x + this.selectedIsland.w/2 - this.world.camera.x;
+            const cy = this.selectedIsland.y + this.selectedIsland.h/2 - this.world.camera.y;
+            this.ctx.translate(cx, cy);
             this.ctx.scale(pulse, pulse);
-            this.ctx.translate(-(this.selectedIsland.x + this.selectedIsland.w/2 - this.world.camera.x), 
-                               -(this.selectedIsland.y + this.selectedIsland.h/2 - this.world.camera.y));
+            this.ctx.translate(-cx, -cy);
             this.selectedIsland.draw(this.ctx, this.world.camera);
             this.ctx.restore();
-        } else {
-            // Draw other islands normally
-            this.islands.forEach(i => {
-                if (i !== this.selectedIsland) i.draw(this.ctx, this.world.camera);
-            });
         }
 
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
