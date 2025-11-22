@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V16: Crash-Proof Physics & Snappy Movement.
+   Definitive V17: Crash-Proof Collision & High Speed.
 */
 
 export class Entity {
@@ -77,7 +77,7 @@ export class Pig extends Entity {
     }
 
     update(dt, islands, worldWidth, worldHeight) {
-        this.vy += 800 * dt; // Gravity
+        this.vy += 800 * dt; 
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
         
         this.stateTimer -= dt;
@@ -86,7 +86,6 @@ export class Pig extends Entity {
             this.vx = (Math.random() - 0.5) * 40; 
         }
 
-        // EDGE DETECTION
         if (this.onGround && this.homeIsland) {
             const nextX = this.x + this.w/2 + (this.vx > 0 ? 10 : -10);
             if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
@@ -98,10 +97,8 @@ export class Pig extends Entity {
         this.y += this.vy * dt;
 
         this.onGround = false;
-        // Simple collision check - Loop through islands
         for (let island of islands) {
             if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                 // Check feet position
                  if (this.y + this.h >= island.y - 10 && this.y + this.h <= island.y + 20 && this.vy >= 0) {
                      this.y = island.y - this.h;
                      this.vy = 0;
@@ -126,10 +123,10 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // --- PHYSICS TUNED FOR SPEED ---
-        this.speed = 450; // Fast base speed
-        this.acceleration = 3000; // High accel
-        this.friction = 0.85; // Good stopping
+        // PHYSICS TUNING
+        this.speed = 450; // Max Speed
+        this.acceleration = 3000; // Acceleration
+        this.friction = 0.85; // Drag (when no input)
         this.gravity = 800; 
         this.maxFallSpeed = 1000; 
         this.jumpForce = -600; 
@@ -143,6 +140,7 @@ export class Player extends Entity {
 
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
         if (this.dead) return; 
+        if (dt <= 0) return; // Safety check
 
         // HP Regen
         if (this.hp < this.maxHp) {
@@ -176,7 +174,7 @@ export class Player extends Entity {
         // Friction only when not pressing keys
         if (!moving) {
             this.vx *= this.friction;
-            if (Math.abs(this.vx) < 10) this.vx = 0; // Snap to stop
+            if (Math.abs(this.vx) < 10) this.vx = 0; 
         }
 
         // Clamp Speed
@@ -203,21 +201,22 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
-        // --- ROBUST COLLISION (NO CRASH) ---
+        // SAFE COLLISION LOGIC
         this.isGrounded = false;
         
-        // Only check if falling downwards
+        // Only check floor if falling downwards
         if (this.vy >= 0) { 
             for (let island of islands) {
-                // Simple overlap check
+                // 1. Horizontal Overlap Check
                 if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
-                    // Check feet relative to surface
+                    // 2. Vertical Overlap Check (Feet vs Surface)
                     const feet = this.y + this.h;
                     const surface = island.y;
                     
-                    // Standard tolerance
-                    if (feet >= surface - 10 && feet <= surface + 20) {
-                         this.y = surface - this.h + 4; // Snap
+                    // If feet are within a reasonable range of the surface (top 30px)
+                    // OR if we fell through slightly due to high speed
+                    if (feet >= surface - 10 && feet <= surface + 30) {
+                         this.y = surface - this.h + 4; // Snap to top (sink slightly)
                          this.vy = 0;
                          this.isGrounded = true;
                          
@@ -331,7 +330,6 @@ export class Island extends Entity {
             return;
         }
 
-        // TENT CONVERSION
         if (this.hasTeepee) {
             const range = 150; 
             
