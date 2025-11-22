@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V16: CRASH FIX & SPEED UP.
+   Definitive V16: Crash-Proof Physics & Snappy Movement.
 */
 
 export class Entity {
@@ -86,19 +86,22 @@ export class Pig extends Entity {
             this.vx = (Math.random() - 0.5) * 40; 
         }
 
-        // Simple Edge Turn
+        // EDGE DETECTION
         if (this.onGround && this.homeIsland) {
-            if (this.x < this.homeIsland.x) this.vx = Math.abs(this.vx);
-            if (this.x > this.homeIsland.x + this.homeIsland.w) this.vx = -Math.abs(this.vx);
+            const nextX = this.x + this.w/2 + (this.vx > 0 ? 10 : -10);
+            if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                this.vx *= -1;
+            }
         }
         
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
         this.onGround = false;
-        // Simple Floor Check
+        // Simple collision check - Loop through islands
         for (let island of islands) {
             if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                 // Check feet position
                  if (this.y + this.h >= island.y - 10 && this.y + this.h <= island.y + 20 && this.vy >= 0) {
                      this.y = island.y - this.h;
                      this.vy = 0;
@@ -123,14 +126,14 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // --- SPEED BOOSTED ---
-        this.speed = 450; // Fast!
-        this.acceleration = 3000; // Instant response
+        // --- PHYSICS TUNED FOR SPEED ---
+        this.speed = 450; // Fast base speed
+        this.acceleration = 3000; // High accel
+        this.friction = 0.85; // Good stopping
         this.gravity = 800; 
         this.maxFallSpeed = 1000; 
         this.jumpForce = -600; 
         this.flyForce = -500; 
-        this.friction = 0.85; // Only applied when stopping
         
         this.isGrounded = false;
         this.hpRegenTimer = 0;
@@ -170,13 +173,13 @@ export class Player extends Entity {
             if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
         }
         
-        // Apply Friction ONLY if not moving input
+        // Friction only when not pressing keys
         if (!moving) {
             this.vx *= this.friction;
             if (Math.abs(this.vx) < 10) this.vx = 0; // Snap to stop
         }
 
-        // Clamp Horizontal Speed
+        // Clamp Speed
         if (this.vx > this.speed) this.vx = this.speed;
         if (this.vx < -this.speed) this.vx = -this.speed;
 
@@ -200,22 +203,21 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
-        // --- CRASH-PROOF COLLISION LOGIC ---
+        // --- ROBUST COLLISION (NO CRASH) ---
         this.isGrounded = false;
         
-        // Only check floor if falling downwards
+        // Only check if falling downwards
         if (this.vy >= 0) { 
             for (let island of islands) {
-                // Check Overlap X
+                // Simple overlap check
                 if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
-                    // Check Overlap Y (Feet vs Surface)
+                    // Check feet relative to surface
                     const feet = this.y + this.h;
                     const surface = island.y;
                     
-                    // Tolerance window: 10px above, 20px below
+                    // Standard tolerance
                     if (feet >= surface - 10 && feet <= surface + 20) {
-                         // Snap
-                         this.y = surface - this.h + 4; 
+                         this.y = surface - this.h + 4; // Snap
                          this.vy = 0;
                          this.isGrounded = true;
                          
@@ -329,6 +331,7 @@ export class Island extends Entity {
             return;
         }
 
+        // TENT CONVERSION
         if (this.hasTeepee) {
             const range = 150; 
             
