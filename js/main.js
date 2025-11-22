@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Definitive V10: Territory War Enabled.
+   Definitive V11: Tent Conversion Hooked Up!
 */
 
 import { InputHandler } from './input.js';
@@ -170,8 +170,8 @@ class Game {
         let nearWater = false;
         let nearFire = false;
         this.islands.forEach(island => {
-            // NEW: Pass player and enemy for conversion check
-            island.update(dt, this.player, this.enemyChief); 
+            // CONVERSION UPDATE
+            island.update(dt, this.player, this.enemyChief, this.audio); 
             
             const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
             if (dist < 400) {
@@ -295,6 +295,7 @@ class Game {
                     this.enemyChief.respawnTimer = 5.0;
                     this._spawnBlood(p.x, p.y, '#cc0000', 100); 
                     this.shake = 40; 
+                    this.audio.play('death', 0.8, 0.1); 
                 }
             }
             
@@ -307,6 +308,7 @@ class Game {
                     this.player.dead = true;
                     this.player.respawnTimer = 5.0;
                     this.shake = 40; 
+                    this.audio.play('death', 0.8, 0.1); 
                 }
             }
             
@@ -384,31 +386,30 @@ class Game {
     }
 
     _spawnVillagers() {
-        const totalPop = this.villagers.length;
-        const SOUL_CAP = 200;
-
-        if (totalPop >= SOUL_CAP) return; 
-
-        this.islands.forEach(island => {
-            if (Math.random() > 0.3) return; 
-
-            if (!island.hasTeepee) return;
-
-            if (island.team === 'green') {
+        const greenPop = this.villagers.filter(v => v.team === 'green').length;
+        const greenCap = this.resources.earth * 5; 
+        if (greenPop < greenCap) {
+            const myIslands = this.islands.filter(i => i.team === 'green' || this.player.visitedIslands.has(i));
+            if (myIslands.length > 0) {
+                const island = myIslands[Math.floor(Math.random() * myIslands.length)];
                 const unit = (Math.random() < 0.4) ? 
                     new Warrior(island.x + 50, island.y - 40, 'green') :
                     new Villager(island.x + 50, island.y - 40, 'green');
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
-            else if (island.team === 'blue') {
+        }
+        if (this.villagers.filter(v => v.team === 'blue').length < 30) {
+            const enemyIslands = this.islands.filter(i => i.team === 'blue');
+             if (enemyIslands.length > 0) {
+                const island = enemyIslands[Math.floor(Math.random() * enemyIslands.length)];
                 const unit = (Math.random() < 0.5) ? 
                     new Warrior(island.x + 50, island.y - 40, 'blue') :
                     new Villager(island.x + 50, island.y - 40, 'blue');
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
-        });
+        }
     }
 
     draw() {
