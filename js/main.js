@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Definitive V9: Soul Economy, Distributed Spawning, Final Polish.
+   Definitive V10: Territory War Enabled.
 */
 
 import { InputHandler } from './input.js';
@@ -165,17 +165,14 @@ class Game {
         }
 
         this._checkWinConditions(dt);
-        
-        // STATS UPDATE
-        const islandCount = this.player.visitedIslands.size;
-        const greenPop = this.villagers.filter(v => v.team === 'green').length;
-        const bluePop = this.villagers.filter(v => v.team === 'blue').length;
-        this.resources.updateStats(islandCount, greenPop, bluePop);
+        this.resources.earth = Math.max(1, this.player.visitedIslands.size);
         
         let nearWater = false;
         let nearFire = false;
         this.islands.forEach(island => {
-            island.update(dt); 
+            // NEW: Pass player and enemy for conversion check
+            island.update(dt, this.player, this.enemyChief); 
+            
             const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
             if (dist < 400) {
                 nearWater = true; 
@@ -189,9 +186,7 @@ class Game {
             this._handleHookshot(dt);
         }
 
-        // SPAWN LOGIC UPDATE
         this.spawnTimer += dt;
-        // Slower spawn rate (every 6 seconds)
         if (this.spawnTimer > 6.0) { 
             this._spawnVillagers(); 
             this.spawnTimer = 0;
@@ -264,9 +259,6 @@ class Game {
                     hit = true;
                     this.selectedIsland = island;
                     
-                    // Free pulling, but only valid if we have water? No, you said keep it infinite.
-                    // But logic said deplete Earth before?
-                    // Let's stick to: Dragging is FREE as per last instruction.
                     const dx = this.player.x - island.x;
                     const dy = this.player.y - island.y;
                     const dist = Math.sqrt(dx*dx + dy*dy);
@@ -395,20 +387,13 @@ class Game {
         const totalPop = this.villagers.length;
         const SOUL_CAP = 200;
 
-        // SOUL ECONOMY CHECK
         if (totalPop >= SOUL_CAP) return; 
 
-        // DISTRIBUTED SPAWNING: Iterate ALL islands
         this.islands.forEach(island => {
-            // Chance to spawn per island (keeps it random but distributed)
-            if (Math.random() > 0.3) return; // 70% chance to skip this tick per island
+            if (Math.random() > 0.3) return; 
 
-            // Must have a Hut (Teepee)
             if (!island.hasTeepee) return;
 
-            // Determine ownership logic (simple proximity or pre-assigned)
-            // For now, let's use the island's original team assignment
-            // Green Team
             if (island.team === 'green') {
                 const unit = (Math.random() < 0.4) ? 
                     new Warrior(island.x + 50, island.y - 40, 'green') :
@@ -416,7 +401,6 @@ class Game {
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
-            // Blue Team
             else if (island.team === 'blue') {
                 const unit = (Math.random() < 0.5) ? 
                     new Warrior(island.x + 50, island.y - 40, 'blue') :
