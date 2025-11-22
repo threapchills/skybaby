@@ -1,5 +1,6 @@
 /* THE HEART OF THE GAME
-   Definitive V19: Clean Main Loop & Graphics Juice.
+   Definitive V21: OPTIMIZATION, SHAKE FIX & SPAWN OVERHAUL.
+   Now with buttery smooth night cycle and real population mechanics.
 */
 
 import { InputHandler } from './input.js';
@@ -116,9 +117,11 @@ class Game {
     }
 
     loop(timestamp) {
-        const dt = (timestamp - this.lastTime) / 1000;
+        const dtRaw = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
-        if (dt > 0.1) { requestAnimationFrame((ts) => this.loop(ts)); return; }
+        
+        // FIX: Cap dt to prevent tunneling/falling through floors during lag spikes
+        const dt = Math.min(dtRaw, 0.05); 
 
         this.update(dt);
         this.draw();
@@ -128,7 +131,8 @@ class Game {
     update(dt) {
         if (this.gameOver) return;
 
-        if (this.shake > 0) this.shake -= 20 * dt;
+        // FIX: Decay shake slower so it's visible
+        if (this.shake > 0) this.shake -= 15 * dt; 
         if (this.shake < 0) this.shake = 0;
         
         this.dayTime += dt * 0.05; 
@@ -165,21 +169,31 @@ class Game {
         }
 
         this._checkWinConditions(dt);
-        this.resources.earth = Math.max(1, this.player.visitedIslands.size);
         
+        // STATS UPDATE
+        let greenTents = 0;
+        let greenPop = this.villagers.filter(v => v.team === 'green').length;
+        let blueTents = 0;
+        let bluePop = this.villagers.filter(v => v.team === 'blue').length;
+
         let nearWater = false;
         let nearFire = false;
         this.islands.forEach(island => {
-            // CONVERSION UPDATE
             island.update(dt, this.player, this.enemyChief, this.audio); 
             
+            if (island.team === 'green' && island.hasTeepee) greenTents++;
+            if (island.team === 'blue' && island.hasTeepee) blueTents++;
+
             const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
             if (dist < 400) {
                 nearWater = true; 
                 if (island.hasFireplace) nearFire = true;
             }
         });
+        
         this.resources.update(dt, isMoving, nearWater, nearFire);
+        // Pass specific counts to the UI
+        this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
             this._handleShooting(dt);
@@ -187,7 +201,7 @@ class Game {
         }
 
         this.spawnTimer += dt;
-        if (this.spawnTimer > 6.0) { 
+        if (this.spawnTimer > 3.0) { // FASTER SPAWN RATE
             this._spawnVillagers(); 
             this.spawnTimer = 0;
         }
@@ -201,15 +215,11 @@ class Game {
     _updateWeather(dt) {
         this.windTimer -= dt;
         if (this.windTimer <= 0) {
-            this.windTimer = 0.1; // Spawn frequency
+            this.windTimer = 0.1; 
             const cx = this.world.camera.x;
             const cy = this.world.camera.y;
-            
-            // Spawn "Wind" type particles!
-            // x, y, color, speed, life, size, type
             const px = cx + this.canvas.width + 50; 
             const py = cy + Math.random() * this.canvas.height;
-            
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random()*400, 2.0, 5, 'wind'));
         }
     }
@@ -219,6 +229,7 @@ class Game {
         const blueCount = this.villagers.filter(v => v.team === 'blue').length;
 
         if (this.player.dead) {
+            // Only lose if you have 0 villagers left
             if (greenCount > 0) {
                 this.player.respawnTimer -= dt;
                 if (this.player.respawnTimer <= 0) {
@@ -283,37 +294,36 @@ class Game {
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const p = this.projectiles[i];
             
-            // NEW: Spawn TRAIL particles (Type 'trail')
             p.update(dt, (x, y, color) => {
-                // x, y, color, speed, life, size, type
                 this.particles.push(new Particle(x, y, color, 0, 0.4, 3, 'trail'));
             });
             
             let hitSomething = false;
 
+            // BUFF: Projectiles now do more damage (15 instead of 5/10)
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= 5;
+                this.enemyChief.hp -= 15; // Buffed Damage
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.enemyChief.hp <= 0) {
                     this.enemyChief.dead = true;
-                    this.enemyChief.respawnTimer = 5.0;
+                    this.enemyChief.respawnTimer = 8.0; // Longer respawn penalty
                     this._spawnBlood(p.x, p.y, '#cc0000', 100); 
-                    this.shake = 40; // TRIGGER SHAKE
+                    this.shake = 80; // HARDER SHAKE
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
             
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= 10; 
+                this.player.hp -= 15; // Buffed Damage
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
                     this.player.dead = true;
-                    this.player.respawnTimer = 5.0;
-                    this.shake = 40; // TRIGGER SHAKE
+                    this.player.respawnTimer = 8.0;
+                    this.shake = 80; // HARDER SHAKE
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
@@ -321,7 +331,7 @@ class Game {
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
-                    v.hp -= 10;
+                    v.hp -= 25; // One or two shots to kill villagers
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
                     if (v.hp <= 0) {
@@ -334,7 +344,7 @@ class Game {
             for (let pig of this.pigs) {
                 if (!pig.dead && this._checkHit(p, pig)) {
                     this._spawnBlood(pig.x, pig.y, '#cc0000'); 
-                    pig.hp -= 10;
+                    pig.hp -= 20;
                     hitSomething = true;
                     if (pig.hp <= 0) {
                         pig.dead = true;
@@ -371,7 +381,6 @@ class Game {
     _spawnBlood(x, y, color='#cc0000', count=25) {
         for (let i=0; i<count; i++) {
             const size = 5 + Math.random() * 7;
-            // Normal particles (gravity applies)
             this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5, size, 'normal'));
         }
     }
@@ -392,66 +401,50 @@ class Game {
         }
     }
 
+    // NEW: Distributed Spawning Logic
     _spawnVillagers() {
-        const greenPop = this.villagers.filter(v => v.team === 'green').length;
-        const greenCap = this.resources.earth * 5; 
-        if (greenPop < greenCap) {
-            const myIslands = this.islands.filter(i => i.team === 'green' || this.player.visitedIslands.has(i));
-            if (myIslands.length > 0) {
-                const island = myIslands[Math.floor(Math.random() * myIslands.length)];
-                const unit = (Math.random() < 0.4) ? 
-                    new Warrior(island.x + 50, island.y - 40, 'green') :
-                    new Villager(island.x + 50, island.y - 40, 'green');
-                unit.homeIsland = island;
-                this.villagers.push(unit);
-            }
-        }
-        if (this.villagers.filter(v => v.team === 'blue').length < 30) {
-            const enemyIslands = this.islands.filter(i => i.team === 'blue');
-             if (enemyIslands.length > 0) {
-                const island = enemyIslands[Math.floor(Math.random() * enemyIslands.length)];
-                const unit = (Math.random() < 0.5) ? 
-                    new Warrior(island.x + 50, island.y - 40, 'blue') :
-                    new Villager(island.x + 50, island.y - 40, 'blue');
-                unit.homeIsland = island;
-                this.villagers.push(unit);
+        if (this.villagers.length >= 200) return; // Global Cap
+
+        // Shuffle islands to spawn randomly across the map, not just first ones
+        const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
+
+        for (let island of shuffledIslands) {
+            // Only spawn if island has a teepee and belongs to a team
+            if (island.hasTeepee && (island.team === 'green' || island.team === 'blue')) {
+                // 30% chance per island per spawn tick
+                if (Math.random() < 0.3) {
+                    const unit = (Math.random() < 0.4) ? 
+                        new Warrior(island.x + 50, island.y - 40, island.team) :
+                        new Villager(island.x + 50, island.y - 40, island.team);
+                    unit.homeIsland = island;
+                    this.villagers.push(unit);
+                    
+                    // Soft cap to prevent one tick from spawning 50 units
+                    if (this.villagers.length >= 200) break; 
+                }
             }
         }
     }
 
     draw() {
-        // 1. Clear Canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // 2. Day/Night Cycle Logic
-        // We calculate a hue rotation and a darkness factor based on the sine wave of dayTime
-        const sunHeight = Math.sin(this.dayTime); // 1 to -1
+        const sunHeight = Math.sin(this.dayTime); 
         let darkness = 0;
-        let hueShift = 0;
-
-        // Night starts when sunHeight goes negative
+        
         if (sunHeight < 0.2) {
-            darkness = Math.abs(sunHeight - 0.2) * 0.7; // Max darkness 0.7
-            if (darkness > 0.7) darkness = 0.7;
+            darkness = Math.abs(sunHeight - 0.2) * 0.8; 
+            if (darkness > 0.8) darkness = 0.8;
         }
         
-        // Hue shift: Turn slightly blue/purple at night
-        hueShift = darkness * 50;
-
-        // 3. Apply Filter (Surgical Graphics Upgrade!)
+        // FIX: Camera shake applied DIRECTLY via save/restore block
         this.ctx.save();
-        if (hueShift > 0) {
-            this.ctx.filter = `hue-rotate(${hueShift}deg)`;
-        }
-
-        // 4. Apply Camera Shake
         if (this.shake > 0) {
             const dx = (Math.random() - 0.5) * this.shake;
             const dy = (Math.random() - 0.5) * this.shake;
             this.ctx.translate(dx, dy);
         }
 
-        // 5. Draw World & Entities
         this.world.draw(this.ctx);
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
@@ -460,7 +453,6 @@ class Game {
         if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
         this.particles.forEach(p => p.draw(this.ctx, this.world.camera));
         
-        // 6. Draw Hookshot (Affected by shake)
         if (this.hookTarget) {
             this.ctx.strokeStyle = this.hookTarget.hit ? 'cyan' : 'gray';
             this.ctx.lineWidth = 2;
@@ -472,16 +464,14 @@ class Game {
             this.ctx.setLineDash([]);
         }
 
-        // 7. Restore Context (Removes Shake & Filters)
-        this.ctx.restore();
+        this.ctx.restore(); // End of Shake
 
-        // 8. Apply Night Overlay (Drawn on top of world, NOT affected by shake, affects everything)
+        // FIX: Night Cycle is now a simple overlay (FAST performance)
         if (darkness > 0.05) {
-            this.ctx.fillStyle = `rgba(0, 0, 20, ${darkness})`;
+            this.ctx.fillStyle = `rgba(0, 0, 30, ${darkness})`;
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
-        // 9. Draw UI (On top of everything)
         this.resources.drawUI(this.ctx);
         
         const mx = this.input.mouse.x;
