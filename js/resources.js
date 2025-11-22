@@ -1,12 +1,16 @@
 /* THE SPIRIT LEDGER (Resource Manager)
    Definitive V8: Soul Economy & Enemy Tracking.
+   FIXED: Now with Earth Pockets to prevent the Walking Crash!
 */
 
 export class ResourceManager {
     constructor() {
         this.islandsOwned = 1;
         this.villagerCount = 0;
-        this.enemyVillagerCount = 0; // NEW
+        this.enemyVillagerCount = 0; 
+        
+        // FIXED: We added the earth variable so the manager knows what dirt is!
+        this.earth = 0;
 
         this.air = 100;
         this.maxAir = 100;
@@ -21,6 +25,16 @@ export class ResourceManager {
         this.maxFire = 10;
         this.fireRegenTimer = 0; 
     }
+
+    // --- THE MISSING METHODS (The Fix!) ---
+    addEarth(amount) {
+        this.earth += amount;
+    }
+
+    addPassiveEarth(amount) {
+        this.earth += amount;
+    }
+    // --------------------------------------
 
     update(dt, isMoving, isNearWaterSource, isNearFireSource) {
         this.air += this.airRegenRate * dt;
@@ -75,6 +89,7 @@ export class ResourceManager {
         
         ctx.font = "14px 'Segoe UI', sans-serif";
         ctx.fillStyle = "#32CD32"; // Green text
+        // We can now display earth too if we want, but sticking to original design!
         ctx.fillText(`Islands: ${this.islandsOwned} | Tribe: ${this.villagerCount}`, startX, startY + 20);
         
         ctx.fillStyle = "#4169E1"; // Blue text
