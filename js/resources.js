@@ -1,15 +1,15 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Definitive V8: Soul Economy & Enemy Tracking.
-   FIXED: Now with Earth Pockets to prevent the Walking Crash!
+   Definitive V20: FIXED UI COUNTERS.
+   Now correctly tracks Tents and Villagers for both sides.
 */
 
 export class ResourceManager {
     constructor() {
-        this.islandsOwned = 1;
-        this.villagerCount = 0;
-        this.enemyVillagerCount = 0; 
+        this.greenTents = 1;
+        this.greenPop = 0;
+        this.blueTents = 1;
+        this.bluePop = 0;
         
-        // FIXED: We added the earth variable so the manager knows what dirt is!
         this.earth = 0;
 
         this.air = 100;
@@ -26,7 +26,6 @@ export class ResourceManager {
         this.fireRegenTimer = 0; 
     }
 
-    // --- THE MISSING METHODS (The Fix!) ---
     addEarth(amount) {
         this.earth += amount;
     }
@@ -34,7 +33,6 @@ export class ResourceManager {
     addPassiveEarth(amount) {
         this.earth += amount;
     }
-    // --------------------------------------
 
     update(dt, isMoving, isNearWaterSource, isNearFireSource) {
         this.air += this.airRegenRate * dt;
@@ -64,10 +62,12 @@ export class ResourceManager {
         return false;
     }
 
-    updateStats(islands, villagers, enemies) {
-        this.islandsOwned = islands;
-        this.villagerCount = villagers;
-        this.enemyVillagerCount = enemies;
+    // UPDATED: Receives all 4 stats
+    updateStats(gTents, gPop, bTents, bPop) {
+        this.greenTents = gTents;
+        this.greenPop = gPop;
+        this.blueTents = bTents;
+        this.bluePop = bPop;
     }
 
     drawUI(ctx) {
@@ -85,15 +85,17 @@ export class ResourceManager {
 
         // SCOREBOARD
         ctx.fillStyle = "#8B4513"; 
-        ctx.fillText(`EARTH DOMINION:`, startX, startY);
+        ctx.fillText(`WAR STATUS:`, startX, startY);
         
         ctx.font = "14px 'Segoe UI', sans-serif";
-        ctx.fillStyle = "#32CD32"; // Green text
-        // We can now display earth too if we want, but sticking to original design!
-        ctx.fillText(`Islands: ${this.islandsOwned} | Tribe: ${this.villagerCount}`, startX, startY + 20);
         
-        ctx.fillStyle = "#4169E1"; // Blue text
-        ctx.fillText(`Enemy Tribe: ${this.enemyVillagerCount}`, startX + 200, startY + 20);
+        // GREEN STATS
+        ctx.fillStyle = "#32CD32"; 
+        ctx.fillText(`YOU (Green): ${this.greenTents} Tents | ${this.greenPop} Tribe`, startX, startY + 20);
+        
+        // BLUE STATS
+        ctx.fillStyle = "#4169E1"; 
+        ctx.fillText(`ENEMY (Blue): ${this.blueTents} Tents | ${this.bluePop} Tribe`, startX + 250, startY + 20);
 
         // BARS
         let yPos = startY + padding + 25;
