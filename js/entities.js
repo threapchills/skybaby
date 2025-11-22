@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V8: SURGICAL FIX - Player Speed Tamed.
+   Definitive V9: Aggressive Blue Shaman & Weakened Player Regen.
 */
 
 export class Entity {
@@ -127,50 +127,63 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // --- PHYSICS SURGERY ---
-        this.speed = 200; // Capped Max Speed
-        this.acceleration = 25; // LOW acceleration for weight
+        this.speed = 200; 
+        this.acceleration = 25;
         this.gravity = 600; 
         this.maxFallSpeed = 800; 
         this.jumpForce = -500; 
         this.flyForce = -400; 
-        this.friction = 0.90; // Higher friction = smoother glide to stop
+        this.friction = 0.90; 
         this.isGrounded = false;
         this.hpRegenTimer = 0;
+        this.fireCooldown = 0; // For AI shooting
         
         this.visitedIslands = new Set();
     }
 
-    update(dt, input, resources, worldWidth, worldHeight, islands, audio) {
+    update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
         if (this.dead) return; 
 
-        // HP Regen
+        // HP REGEN (Nerfed: 2.0s delay)
         if (this.hp < this.maxHp) {
             this.hpRegenTimer += dt;
-            if (this.hpRegenTimer > 0.5) { 
+            if (this.hpRegenTimer > 2.0) { 
                 this.hp++;
                 this.hpRegenTimer = 0;
             }
         }
 
-        // MOVEMENT PHYSICS
+        // AI LOGIC (If this is the Blue Shaman)
+        if (this.team === 'blue' && enemy) {
+            // Shoot at player if close!
+            this.fireCooldown -= dt;
+            const dx = enemy.x - this.x;
+            const dy = enemy.y - this.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist < 500 && this.fireCooldown <= 0) {
+                // FIRE!
+                this.fireCooldown = 1.0; // 1 sec fire rate
+                const angle = Math.atan2(dy, dx);
+                // We need to return a "shoot" action to Main...
+                // Or we can cheat and return a projectile object directly?
+                // Better: Main loop handles this via callback or property check.
+                // Let's set a flag 'wantsToShoot'
+                this.shootRequest = { x: this.x, y: this.y, angle: angle };
+            }
+        }
+
         if (input && input.keys) {
-            if (input.keys.a) this.vx -= this.acceleration * dt * 10; // Scale by dt
+            if (input.keys.a) this.vx -= this.acceleration * dt * 10; 
             if (input.keys.d) this.vx += this.acceleration * dt * 10;
         }
         
-        // Apply Friction
         this.vx *= this.friction; 
-
-        // CLAMP HORIZONTAL SPEED
-        // This prevents the "Zoomies"
-        if (this.vx > 5) this.vx = 5; // Max speed in arbitrary units
+        if (this.vx > 5) this.vx = 5; 
         if (this.vx < -5) this.vx = -5;
 
-        // Apply to Position (Scale by speed multiplier)
-        this.x += this.vx * (this.speed / 5) * dt; // Normalized
+        this.x += this.vx * (this.speed / 5) * dt; 
 
-        // Vertical
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
@@ -187,7 +200,6 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
-        // Collisions
         this.isGrounded = false;
         if (this.vy >= 0) { 
             for (let island of islands) {
@@ -202,12 +214,7 @@ export class Player extends Entity {
                          
                          if (this.team === 'green' && !this.visitedIslands.has(island) && resources) {
                             this.visitedIslands.add(island);
-                            resources.addEarth(20); 
-                         }
-
-                         // Earth Walk Regen
-                         if (this.team === 'green' && Math.abs(this.vx) > 0.5 && resources) {
-                             resources.addPassiveEarth(10 * dt);
+                            // Earth logic moved to Main count
                          }
                     }
                 }
