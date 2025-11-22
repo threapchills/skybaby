@@ -1,6 +1,6 @@
 /* THE HEART OF THE GAME
-   Definitive V21: OPTIMIZATION, SHAKE FIX & SPAWN OVERHAUL.
-   Now with buttery smooth night cycle and real population mechanics.
+   Definitive V22: THE SHAMAN'S CURSE & THE PIG UPDATE.
+   Now with lethal enemy chiefs and porcine companions!
 */
 
 import { InputHandler } from './input.js';
@@ -103,6 +103,7 @@ class Game {
                     const newIsland = new Island(rx, ry, rw, rh, team);
                     this.islands.push(newIsland);
                     
+                    // Initial pig population
                     if (Math.random() > 0.5) {
                         this.pigs.push(new Pig(rx + rw/2, ry - 50));
                     }
@@ -120,7 +121,7 @@ class Game {
         const dtRaw = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
         
-        // FIX: Cap dt to prevent tunneling/falling through floors during lag spikes
+        // Cap dt to prevent tunneling/falling through floors during lag spikes
         const dt = Math.min(dtRaw, 0.05); 
 
         this.update(dt);
@@ -131,7 +132,6 @@ class Game {
     update(dt) {
         if (this.gameOver) return;
 
-        // FIX: Decay shake slower so it's visible
         if (this.shake > 0) this.shake -= 15 * dt; 
         if (this.shake < 0) this.shake = 0;
         
@@ -166,6 +166,27 @@ class Game {
                 this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue'));
                 this.enemyChief.shootRequest = null; 
             }
+
+            // --- NEW: ENEMY SHAMAN "TOUCH OF DEATH" ---
+            // If the enemy chief touches a green villager/warrior, they die instantly.
+            this.villagers.forEach(v => {
+                if (v.team === 'green' && !v.dead) {
+                    // AABB Collision Check
+                    if (this.enemyChief.x < v.x + v.w &&
+                        this.enemyChief.x + this.enemyChief.w > v.x &&
+                        this.enemyChief.y < v.y + v.h &&
+                        this.enemyChief.y + this.enemyChief.h > v.y) {
+                        
+                        v.hp = 0;
+                        v.dead = true;
+                        this._spawnBlood(v.x, v.y, '#00ff00', 40); // Massive splat
+                        this.audio.play('hit', 0.5, 0.1);
+                        // Just a little shake for impact
+                        this.shake = Math.max(this.shake, 10); 
+                    }
+                }
+            });
+            // -------------------------------------------
         }
 
         this._checkWinConditions(dt);
@@ -192,7 +213,6 @@ class Game {
         });
         
         this.resources.update(dt, isMoving, nearWater, nearFire);
-        // Pass specific counts to the UI
         this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
@@ -201,7 +221,7 @@ class Game {
         }
 
         this.spawnTimer += dt;
-        if (this.spawnTimer > 3.0) { // FASTER SPAWN RATE
+        if (this.spawnTimer > 3.0) { 
             this._spawnVillagers(); 
             this.spawnTimer = 0;
         }
@@ -229,7 +249,6 @@ class Game {
         const blueCount = this.villagers.filter(v => v.team === 'blue').length;
 
         if (this.player.dead) {
-            // Only lose if you have 0 villagers left
             if (greenCount > 0) {
                 this.player.respawnTimer -= dt;
                 if (this.player.respawnTimer <= 0) {
@@ -300,30 +319,29 @@ class Game {
             
             let hitSomething = false;
 
-            // BUFF: Projectiles now do more damage (15 instead of 5/10)
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= 15; // Buffed Damage
+                this.enemyChief.hp -= 15; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.enemyChief.hp <= 0) {
                     this.enemyChief.dead = true;
-                    this.enemyChief.respawnTimer = 8.0; // Longer respawn penalty
+                    this.enemyChief.respawnTimer = 8.0; 
                     this._spawnBlood(p.x, p.y, '#cc0000', 100); 
-                    this.shake = 80; // HARDER SHAKE
+                    this.shake = 80; 
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
             
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= 15; // Buffed Damage
+                this.player.hp -= 15; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
                     this.player.dead = true;
                     this.player.respawnTimer = 8.0;
-                    this.shake = 80; // HARDER SHAKE
+                    this.shake = 80; 
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
@@ -331,7 +349,7 @@ class Game {
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
-                    v.hp -= 25; // One or two shots to kill villagers
+                    v.hp -= 25; 
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
                     if (v.hp <= 0) {
@@ -385,41 +403,27 @@ class Game {
         }
     }
 
-    _handleShooting(dt) {
-        if (this.input.mouse.leftDown) {
-            if (!this.player.fireCooldown) this.player.fireCooldown = 0;
-            this.player.fireCooldown -= dt;
-
-            if (this.player.fireCooldown <= 0 && this.resources.spendFire()) {
-                this.player.fireCooldown = 0.2; 
-                const mx = this.input.mouse.x + this.world.camera.x;
-                const my = this.input.mouse.y + this.world.camera.y;
-                const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
-                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green'));
-                this.audio.play('shoot', 0.4, 0.0);
-            }
-        }
-    }
-
-    // NEW: Distributed Spawning Logic
     _spawnVillagers() {
-        if (this.villagers.length >= 200) return; // Global Cap
+        if (this.villagers.length >= 200) return; 
 
-        // Shuffle islands to spawn randomly across the map, not just first ones
         const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
 
         for (let island of shuffledIslands) {
-            // Only spawn if island has a teepee and belongs to a team
             if (island.hasTeepee && (island.team === 'green' || island.team === 'blue')) {
-                // 30% chance per island per spawn tick
                 if (Math.random() < 0.3) {
                     const unit = (Math.random() < 0.4) ? 
                         new Warrior(island.x + 50, island.y - 40, island.team) :
                         new Villager(island.x + 50, island.y - 40, island.team);
                     unit.homeIsland = island;
                     this.villagers.push(unit);
+
+                    // --- NEW: PIG SPAWN CHANCE ---
+                    // ~16% chance to spawn a pig alongside a villager (approx 1 in 6)
+                    if (Math.random() < 0.16) {
+                        this.pigs.push(new Pig(island.x + 50, island.y - 40));
+                    }
+                    // ------------------------------
                     
-                    // Soft cap to prevent one tick from spawning 50 units
                     if (this.villagers.length >= 200) break; 
                 }
             }
@@ -437,7 +441,6 @@ class Game {
             if (darkness > 0.8) darkness = 0.8;
         }
         
-        // FIX: Camera shake applied DIRECTLY via save/restore block
         this.ctx.save();
         if (this.shake > 0) {
             const dx = (Math.random() - 0.5) * this.shake;
@@ -464,9 +467,8 @@ class Game {
             this.ctx.setLineDash([]);
         }
 
-        this.ctx.restore(); // End of Shake
+        this.ctx.restore(); 
 
-        // FIX: Night Cycle is now a simple overlay (FAST performance)
         if (darkness > 0.05) {
             this.ctx.fillStyle = `rgba(0, 0, 30, ${darkness})`;
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
