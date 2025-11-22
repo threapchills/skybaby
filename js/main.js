@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Definitive V11: Tent Conversion Hooked Up!
+   Definitive V18: Clean Main Loop.
 */
 
 import { InputHandler } from './input.js';
@@ -414,35 +414,10 @@ class Game {
 
     draw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        let sx = 0, sy = 0;
-        if (this.shake > 0) {
-            sx = (Math.random() - 0.5) * this.shake;
-            sy = (Math.random() - 0.5) * this.shake;
-        }
-        
-        this.ctx.save();
-        this.ctx.translate(sx, sy);
 
         this.world.draw(this.ctx);
-        
-        this.islands.forEach(i => {
-            if (i !== this.selectedIsland) i.draw(this.ctx, this.world.camera);
-        });
-        if (this.selectedIsland) {
-            const pulse = 1 + Math.sin(this.pulseTime) * 0.05;
-            this.ctx.save();
-            const cx = this.selectedIsland.x + this.selectedIsland.w/2 - this.world.camera.x;
-            const cy = this.selectedIsland.y + this.selectedIsland.h/2 - this.world.camera.y;
-            this.ctx.translate(cx, cy);
-            this.ctx.scale(pulse, pulse);
-            this.ctx.translate(-cx, -cy);
-            this.selectedIsland.draw(this.ctx, this.world.camera);
-            this.ctx.restore();
-        }
-
+        this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
-        this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
         this.projectiles.forEach(p => p.draw(this.ctx, this.world.camera));
         if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
         if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
@@ -458,15 +433,6 @@ class Game {
             this.ctx.stroke();
             this.ctx.setLineDash([]);
         }
-        
-        const sunHeight = Math.sin(this.dayTime); 
-        if (sunHeight < 0) {
-            const darkness = Math.abs(sunHeight) * 0.75; 
-            this.ctx.fillStyle = `rgba(0, 0, 50, ${darkness})`;
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        }
-
-        this.ctx.restore(); 
 
         this.resources.drawUI(this.ctx);
         
