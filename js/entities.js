@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V17: Crash-Proof Collision & High Speed.
+   Definitive V18: CRASH-PROOF PHYSICS REWRITE.
 */
 
 export class Entity {
@@ -86,11 +86,10 @@ export class Pig extends Entity {
             this.vx = (Math.random() - 0.5) * 40; 
         }
 
+        // Simple Edge Turn
         if (this.onGround && this.homeIsland) {
-            const nextX = this.x + this.w/2 + (this.vx > 0 ? 10 : -10);
-            if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                this.vx *= -1;
-            }
+            if (this.x < this.homeIsland.x) this.vx = Math.abs(this.vx);
+            if (this.x > this.homeIsland.x + this.homeIsland.w) this.vx = -Math.abs(this.vx);
         }
         
         this.x += this.vx * dt;
@@ -98,13 +97,17 @@ export class Pig extends Entity {
 
         this.onGround = false;
         for (let island of islands) {
-            if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                 if (this.y + this.h >= island.y - 10 && this.y + this.h <= island.y + 20 && this.vy >= 0) {
-                     this.y = island.y - this.h;
-                     this.vy = 0;
-                     this.onGround = true;
-                     this.homeIsland = island; 
-                 }
+            // Simple AABB Collision
+            if (this.x < island.x + island.w && this.x + this.w > island.x &&
+                this.y < island.y + island.h && this.y + this.h > island.y) {
+                
+                // Resolve Y (Landing)
+                if (this.vy > 0 && this.y + this.h < island.y + 30) {
+                    this.y = island.y - this.h;
+                    this.vy = 0;
+                    this.onGround = true;
+                    this.homeIsland = island;
+                }
             }
         }
         
@@ -123,10 +126,10 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // PHYSICS TUNING
-        this.speed = 450; // Max Speed
-        this.acceleration = 3000; // Acceleration
-        this.friction = 0.85; // Drag (when no input)
+        // --- PHYSICS REBOOT ---
+        this.speed = 450; // Fast Max Speed
+        this.acceleration = 3000; // Instant Accel
+        this.friction = 0.85; 
         this.gravity = 800; 
         this.maxFallSpeed = 1000; 
         this.jumpForce = -600; 
@@ -140,7 +143,7 @@ export class Player extends Entity {
 
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
         if (this.dead) return; 
-        if (dt <= 0) return; // Safety check
+        if (dt <= 0) return;
 
         // HP Regen
         if (this.hp < this.maxHp) {
@@ -201,35 +204,29 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
-        // SAFE COLLISION LOGIC
+        // --- CRASH-PROOF COLLISION ---
         this.isGrounded = false;
         
-        // Only check floor if falling downwards
-        if (this.vy >= 0) { 
-            for (let island of islands) {
-                // 1. Horizontal Overlap Check
-                if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
-                    // 2. Vertical Overlap Check (Feet vs Surface)
-                    const feet = this.y + this.h;
-                    const surface = island.y;
+        // Standard AABB check
+        for (let island of islands) {
+            if (this.x < island.x + island.w && this.x + this.w > island.x &&
+                this.y < island.y + island.h && this.y + this.h > island.y) {
+                
+                // If falling down into the top of the island
+                if (this.vy >= 0 && this.y + this.h < island.y + 30) {
+                    this.y = island.y - this.h + 4; // Snap to top
+                    this.vy = 0;
+                    this.isGrounded = true;
                     
-                    // If feet are within a reasonable range of the surface (top 30px)
-                    // OR if we fell through slightly due to high speed
-                    if (feet >= surface - 10 && feet <= surface + 30) {
-                         this.y = surface - this.h + 4; // Snap to top (sink slightly)
-                         this.vy = 0;
-                         this.isGrounded = true;
-                         
-                         // Resources
-                         if (this.team === 'green' && resources) {
-                            if (!this.visitedIslands.has(island)) {
-                                this.visitedIslands.add(island);
-                                resources.addEarth(20); 
-                            }
-                            if (Math.abs(this.vx) > 10) { 
-                                resources.addPassiveEarth(10 * dt);
-                            }
-                         }
+                    // Resources
+                    if (this.team === 'green' && resources) {
+                       if (!this.visitedIslands.has(island)) {
+                           this.visitedIslands.add(island);
+                           resources.addEarth(20); 
+                       }
+                       if (Math.abs(this.vx) > 10) { 
+                           resources.addPassiveEarth(10 * dt);
+                       }
                     }
                 }
             }
