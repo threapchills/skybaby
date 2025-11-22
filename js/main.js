@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Definitive V18: Clean Main Loop.
+   Definitive V19: Clean Main Loop & Graphics Juice.
 */
 
 import { InputHandler } from './input.js';
@@ -201,12 +201,16 @@ class Game {
     _updateWeather(dt) {
         this.windTimer -= dt;
         if (this.windTimer <= 0) {
-            this.windTimer = 0.15; 
+            this.windTimer = 0.1; // Spawn frequency
             const cx = this.world.camera.x;
             const cy = this.world.camera.y;
-            const px = cx + Math.random() * 900; 
-            const py = cy + Math.random() * 600;
-            this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.5)', 250, 1.2, 3));
+            
+            // Spawn "Wind" type particles!
+            // x, y, color, speed, life, size, type
+            const px = cx + this.canvas.width + 50; 
+            const py = cy + Math.random() * this.canvas.height;
+            
+            this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random()*400, 2.0, 5, 'wind'));
         }
     }
 
@@ -279,8 +283,10 @@ class Game {
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const p = this.projectiles[i];
             
+            // NEW: Spawn TRAIL particles (Type 'trail')
             p.update(dt, (x, y, color) => {
-                this.particles.push(new Particle(x, y, color, 0, 0.5, 2));
+                // x, y, color, speed, life, size, type
+                this.particles.push(new Particle(x, y, color, 0, 0.4, 3, 'trail'));
             });
             
             let hitSomething = false;
@@ -294,7 +300,7 @@ class Game {
                     this.enemyChief.dead = true;
                     this.enemyChief.respawnTimer = 5.0;
                     this._spawnBlood(p.x, p.y, '#cc0000', 100); 
-                    this.shake = 40; 
+                    this.shake = 40; // TRIGGER SHAKE
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
@@ -307,7 +313,7 @@ class Game {
                 if (this.player.hp <= 0) {
                     this.player.dead = true;
                     this.player.respawnTimer = 5.0;
-                    this.shake = 40; 
+                    this.shake = 40; // TRIGGER SHAKE
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
@@ -365,7 +371,8 @@ class Game {
     _spawnBlood(x, y, color='#cc0000', count=25) {
         for (let i=0; i<count; i++) {
             const size = 5 + Math.random() * 7;
-            this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5, size));
+            // Normal particles (gravity applies)
+            this.particles.push(new Particle(x, y, color, Math.random()*150, 0.5 + Math.random()*0.5, size, 'normal'));
         }
     }
 
@@ -413,8 +420,38 @@ class Game {
     }
 
     draw() {
+        // 1. Clear Canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // 2. Day/Night Cycle Logic
+        // We calculate a hue rotation and a darkness factor based on the sine wave of dayTime
+        const sunHeight = Math.sin(this.dayTime); // 1 to -1
+        let darkness = 0;
+        let hueShift = 0;
+
+        // Night starts when sunHeight goes negative
+        if (sunHeight < 0.2) {
+            darkness = Math.abs(sunHeight - 0.2) * 0.7; // Max darkness 0.7
+            if (darkness > 0.7) darkness = 0.7;
+        }
+        
+        // Hue shift: Turn slightly blue/purple at night
+        hueShift = darkness * 50;
+
+        // 3. Apply Filter (Surgical Graphics Upgrade!)
+        this.ctx.save();
+        if (hueShift > 0) {
+            this.ctx.filter = `hue-rotate(${hueShift}deg)`;
+        }
+
+        // 4. Apply Camera Shake
+        if (this.shake > 0) {
+            const dx = (Math.random() - 0.5) * this.shake;
+            const dy = (Math.random() - 0.5) * this.shake;
+            this.ctx.translate(dx, dy);
+        }
+
+        // 5. Draw World & Entities
         this.world.draw(this.ctx);
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
@@ -422,7 +459,8 @@ class Game {
         if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
         if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
         this.particles.forEach(p => p.draw(this.ctx, this.world.camera));
-
+        
+        // 6. Draw Hookshot (Affected by shake)
         if (this.hookTarget) {
             this.ctx.strokeStyle = this.hookTarget.hit ? 'cyan' : 'gray';
             this.ctx.lineWidth = 2;
@@ -434,6 +472,16 @@ class Game {
             this.ctx.setLineDash([]);
         }
 
+        // 7. Restore Context (Removes Shake & Filters)
+        this.ctx.restore();
+
+        // 8. Apply Night Overlay (Drawn on top of world, NOT affected by shake, affects everything)
+        if (darkness > 0.05) {
+            this.ctx.fillStyle = `rgba(0, 0, 20, ${darkness})`;
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        // 9. Draw UI (On top of everything)
         this.resources.drawUI(this.ctx);
         
         const mx = this.input.mouse.x;
