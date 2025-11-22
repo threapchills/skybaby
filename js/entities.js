@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V12: Physics Fixed (No more zoomies), Silent Warriors, Tent Conversion.
+   Definitive V13: ROBUST PHYSICS & SNAPPY MOVEMENT.
 */
 
 export class Entity {
@@ -77,7 +77,7 @@ export class Pig extends Entity {
     }
 
     update(dt, islands, worldWidth, worldHeight) {
-        this.vy += 500 * dt; 
+        this.vy += 800 * dt; // Gravity
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
         
         this.stateTimer -= dt;
@@ -86,9 +86,9 @@ export class Pig extends Entity {
             this.vx = (Math.random() - 0.5) * 40; 
         }
 
+        // EDGE DETECTION
         if (this.onGround && this.homeIsland) {
-            const lookAhead = this.vx > 0 ? 10 : -10;
-            const nextX = this.x + this.w/2 + lookAhead;
+            const nextX = this.x + this.w/2 + (this.vx > 0 ? 10 : -10);
             if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
                 this.vx *= -1;
             }
@@ -100,9 +100,10 @@ export class Pig extends Entity {
         this.onGround = false;
         if (this.vy >= 0) {
             for (let island of islands) {
-                if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                     const threshold = 10 + (this.vy * dt * 2);
-                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                // Precise platform check
+                if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
+                     // Check if feet are just above or slightly inside platform top
+                     if (this.y + this.h >= island.y - 10 && this.y + this.h <= island.y + 20) {
                          this.y = island.y - this.h;
                          this.vy = 0;
                          this.onGround = true;
@@ -127,26 +128,25 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // --- PHYSICS TUNING (RESET TO SANITY) ---
-        this.maxSpeed = 250; // Cap horizontal speed
-        this.acceleration = 1500; // Force applied per second
-        this.friction = 0.85; // Velocity retention per frame
-        this.gravity = 600; 
-        this.maxFallSpeed = 800; 
-        this.jumpForce = -500; 
-        this.flyForce = -400; 
+        // --- PHYSICS TUNED FOR RESPONSIVENESS ---
+        this.speed = 300; // Faster base speed
+        this.acceleration = 2000; // High accel for snappy start
+        this.friction = 0.85; // Good stopping power
+        this.gravity = 800; // Heavy gravity
+        this.maxFallSpeed = 900; 
+        this.jumpForce = -550; 
+        this.flyForce = -450; 
         
         this.isGrounded = false;
         this.hpRegenTimer = 0;
         this.fireCooldown = 0; 
-        
         this.visitedIslands = new Set();
     }
 
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
         if (this.dead) return; 
 
-        // HP REGEN
+        // HP Regen
         if (this.hp < this.maxHp) {
             this.hpRegenTimer += dt;
             if (this.hpRegenTimer > 2.0) { 
@@ -155,13 +155,12 @@ export class Player extends Entity {
             }
         }
 
-        // AI LOGIC (Blue Shaman)
+        // AI Logic
         if (this.team === 'blue' && enemy) {
             this.fireCooldown -= dt;
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
-            
             if (dist < 500 && this.fireCooldown <= 0) {
                 this.fireCooldown = 1.0; 
                 const angle = Math.atan2(dy, dx);
@@ -169,61 +168,64 @@ export class Player extends Entity {
             }
         }
 
-        // --- PHYSICS CORE ---
-        // Apply Acceleration
+        // MOVEMENT
         if (input && input.keys) {
             if (input.keys.a) this.vx -= this.acceleration * dt; 
             if (input.keys.d) this.vx += this.acceleration * dt;
         }
         
-        // Apply Friction
         this.vx *= this.friction; 
 
-        // Cap Horizontal Speed
-        if (this.vx > this.maxSpeed) this.vx = this.maxSpeed;
-        if (this.vx < -this.maxSpeed) this.vx = -this.maxSpeed;
+        // Clamp Horizontal Speed
+        if (this.vx > this.speed) this.vx = this.speed;
+        if (this.vx < -this.speed) this.vx = -this.speed;
 
-        // Apply Velocity to Position
         this.x += this.vx * dt; 
 
-        // Vertical Physics
+        // Vertical
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
-        // Jumping / Flying
+        // Jump/Fly
         if (input && input.keys.space) {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
                 if(audio) audio.play('jump', 0.4, 0.1);
             } else if (resources && resources.air > 0) {
-                this.vy -= 1200 * dt; 
+                this.vy -= 1500 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
                 resources.air -= 80 * dt; 
             }
         }
         this.y += this.vy * dt;
 
-        // Collisions & Earth Gathering
+        // ROBUST COLLISION
         this.isGrounded = false;
         if (this.vy >= 0) { 
             for (let island of islands) {
-                if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
+                // 1. Horizontal Check (Feet within island width)
+                if (this.x + this.w > island.x + 10 && this.x < island.x + island.w - 10) {
+                    // 2. Vertical Check (Feet near top surface)
+                    // We check a range: from slightly above to slightly below
+                    // The "fall distance" helps catch fast falling players
                     const feet = this.y + this.h;
-                    const threshold = 10 + (this.vy * dt * 2); 
+                    const fallDist = Math.max(10, this.vy * dt * 2); // Look ahead based on speed
                     
-                    if (feet >= island.y - 10 && feet <= island.y + threshold) {
-                         this.y = island.y - this.h + 4; 
+                    if (feet >= island.y - 10 && feet <= island.y + fallDist) {
+                         this.y = island.y - this.h; // Snap exactly to top
                          this.vy = 0;
                          this.isGrounded = true;
                          
-                         if (this.team === 'green' && !this.visitedIslands.has(island) && resources) {
-                            this.visitedIslands.add(island);
-                            resources.addEarth(20); 
-                         }
-
-                         if (this.team === 'green' && Math.abs(this.vx) > 10 && resources) { // Threshold for walking
-                             resources.addPassiveEarth(10 * dt);
+                         // Resources
+                         if (this.team === 'green' && resources) {
+                            if (!this.visitedIslands.has(island)) {
+                                this.visitedIslands.add(island);
+                                resources.addEarth(20); 
+                            }
+                            if (Math.abs(this.vx) > 10) { 
+                                resources.addPassiveEarth(10 * dt);
+                            }
                          }
                     }
                 }
@@ -328,7 +330,6 @@ export class Island extends Entity {
         if (this.hasTeepee) {
             const range = 150; 
             
-            // Player Conversion
             if (player && !player.dead) {
                 const tentX = this.x + 20 + 48; 
                 const tentY = this.y - 20; 
@@ -344,7 +345,6 @@ export class Island extends Entity {
                 }
             }
 
-            // Enemy Conversion
             if (enemyChief && !enemyChief.dead) {
                 const tentX = this.x + 20 + 48;
                 const tentY = this.y - 20;
@@ -496,7 +496,6 @@ export class Warrior extends Villager {
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
                     spawnProjectileCallback(this.x, this.y, angle, this.team);
-                    // SILENCE: No audio play call here
                 }
             } else {
                 const dir = target.x > this.x ? 1 : -1;
