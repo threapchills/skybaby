@@ -1,5 +1,6 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V18: CRASH-PROOF PHYSICS REWRITE.
+   Definitive V19: GRAPHICS & JUICE UPGRADE.
+   Now with Wind, Trails, and optimized Particles!
 */
 
 export class Entity {
@@ -36,18 +37,41 @@ export class Entity {
 }
 
 export class Particle extends Entity {
-    constructor(x, y, color, speed, life, size = 5) {
-        super(x, y, size, size, null);
+    // UPDATED: Added 'type' to handle Wind (lines) and Trails (no gravity)
+    constructor(x, y, color, speed, life, size = 5, type = 'normal') {
+        // If wind, make it wide and thin!
+        let w = size;
+        let h = size;
+        if (type === 'wind') { w = 40 + Math.random() * 40; h = 1; } 
+        
+        super(x, y, w, h, null);
+        
         this.color = color;
-        const angle = Math.random() * Math.PI * 2;
-        this.vx = Math.cos(angle) * speed;
-        this.vy = Math.sin(angle) * speed - 50; 
-        this.life = life;
+        this.type = type;
         this.maxLife = life;
+        this.life = life;
+
+        // Physics Setup based on Type
+        if (this.type === 'wind') {
+            this.vx = speed; // Wind flies horizontal
+            this.vy = (Math.random() - 0.5) * 20; // Slight vertical drift
+        } else if (this.type === 'trail') {
+            this.vx = (Math.random() - 0.5) * 10; // Trails barely move
+            this.vy = (Math.random() - 0.5) * 10; 
+        } else {
+            // Normal explosions/blood
+            const angle = Math.random() * Math.PI * 2;
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed - 50; 
+        }
     }
 
     update(dt) {
-        this.vy += 500 * dt; 
+        // Only apply gravity to normal particles (Blood/Explosions)
+        if (this.type === 'normal') {
+            this.vy += 500 * dt; 
+        }
+
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.life -= dt;
@@ -57,10 +81,16 @@ export class Particle extends Entity {
     draw(ctx, camera) {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
+        
+        ctx.save();
         ctx.globalAlpha = this.life / this.maxLife;
         ctx.fillStyle = this.color;
+        
+        // Wind is drawn as a rect, which we set up in constructor
         ctx.fillRect(screenX, screenY, this.w, this.h);
+        
         ctx.globalAlpha = 1.0;
+        ctx.restore();
     }
 }
 
@@ -580,6 +610,7 @@ export class Projectile extends Entity {
         this.trailTimer -= dt;
         if (this.trailTimer <= 0 && spawnParticleCallback) {
             this.trailTimer = 0.05; 
+            // Spawn Trail Particles!
             spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
         }
     }
