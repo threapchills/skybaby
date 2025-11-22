@@ -1,16 +1,17 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Tuned: Expensive Flight, Walking for Earth.
+   Definitive V7: Earth is now a Scoreboard. Dragging is Free.
 */
 
 export class ResourceManager {
     constructor() {
-        this.earth = 20; // Start with a little bit
-        this.maxEarth = 100;
+        // EARTH: Now tracks count, not a depletable resource
+        this.islandsOwned = 1;
+        this.villagerCount = 0;
 
         this.air = 100;
         this.maxAir = 100;
         this.airRegenRate = 30; 
-        this.airDepletionRate = 60; // TRIPLED COST (was 15-20ish)
+        this.airDepletionRate = 60; 
 
         this.water = 100;
         this.maxWater = 100;
@@ -23,18 +24,11 @@ export class ResourceManager {
 
     update(dt, isMoving, isNearWaterSource, isNearFireSource) {
         // AIR
-        if (isMoving) {
-            // Moving in air costs air (handled in Player update really, but we track regen here)
-            // We actually handle air drain in Player.update for flight, 
-            // but if we want general movement tiredness we could do it here.
-            // For now, we just regen if NOT flying.
-        }
-        // Air regen is handled by the fact we only drain when flying.
-        // So we always try to regen unless maxed.
         this.air += this.airRegenRate * dt;
         if (this.air > this.maxAir) this.air = this.maxAir;
 
-        // WATER
+        // WATER (Still used for... actually nothing now if dragging is free? 
+        // Let's keep it for future magic or dashes)
         if (isNearWaterSource) {
             this.water += this.waterRegenRate * dt;
             if (this.water > this.maxWater) this.water = this.maxWater;
@@ -50,18 +44,6 @@ export class ResourceManager {
         } else {
             this.fireRegenTimer = 0;
         }
-
-        // EARTH: No passive trickle anymore. It comes from walking.
-        // We just clamp it here.
-        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
-    }
-
-    spendEarth(amount) {
-        if (this.earth >= amount) {
-            this.earth -= amount;
-            return true;
-        }
-        return false;
     }
 
     spendFire() {
@@ -72,16 +54,10 @@ export class ResourceManager {
         return false;
     }
 
-    // Called when walking
-    addPassiveEarth(amount) {
-        this.earth += amount;
-        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
-    }
-
-    // Called when discovering new land
-    addEarth(amount) {
-        this.earth += amount;
-        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
+    // Called by main.js to sync stats
+    updateStats(islands, villagers) {
+        this.islandsOwned = islands;
+        this.villagerCount = villagers;
     }
 
     drawUI(ctx) {
@@ -97,14 +73,22 @@ export class ResourceManager {
         ctx.shadowBlur = 4;
         ctx.lineWidth = 2;
 
-        this._drawBar(ctx, startX, startY, this.earth, this.maxEarth, "#8B4513", "#3e2723", "EARTH");
+        // EARTH (Scoreboard)
+        ctx.fillStyle = "#8B4513"; 
+        ctx.fillText(`EARTH DOMINION:`, startX, startY);
+        ctx.font = "14px 'Segoe UI', sans-serif";
+        ctx.fillStyle = "#CD853F"; 
+        ctx.fillText(`Islands: ${this.islandsOwned} | Villagers: ${this.villagerCount}`, startX, startY + 20);
 
-        let yPos = startY + padding;
+        // AIR
+        let yPos = startY + padding + 20;
         this._drawBar(ctx, startX, yPos, this.air, this.maxAir, "#FFFFFF", "#87CEEB", "AIR");
 
+        // WATER
         yPos += padding;
         this._drawBar(ctx, startX, yPos, this.water, this.maxWater, "#00BFFF", "#00008B", "WATER");
 
+        // FIRE
         yPos += padding;
         ctx.fillStyle = "#FF4500"; 
         ctx.fillText("FIRE:", startX, yPos + 10);
