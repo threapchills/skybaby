@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V13: ROBUST PHYSICS & SNAPPY MOVEMENT.
+   Definitive V14: Anti-Crash Physics & Snappy Movement.
 */
 
 export class Entity {
@@ -100,9 +100,7 @@ export class Pig extends Entity {
         this.onGround = false;
         if (this.vy >= 0) {
             for (let island of islands) {
-                // Precise platform check
                 if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
-                     // Check if feet are just above or slightly inside platform top
                      if (this.y + this.h >= island.y - 10 && this.y + this.h <= island.y + 20) {
                          this.y = island.y - this.h;
                          this.vy = 0;
@@ -128,14 +126,14 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // --- PHYSICS TUNED FOR RESPONSIVENESS ---
-        this.speed = 300; // Faster base speed
-        this.acceleration = 2000; // High accel for snappy start
-        this.friction = 0.85; // Good stopping power
-        this.gravity = 800; // Heavy gravity
+        // --- PHYSICS TUNED FOR SNAPPYNESS ---
+        this.speed = 400; // Much faster base speed
+        this.acceleration = 2500; // Instant accel
+        this.friction = 0.80; // Good stopping
+        this.gravity = 800; 
         this.maxFallSpeed = 900; 
-        this.jumpForce = -550; 
-        this.flyForce = -450; 
+        this.jumpForce = -600; // Higher jump
+        this.flyForce = -500; 
         
         this.isGrounded = false;
         this.hpRegenTimer = 0;
@@ -200,20 +198,25 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
+        // SAFETY CHECK: Prevent NaN crash
+        if (isNaN(this.x)) this.x = 0;
+        if (isNaN(this.y)) this.y = 0;
+        if (isNaN(this.vx)) this.vx = 0;
+        if (isNaN(this.vy)) this.vy = 0;
+
         // ROBUST COLLISION
         this.isGrounded = false;
         if (this.vy >= 0) { 
             for (let island of islands) {
-                // 1. Horizontal Check (Feet within island width)
+                // Horizontal Check
                 if (this.x + this.w > island.x + 10 && this.x < island.x + island.w - 10) {
-                    // 2. Vertical Check (Feet near top surface)
-                    // We check a range: from slightly above to slightly below
-                    // The "fall distance" helps catch fast falling players
+                    // Vertical Check
                     const feet = this.y + this.h;
-                    const fallDist = Math.max(10, this.vy * dt * 2); // Look ahead based on speed
+                    // Look ahead based on speed, minimum 10px
+                    const fallDist = Math.max(10, this.vy * dt * 2); 
                     
                     if (feet >= island.y - 10 && feet <= island.y + fallDist) {
-                         this.y = island.y - this.h; // Snap exactly to top
+                         this.y = island.y - this.h; // Snap to top
                          this.vy = 0;
                          this.isGrounded = true;
                          
