@@ -1,5 +1,5 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V14: Anti-Crash Physics & Snappy Movement.
+   Definitive V16: CRASH FIX & SPEED UP.
 */
 
 export class Entity {
@@ -86,28 +86,25 @@ export class Pig extends Entity {
             this.vx = (Math.random() - 0.5) * 40; 
         }
 
-        // EDGE DETECTION
+        // Simple Edge Turn
         if (this.onGround && this.homeIsland) {
-            const nextX = this.x + this.w/2 + (this.vx > 0 ? 10 : -10);
-            if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                this.vx *= -1;
-            }
+            if (this.x < this.homeIsland.x) this.vx = Math.abs(this.vx);
+            if (this.x > this.homeIsland.x + this.homeIsland.w) this.vx = -Math.abs(this.vx);
         }
         
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
         this.onGround = false;
-        if (this.vy >= 0) {
-            for (let island of islands) {
-                if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
-                     if (this.y + this.h >= island.y - 10 && this.y + this.h <= island.y + 20) {
-                         this.y = island.y - this.h;
-                         this.vy = 0;
-                         this.onGround = true;
-                         this.homeIsland = island; 
-                     }
-                }
+        // Simple Floor Check
+        for (let island of islands) {
+            if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                 if (this.y + this.h >= island.y - 10 && this.y + this.h <= island.y + 20 && this.vy >= 0) {
+                     this.y = island.y - this.h;
+                     this.vy = 0;
+                     this.onGround = true;
+                     this.homeIsland = island; 
+                 }
             }
         }
         
@@ -126,14 +123,14 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // --- PHYSICS TUNED FOR SNAPPYNESS ---
-        this.speed = 400; // Much faster base speed
-        this.acceleration = 2500; // Instant accel
-        this.friction = 0.80; // Good stopping
+        // --- SPEED BOOSTED ---
+        this.speed = 450; // Fast!
+        this.acceleration = 3000; // Instant response
         this.gravity = 800; 
-        this.maxFallSpeed = 900; 
-        this.jumpForce = -600; // Higher jump
+        this.maxFallSpeed = 1000; 
+        this.jumpForce = -600; 
         this.flyForce = -500; 
+        this.friction = 0.85; // Only applied when stopping
         
         this.isGrounded = false;
         this.hpRegenTimer = 0;
@@ -167,12 +164,17 @@ export class Player extends Entity {
         }
 
         // MOVEMENT
+        let moving = false;
         if (input && input.keys) {
-            if (input.keys.a) this.vx -= this.acceleration * dt; 
-            if (input.keys.d) this.vx += this.acceleration * dt;
+            if (input.keys.a) { this.vx -= this.acceleration * dt; moving = true; }
+            if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
         }
         
-        this.vx *= this.friction; 
+        // Apply Friction ONLY if not moving input
+        if (!moving) {
+            this.vx *= this.friction;
+            if (Math.abs(this.vx) < 10) this.vx = 0; // Snap to stop
+        }
 
         // Clamp Horizontal Speed
         if (this.vx > this.speed) this.vx = this.speed;
@@ -198,25 +200,22 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
-        // SAFETY CHECK: Prevent NaN crash
-        if (isNaN(this.x)) this.x = 0;
-        if (isNaN(this.y)) this.y = 0;
-        if (isNaN(this.vx)) this.vx = 0;
-        if (isNaN(this.vy)) this.vy = 0;
-
-        // ROBUST COLLISION
+        // --- CRASH-PROOF COLLISION LOGIC ---
         this.isGrounded = false;
+        
+        // Only check floor if falling downwards
         if (this.vy >= 0) { 
             for (let island of islands) {
-                // Horizontal Check
-                if (this.x + this.w > island.x + 10 && this.x < island.x + island.w - 10) {
-                    // Vertical Check
+                // Check Overlap X
+                if (this.x + this.w > island.x + 5 && this.x < island.x + island.w - 5) {
+                    // Check Overlap Y (Feet vs Surface)
                     const feet = this.y + this.h;
-                    // Look ahead based on speed, minimum 10px
-                    const fallDist = Math.max(10, this.vy * dt * 2); 
+                    const surface = island.y;
                     
-                    if (feet >= island.y - 10 && feet <= island.y + fallDist) {
-                         this.y = island.y - this.h; // Snap to top
+                    // Tolerance window: 10px above, 20px below
+                    if (feet >= surface - 10 && feet <= surface + 20) {
+                         // Snap
+                         this.y = surface - this.h + 4; 
                          this.vy = 0;
                          this.isGrounded = true;
                          
