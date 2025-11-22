@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Definitive V8: Free Dragging, Aggressive Shaman, Draw Fixes.
+   Definitive V9: Soul Economy, Distributed Spawning, Final Polish.
 */
 
 import { InputHandler } from './input.js';
@@ -158,10 +158,9 @@ class Game {
             this.enemyChief.y += (dy * 0.15) * dt;
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player); 
             
-            // ENEMY SHAMAN SHOOTING CHECK
             if (this.enemyChief.shootRequest) {
                 this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue'));
-                this.enemyChief.shootRequest = null; // Consumed
+                this.enemyChief.shootRequest = null; 
             }
         }
 
@@ -169,8 +168,9 @@ class Game {
         
         // STATS UPDATE
         const islandCount = this.player.visitedIslands.size;
-        const villagerCount = this.villagers.filter(v => v.team === 'green').length;
-        this.resources.updateStats(islandCount, villagerCount);
+        const greenPop = this.villagers.filter(v => v.team === 'green').length;
+        const bluePop = this.villagers.filter(v => v.team === 'blue').length;
+        this.resources.updateStats(islandCount, greenPop, bluePop);
         
         let nearWater = false;
         let nearFire = false;
@@ -189,8 +189,10 @@ class Game {
             this._handleHookshot(dt);
         }
 
+        // SPAWN LOGIC UPDATE
         this.spawnTimer += dt;
-        if (this.spawnTimer > 4.0) { 
+        // Slower spawn rate (every 6 seconds)
+        if (this.spawnTimer > 6.0) { 
             this._spawnVillagers(); 
             this.spawnTimer = 0;
         }
@@ -262,7 +264,9 @@ class Game {
                     hit = true;
                     this.selectedIsland = island;
                     
-                    // FREE PULLING
+                    // Free pulling, but only valid if we have water? No, you said keep it infinite.
+                    // But logic said deplete Earth before?
+                    // Let's stick to: Dragging is FREE as per last instruction.
                     const dx = this.player.x - island.x;
                     const dy = this.player.y - island.y;
                     const dist = Math.sqrt(dx*dx + dy*dy);
@@ -304,7 +308,7 @@ class Game {
             
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= 10; // DAMAGE BUFF (Was 5)
+                this.player.hp -= 10; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
@@ -388,34 +392,42 @@ class Game {
     }
 
     _spawnVillagers() {
-        const greenPop = this.villagers.filter(v => v.team === 'green').length;
-        const greenCap = this.resources.earth * 5; 
-        if (greenPop < greenCap) {
-            const myIslands = this.islands.filter(i => i.team === 'green' || this.player.visitedIslands.has(i));
-            if (myIslands.length > 0) {
-                const island = myIslands[Math.floor(Math.random() * myIslands.length)];
+        const totalPop = this.villagers.length;
+        const SOUL_CAP = 200;
+
+        // SOUL ECONOMY CHECK
+        if (totalPop >= SOUL_CAP) return; 
+
+        // DISTRIBUTED SPAWNING: Iterate ALL islands
+        this.islands.forEach(island => {
+            // Chance to spawn per island (keeps it random but distributed)
+            if (Math.random() > 0.3) return; // 70% chance to skip this tick per island
+
+            // Must have a Hut (Teepee)
+            if (!island.hasTeepee) return;
+
+            // Determine ownership logic (simple proximity or pre-assigned)
+            // For now, let's use the island's original team assignment
+            // Green Team
+            if (island.team === 'green') {
                 const unit = (Math.random() < 0.4) ? 
                     new Warrior(island.x + 50, island.y - 40, 'green') :
                     new Villager(island.x + 50, island.y - 40, 'green');
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
-        }
-        if (this.villagers.filter(v => v.team === 'blue').length < 30) {
-            const enemyIslands = this.islands.filter(i => i.team === 'blue');
-             if (enemyIslands.length > 0) {
-                const island = enemyIslands[Math.floor(Math.random() * enemyIslands.length)];
+            // Blue Team
+            else if (island.team === 'blue') {
                 const unit = (Math.random() < 0.5) ? 
                     new Warrior(island.x + 50, island.y - 40, 'blue') :
                     new Villager(island.x + 50, island.y - 40, 'blue');
                 unit.homeIsland = island;
                 this.villagers.push(unit);
             }
-        }
+        });
     }
 
     draw() {
-        // DAY NIGHT CYCLE
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
         let sx = 0, sy = 0;
@@ -429,15 +441,12 @@ class Game {
 
         this.world.draw(this.ctx);
         
-        // Draw ALL islands
-        // We draw the selected one LAST so it is on top
         this.islands.forEach(i => {
             if (i !== this.selectedIsland) i.draw(this.ctx, this.world.camera);
         });
         if (this.selectedIsland) {
             const pulse = 1 + Math.sin(this.pulseTime) * 0.05;
             this.ctx.save();
-            // Center pivot
             const cx = this.selectedIsland.x + this.selectedIsland.w/2 - this.world.camera.x;
             const cy = this.selectedIsland.y + this.selectedIsland.h/2 - this.world.camera.y;
             this.ctx.translate(cx, cy);
