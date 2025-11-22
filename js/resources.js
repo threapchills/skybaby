@@ -1,12 +1,12 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Definitive V7: Earth is now a Scoreboard. Dragging is Free.
+   Definitive V8: Soul Economy & Enemy Tracking.
 */
 
 export class ResourceManager {
     constructor() {
-        // EARTH: Now tracks count, not a depletable resource
         this.islandsOwned = 1;
         this.villagerCount = 0;
+        this.enemyVillagerCount = 0; // NEW
 
         this.air = 100;
         this.maxAir = 100;
@@ -23,18 +23,14 @@ export class ResourceManager {
     }
 
     update(dt, isMoving, isNearWaterSource, isNearFireSource) {
-        // AIR
         this.air += this.airRegenRate * dt;
         if (this.air > this.maxAir) this.air = this.maxAir;
 
-        // WATER (Still used for... actually nothing now if dragging is free? 
-        // Let's keep it for future magic or dashes)
         if (isNearWaterSource) {
             this.water += this.waterRegenRate * dt;
             if (this.water > this.maxWater) this.water = this.maxWater;
         }
 
-        // FIRE
         if (isNearFireSource && this.fire < this.maxFire) {
             this.fireRegenTimer += dt;
             if (this.fireRegenTimer > 0.25) { 
@@ -54,10 +50,10 @@ export class ResourceManager {
         return false;
     }
 
-    // Called by main.js to sync stats
-    updateStats(islands, villagers) {
+    updateStats(islands, villagers, enemies) {
         this.islandsOwned = islands;
         this.villagerCount = villagers;
+        this.enemyVillagerCount = enemies;
     }
 
     drawUI(ctx) {
@@ -73,22 +69,24 @@ export class ResourceManager {
         ctx.shadowBlur = 4;
         ctx.lineWidth = 2;
 
-        // EARTH (Scoreboard)
+        // SCOREBOARD
         ctx.fillStyle = "#8B4513"; 
         ctx.fillText(`EARTH DOMINION:`, startX, startY);
+        
         ctx.font = "14px 'Segoe UI', sans-serif";
-        ctx.fillStyle = "#CD853F"; 
-        ctx.fillText(`Islands: ${this.islandsOwned} | Villagers: ${this.villagerCount}`, startX, startY + 20);
+        ctx.fillStyle = "#32CD32"; // Green text
+        ctx.fillText(`Islands: ${this.islandsOwned} | Tribe: ${this.villagerCount}`, startX, startY + 20);
+        
+        ctx.fillStyle = "#4169E1"; // Blue text
+        ctx.fillText(`Enemy Tribe: ${this.enemyVillagerCount}`, startX + 200, startY + 20);
 
-        // AIR
-        let yPos = startY + padding + 20;
+        // BARS
+        let yPos = startY + padding + 25;
         this._drawBar(ctx, startX, yPos, this.air, this.maxAir, "#FFFFFF", "#87CEEB", "AIR");
 
-        // WATER
         yPos += padding;
         this._drawBar(ctx, startX, yPos, this.water, this.maxWater, "#00BFFF", "#00008B", "WATER");
 
-        // FIRE
         yPos += padding;
         ctx.fillStyle = "#FF4500"; 
         ctx.fillText("FIRE:", startX, yPos + 10);
