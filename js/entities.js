@@ -1,6 +1,6 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V19: GRAPHICS & JUICE UPGRADE.
-   Now with Wind, Trails, and optimized Particles!
+   Definitive V20: COLLISIONS FIXED & PARTICLES BUFFED.
+   Now with anti-tunneling physics and chunkier effects!
 */
 
 export class Entity {
@@ -37,12 +37,13 @@ export class Entity {
 }
 
 export class Particle extends Entity {
-    // UPDATED: Added 'type' to handle Wind (lines) and Trails (no gravity)
     constructor(x, y, color, speed, life, size = 5, type = 'normal') {
-        // If wind, make it wide and thin!
-        let w = size;
-        let h = size;
-        if (type === 'wind') { w = 40 + Math.random() * 40; h = 1; } 
+        // JUICE UPGRADE: Make everything slightly bigger by default for visibility
+        let finalSize = size * 1.5; 
+        
+        let w = finalSize;
+        let h = finalSize;
+        if (type === 'wind') { w = 60 + Math.random() * 60; h = 2; } // Thicker, longer wind
         
         super(x, y, w, h, null);
         
@@ -51,15 +52,14 @@ export class Particle extends Entity {
         this.maxLife = life;
         this.life = life;
 
-        // Physics Setup based on Type
         if (this.type === 'wind') {
-            this.vx = speed; // Wind flies horizontal
-            this.vy = (Math.random() - 0.5) * 20; // Slight vertical drift
+            this.vx = speed; 
+            this.vy = (Math.random() - 0.5) * 20; 
         } else if (this.type === 'trail') {
-            this.vx = (Math.random() - 0.5) * 10; // Trails barely move
+            this.vx = (Math.random() - 0.5) * 10; 
             this.vy = (Math.random() - 0.5) * 10; 
+            this.w = 6; this.h = 6; // Make trail dots visible!
         } else {
-            // Normal explosions/blood
             const angle = Math.random() * Math.PI * 2;
             this.vx = Math.cos(angle) * speed;
             this.vy = Math.sin(angle) * speed - 50; 
@@ -67,7 +67,6 @@ export class Particle extends Entity {
     }
 
     update(dt) {
-        // Only apply gravity to normal particles (Blood/Explosions)
         if (this.type === 'normal') {
             this.vy += 500 * dt; 
         }
@@ -82,13 +81,12 @@ export class Particle extends Entity {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
         
+        if (screenX < -100 || screenX > camera.w + 100) return; // Cull off-screen particles
+
         ctx.save();
-        ctx.globalAlpha = this.life / this.maxLife;
+        ctx.globalAlpha = Math.max(0, this.life / this.maxLife); // Prevent negative alpha
         ctx.fillStyle = this.color;
-        
-        // Wind is drawn as a rect, which we set up in constructor
         ctx.fillRect(screenX, screenY, this.w, this.h);
-        
         ctx.globalAlpha = 1.0;
         ctx.restore();
     }
@@ -116,7 +114,6 @@ export class Pig extends Entity {
             this.vx = (Math.random() - 0.5) * 40; 
         }
 
-        // Simple Edge Turn
         if (this.onGround && this.homeIsland) {
             if (this.x < this.homeIsland.x) this.vx = Math.abs(this.vx);
             if (this.x > this.homeIsland.x + this.homeIsland.w) this.vx = -Math.abs(this.vx);
@@ -126,17 +123,20 @@ export class Pig extends Entity {
         this.y += this.vy * dt;
 
         this.onGround = false;
-        for (let island of islands) {
-            // Simple AABB Collision
-            if (this.x < island.x + island.w && this.x + this.w > island.x &&
-                this.y < island.y + island.h && this.y + this.h > island.y) {
-                
-                // Resolve Y (Landing)
-                if (this.vy > 0 && this.y + this.h < island.y + 30) {
-                    this.y = island.y - this.h;
-                    this.vy = 0;
-                    this.onGround = true;
-                    this.homeIsland = island;
+        
+        // COLLISION FIX: Check if we passed through an island
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x < island.x + island.w && this.x + this.w > island.x) {
+                    // Dynamic threshold based on speed to catch high-speed falling
+                    const collisionThreshold = island.y + 30 + (this.vy * dt);
+                    
+                    if (this.y + this.h >= island.y && this.y + this.h <= collisionThreshold) {
+                         this.y = island.y - this.h;
+                         this.vy = 0;
+                         this.onGround = true;
+                         this.homeIsland = island;
+                    }
                 }
             }
         }
@@ -156,9 +156,8 @@ export class Player extends Entity {
         this.hp = 100; 
         this.maxHp = 100;
         
-        // --- PHYSICS REBOOT ---
-        this.speed = 450; // Fast Max Speed
-        this.acceleration = 3000; // Instant Accel
+        this.speed = 450; 
+        this.acceleration = 3000; 
         this.friction = 0.85; 
         this.gravity = 800; 
         this.maxFallSpeed = 1000; 
@@ -175,7 +174,6 @@ export class Player extends Entity {
         if (this.dead) return; 
         if (dt <= 0) return;
 
-        // HP Regen
         if (this.hp < this.maxHp) {
             this.hpRegenTimer += dt;
             if (this.hpRegenTimer > 2.0) { 
@@ -184,43 +182,37 @@ export class Player extends Entity {
             }
         }
 
-        // AI Logic
         if (this.team === 'blue' && enemy) {
             this.fireCooldown -= dt;
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist < 500 && this.fireCooldown <= 0) {
-                this.fireCooldown = 1.0; 
+            if (dist < 600 && this.fireCooldown <= 0) { // Buffed AI Range
+                this.fireCooldown = 0.8; // Buffed AI Fire Rate
                 const angle = Math.atan2(dy, dx);
                 this.shootRequest = { x: this.x, y: this.y, angle: angle };
             }
         }
 
-        // MOVEMENT
         let moving = false;
         if (input && input.keys) {
             if (input.keys.a) { this.vx -= this.acceleration * dt; moving = true; }
             if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
         }
         
-        // Friction only when not pressing keys
         if (!moving) {
             this.vx *= this.friction;
             if (Math.abs(this.vx) < 10) this.vx = 0; 
         }
 
-        // Clamp Speed
         if (this.vx > this.speed) this.vx = this.speed;
         if (this.vx < -this.speed) this.vx = -this.speed;
 
         this.x += this.vx * dt; 
 
-        // Vertical
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
-        // Jump/Fly
         if (input && input.keys.space) {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
@@ -234,35 +226,35 @@ export class Player extends Entity {
         }
         this.y += this.vy * dt;
 
-        // --- CRASH-PROOF COLLISION ---
+        // --- CRASH-PROOF & FALL-PROOF COLLISION ---
         this.isGrounded = false;
         
-        // Standard AABB check
-        for (let island of islands) {
-            if (this.x < island.x + island.w && this.x + this.w > island.x &&
-                this.y < island.y + island.h && this.y + this.h > island.y) {
-                
-                // If falling down into the top of the island
-                if (this.vy >= 0 && this.y + this.h < island.y + 30) {
-                    this.y = island.y - this.h + 4; // Snap to top
-                    this.vy = 0;
-                    this.isGrounded = true;
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x < island.x + island.w && this.x + this.w > island.x) {
                     
-                    // Resources
-                    if (this.team === 'green' && resources) {
-                       if (!this.visitedIslands.has(island)) {
-                           this.visitedIslands.add(island);
-                           resources.addEarth(20); 
-                       }
-                       if (Math.abs(this.vx) > 10) { 
-                           resources.addPassiveEarth(10 * dt);
-                       }
+                    // FIX: Dynamic threshold based on velocity to catch high-speed falling
+                    const collisionThreshold = island.y + 30 + (this.vy * dt);
+                    
+                    if (this.y + this.h >= island.y && this.y + this.h <= collisionThreshold) {
+                        this.y = island.y - this.h + 1; // Snap to top (slight overlap to prevent jitter)
+                        this.vy = 0;
+                        this.isGrounded = true;
+                        
+                        if (this.team === 'green' && resources) {
+                           if (!this.visitedIslands.has(island)) {
+                               this.visitedIslands.add(island);
+                               resources.addEarth(20); 
+                           }
+                           if (Math.abs(this.vx) > 10) { 
+                               resources.addPassiveEarth(10 * dt);
+                           }
+                        }
                     }
                 }
             }
         }
 
-        // Wrapping
         if (this.y > worldHeight + 100) this.y = -100; 
         if (this.y < -200) this.y = worldHeight; 
         if (this.x > worldWidth) this.x = 0; 
@@ -472,6 +464,7 @@ export class Villager extends Entity {
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                     // FIX: Dynamic threshold collision for villagers too
                      const threshold = 10 + (this.vy * dt * 2);
                      if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
                          this.y = island.y - this.h;
