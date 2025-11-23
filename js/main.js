@@ -1,8 +1,8 @@
 /* THE HEART OF THE GAME
-   Definitive V23: THE BACON UPDATE 🥓
-   - Pigs are now ghost-like to arrows (invincible/intangible).
-   - Collision detection upgraded to AABB (Overlaps work much better now!).
-   - Healing on touch confirmed for both Player and Enemy Chief.
+   Definitive V24: THE ECONOMY OF SOULS 👻🐖
+   - Initial pig spawn reduced significantly (rare at start).
+   - New natural pig repopulation logic added.
+   - Pig population cap set strictly to 77.
 */
 
 import { InputHandler } from './input.js';
@@ -111,8 +111,9 @@ class Game {
             }
         }
 
-        // --- PIG SPAWNER 9000 ---
-        const pigCount = 50 + Math.floor(Math.random() * 51); // 50 to 100
+        // --- UPDATED PIG SPAWNER ---
+        // Start small! Let them breed naturally (or fall from the sky... same thing here!)
+        const pigCount = 5 + Math.floor(Math.random() * 6); // 5 to 10 pigs initially
         for (let i = 0; i < pigCount; i++) {
             const home = this.islands[Math.floor(Math.random() * this.islands.length)];
             const px = home.x + Math.random() * (home.w - 50);
@@ -217,13 +218,13 @@ class Game {
         this.spawnTimer += dt;
         if (this.spawnTimer > 3.0) { 
             this._spawnVillagers(); 
+            this._spawnPigs(); // NEW: Nature calls!
             this.spawnTimer = 0;
         }
 
         this._handleCombat(dt);
-        
-        // --- HANDLE PIGS ---
         this._handleConsumables(dt); 
+        
         this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
         this.pigs = this.pigs.filter(p => !p.dead); 
 
@@ -235,13 +236,11 @@ class Game {
         for (let i = this.pigs.length - 1; i >= 0; i--) {
             const pig = this.pigs[i];
             
-            // Check Player collision (Healing)
             if (!this.player.dead && this._checkHit(this.player, pig)) {
                 this._consumePig(pig, this.player);
                 continue; 
             }
 
-            // Check Enemy Chief collision (Healing)
             if (!this.enemyChief.dead && this._checkHit(this.enemyChief, pig)) {
                 this._consumePig(pig, this.enemyChief);
                 continue;
@@ -251,14 +250,9 @@ class Game {
 
     _consumePig(pig, consumer) {
         pig.dead = true;
-        
-        // Heal 1/10th of max health
         consumer.hp = Math.min(consumer.hp + 10, consumer.maxHp);
-        
         this.audio.play('munch', 0.6, 0.2); 
         this.shake = 5; 
-        
-        // Spawn PINK healing particles
         this._spawnBlood(pig.x, pig.y, '#FF69B4', 15); 
     }
 
@@ -393,8 +387,6 @@ class Game {
                 }
             }
 
-            // --- REPAIR: I removed the Pig Loop here! No more shooting pigs! ---
-
             if (hitSomething) p.dead = true;
             if (p.dead) this.projectiles.splice(i, 1);
         }
@@ -415,7 +407,6 @@ class Game {
         this.villagers = this.villagers.filter(v => !v.dead);
     }
 
-    // UPDATED: AABB Collision (Overlaps!)
     _checkHit(entity1, entity2) {
         return (entity1.x < entity2.x + entity2.w &&
                 entity1.x + entity1.w > entity2.x &&
@@ -462,6 +453,28 @@ class Game {
                     
                     if (this.villagers.length >= 200) break; 
                 }
+            }
+        }
+    }
+
+    // NEW: The Cycle of Life (Pig Edition)
+    _spawnPigs() {
+        // THE ECONOMY OF SOULS: Strictly capped at 77
+        if (this.pigs.length >= 77) return; 
+
+        const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
+
+        for (let island of shuffledIslands) {
+            // 10% chance per island per tick (Roughly 1 for every 3 villagers who have 30% chance)
+            if (Math.random() < 0.1) {
+                const px = island.x + Math.random() * (island.w - 50);
+                const py = island.y - 60; 
+                const piggy = new Pig(px, py);
+                piggy.homeIsland = island; 
+                this.pigs.push(piggy);
+                
+                // Stop spawning in this tick if we hit the cap
+                if (this.pigs.length >= 77) break; 
             }
         }
     }
