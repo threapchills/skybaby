@@ -168,6 +168,11 @@ export class Player extends Entity {
         this.hpRegenTimer = 0;
         this.fireCooldown = 0; 
         this.visitedIslands = new Set();
+        
+        // AI Variables
+        this.aiTargetIsland = null;
+        this.aiStateTimer = 0;
+        this.aiJump = false;
     }
 
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
@@ -195,9 +200,63 @@ export class Player extends Entity {
         }
 
         let moving = false;
-        if (input && input.keys) {
-            if (input.keys.a) { this.vx -= this.acceleration * dt; moving = true; }
-            if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
+        let wantJump = false;
+
+        // --- MOVEMENT LOGIC SWITCH ---
+        if (this.team === 'green') {
+            // HUMAN INPUT
+            if (input && input.keys) {
+                if (input.keys.a) { this.vx -= this.acceleration * dt; moving = true; }
+                if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
+                if (input.keys.space) wantJump = true;
+            }
+        } else {
+            // AI LOGIC (Blue Team)
+            moving = true; // AI always applies force to correct course
+
+            // 1. Pick a Target (Prefer Green or Neutral islands)
+            if (!this.aiTargetIsland || this.aiTargetIsland.team === 'blue' || this.aiStateTimer <= 0) {
+                this.aiStateTimer = 5.0 + Math.random() * 5.0; // Rethink every few seconds
+                
+                // Find all potential targets (not blue)
+                const targets = islands.filter(i => i.team !== 'blue');
+                if (targets.length > 0) {
+                    // Pick random one to encourage roaming
+                    this.aiTargetIsland = targets[Math.floor(Math.random() * targets.length)];
+                } else {
+                    // If everything is blue, just patrol random island
+                    this.aiTargetIsland = islands[Math.floor(Math.random() * islands.length)];
+                }
+            }
+            this.aiStateTimer -= dt;
+
+            // 2. Move towards Target
+            if (this.aiTargetIsland) {
+                const targetX = this.aiTargetIsland.x + (this.aiTargetIsland.w / 2);
+                const dist = Math.abs(this.x - targetX);
+                
+                if (this.x < targetX - 50) {
+                    this.vx += this.acceleration * dt; 
+                } else if (this.x > targetX + 50) {
+                    this.vx -= this.acceleration * dt; 
+                } else {
+                    // Near center, maybe jitter or stop?
+                    // Let's keep moving slightly to simulate patrolling
+                    if (Math.random() < 0.05) this.vx *= -1;
+                }
+
+                // 3. Jump Logic (Parkour!)
+                // Jump if we are grounded and moving slow (stuck) OR purely random to traverse gaps
+                if (this.isGrounded) {
+                    if (Math.abs(this.vx) < 50 || Math.random() < 0.015) {
+                        wantJump = true;
+                    }
+                    
+                    // Jump if reaching edge of current platform?
+                    // Simple heuristic: if we need to go Right, but there is a gap?
+                    // Hard to detect gaps without raycasts, but random jumping works well for this chaos.
+                }
+            }
         }
         
         if (!moving) {
@@ -213,15 +272,21 @@ export class Player extends Entity {
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
-        if (input && input.keys.space) {
+        // SHARED JUMP / FLY LOGIC
+        if (wantJump) {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
                 if(audio) audio.play('jump', 0.4, 0.1);
-            } else if (resources && resources.air > 0) {
+            } else if (this.team === 'green' && resources && resources.air > 0) {
+                // Only Green team uses resources to fly
                 this.vy -= 1500 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
                 resources.air -= 80 * dt; 
+            } else if (this.team === 'blue') {
+                // AI can cheat slightly and "flutter" if stuck in air?
+                // Nah, let's keep them grounded to physics, maybe small air control
+                this.vy -= 100 * dt; // Slight float
             }
         }
         this.y += this.vy * dt;
