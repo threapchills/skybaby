@@ -1,6 +1,8 @@
 /* THE HEART OF THE GAME
-   Definitive V22: OPERATION HAM & CHEESE 🐷🧀
-   Now with roaming pigs that heal you! Yum!
+   Definitive V23: THE BACON UPDATE 🥓
+   - Pigs are now ghost-like to arrows (invincible/intangible).
+   - Collision detection upgraded to AABB (Overlaps work much better now!).
+   - Healing on touch confirmed for both Player and Enemy Chief.
 */
 
 import { InputHandler } from './input.js';
@@ -110,15 +112,13 @@ class Game {
         }
 
         // --- PIG SPAWNER 9000 ---
-        // Ensuring 50 to 100 pigs roam the lands!
         const pigCount = 50 + Math.floor(Math.random() * 51); // 50 to 100
         for (let i = 0; i < pigCount; i++) {
-            // Pick a random island
             const home = this.islands[Math.floor(Math.random() * this.islands.length)];
             const px = home.x + Math.random() * (home.w - 50);
-            const py = home.y - 60; // Just above the ground
+            const py = home.y - 60; 
             const piggy = new Pig(px, py);
-            piggy.homeIsland = home; // Give them a home immediately so they don't wander into the void
+            piggy.homeIsland = home; 
             this.pigs.push(piggy);
         }
 
@@ -129,7 +129,6 @@ class Game {
         const dtRaw = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
         
-        // FIX: Cap dt to prevent tunneling/falling through floors during lag spikes
         const dt = Math.min(dtRaw, 0.05); 
 
         this.update(dt);
@@ -140,7 +139,6 @@ class Game {
     update(dt) {
         if (this.gameOver) return;
 
-        // FIX: Decay shake slower so it's visible
         if (this.shake > 0) this.shake -= 15 * dt; 
         if (this.shake < 0) this.shake = 0;
         
@@ -224,16 +222,15 @@ class Game {
 
         this._handleCombat(dt);
         
-        // --- NEW: HANDLE PIGS ---
-        this._handleConsumables(dt); // Check for eating pigs!
+        // --- HANDLE PIGS ---
+        this._handleConsumables(dt); 
         this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
-        this.pigs = this.pigs.filter(p => !p.dead); // Clean up eaten pigs
+        this.pigs = this.pigs.filter(p => !p.dead); 
 
         this.particles.forEach(p => p.update(dt));
         this.particles = this.particles.filter(p => !p.dead);
     }
 
-    // NEW: Logic for Eating Pigs
     _handleConsumables(dt) {
         for (let i = this.pigs.length - 1; i >= 0; i--) {
             const pig = this.pigs[i];
@@ -255,14 +252,13 @@ class Game {
     _consumePig(pig, consumer) {
         pig.dead = true;
         
-        // Heal 1/10th of max health (which is 100, so heal 10)
+        // Heal 1/10th of max health
         consumer.hp = Math.min(consumer.hp + 10, consumer.maxHp);
         
-        // JUICY FEEDBACK
-        this.audio.play('munch', 0.6, 0.2); // Varied pitch for that 'crunch'
-        this.shake = 5; // Subtle satisfaction shake
+        this.audio.play('munch', 0.6, 0.2); 
+        this.shake = 5; 
         
-        // Spawn PINK healing particles (Hot Pink #FF69B4)
+        // Spawn PINK healing particles
         this._spawnBlood(pig.x, pig.y, '#FF69B4', 15); 
     }
 
@@ -397,17 +393,7 @@ class Game {
                 }
             }
 
-            for (let pig of this.pigs) {
-                if (!pig.dead && this._checkHit(p, pig)) {
-                    this._spawnBlood(pig.x, pig.y, '#cc0000'); 
-                    pig.hp -= 20;
-                    hitSomething = true;
-                    if (pig.hp <= 0) {
-                        pig.dead = true;
-                        this._spawnBlood(pig.x, pig.y, '#cc0000', 20);
-                    }
-                }
-            }
+            // --- REPAIR: I removed the Pig Loop here! No more shooting pigs! ---
 
             if (hitSomething) p.dead = true;
             if (p.dead) this.projectiles.splice(i, 1);
@@ -429,9 +415,12 @@ class Game {
         this.villagers = this.villagers.filter(v => !v.dead);
     }
 
-    _checkHit(proj, entity) {
-        return (proj.x > entity.x && proj.x < entity.x + entity.w &&
-                proj.y > entity.y && proj.y < entity.y + entity.h);
+    // UPDATED: AABB Collision (Overlaps!)
+    _checkHit(entity1, entity2) {
+        return (entity1.x < entity2.x + entity2.w &&
+                entity1.x + entity1.w > entity2.x &&
+                entity1.y < entity2.y + entity2.h &&
+                entity1.y + entity1.h > entity2.y);
     }
 
     _spawnBlood(x, y, color='#cc0000', count=25) {
@@ -498,7 +487,6 @@ class Game {
         this.world.draw(this.ctx);
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         
-        // PIGS BEFORE VILLAGERS!
         this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
         
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
