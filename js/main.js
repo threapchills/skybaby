@@ -1,14 +1,14 @@
 /* THE HEART OF THE GAME
-   Definitive V24: THE ECONOMY OF SOULS 👻🐖
-   - Initial pig spawn reduced significantly (rare at start).
-   - New natural pig repopulation logic added.
-   - Pig population cap set strictly to 77.
+   Definitive V25: LIVING WORLD 🌿
+   - Added Season cycle (3 days Summer / 3 days Winter).
+   - Added blowing leaves in the background.
+   - Updated islands to handle texture swapping for Winter.
 */
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
 import { World } from './world.js';
-import { Player, Island, Villager, Warrior, Projectile, Particle, Pig } from './entities.js';
+import { Player, Island, Villager, Warrior, Projectile, Particle, Pig, Leaf } from './entities.js';
 import { AudioManager } from './audio.js';
 
 class Game {
@@ -36,6 +36,7 @@ class Game {
         this.projectiles = [];
         this.particles = [];
         this.pigs = []; 
+        this.leaves = []; // NEW: Leaf container
 
         this._generateWorld();
 
@@ -46,7 +47,11 @@ class Game {
         
         this.shake = 0;
         this.dayTime = 0; 
+        this.dayCount = 0; // NEW: Track days passed
+        this.season = 'summer'; // 'summer' or 'winter'
+        
         this.windTimer = 0;
+        this.leafTimer = 0; // NEW: Timer for leaf spawn
         this.pulseTime = 0; 
 
         window.addEventListener('click', () => this._startAudio(), { once: true });
@@ -111,9 +116,7 @@ class Game {
             }
         }
 
-        // --- UPDATED PIG SPAWNER ---
-        // Start small! Let them breed naturally (or fall from the sky... same thing here!)
-        const pigCount = 5 + Math.floor(Math.random() * 6); // 5 to 10 pigs initially
+        const pigCount = 5 + Math.floor(Math.random() * 6); 
         for (let i = 0; i < pigCount; i++) {
             const home = this.islands[Math.floor(Math.random() * this.islands.length)];
             const px = home.x + Math.random() * (home.w - 50);
@@ -143,8 +146,14 @@ class Game {
         if (this.shake > 0) this.shake -= 15 * dt; 
         if (this.shake < 0) this.shake = 0;
         
-        this.dayTime += dt * 0.05; 
-        if (this.dayTime > Math.PI * 2) this.dayTime = 0;
+        // --- Day/Night & Season Cycle ---
+        const prevDayTime = this.dayTime;
+        this.dayTime += dt * 0.05; // Day progression
+        if (this.dayTime > Math.PI * 2) {
+            this.dayTime = 0;
+            this.dayCount++;
+            this._checkSeasonChange();
+        }
         
         this.pulseTime += dt * 5; 
 
@@ -218,7 +227,7 @@ class Game {
         this.spawnTimer += dt;
         if (this.spawnTimer > 3.0) { 
             this._spawnVillagers(); 
-            this._spawnPigs(); // NEW: Nature calls!
+            this._spawnPigs(); 
             this.spawnTimer = 0;
         }
 
@@ -228,8 +237,28 @@ class Game {
         this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
         this.pigs = this.pigs.filter(p => !p.dead); 
 
+        // Update Leaves
+        this.leaves.forEach(l => l.update(dt));
+        this.leaves = this.leaves.filter(l => !l.dead);
+
         this.particles.forEach(p => p.update(dt));
         this.particles = this.particles.filter(p => !p.dead);
+    }
+
+    _checkSeasonChange() {
+        // Cycle: 3 days Summer, 3 days Winter (Mod 6)
+        // Days 0, 1, 2 -> Summer
+        // Days 3, 4, 5 -> Winter
+        const cycleDay = this.dayCount % 6;
+        const newSeason = (cycleDay >= 3) ? 'winter' : 'summer';
+        
+        if (newSeason !== this.season) {
+            this.season = newSeason;
+            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! ❄️🍂`);
+            
+            const isWinter = (this.season === 'winter');
+            this.islands.forEach(island => island.setSeason(isWinter));
+        }
     }
 
     _handleConsumables(dt) {
@@ -257,6 +286,7 @@ class Game {
     }
 
     _updateWeather(dt) {
+        // Wind Particles
         this.windTimer -= dt;
         if (this.windTimer <= 0) {
             this.windTimer = 0.1; 
@@ -265,6 +295,18 @@ class Game {
             const px = cx + this.canvas.width + 50; 
             const py = cy + Math.random() * this.canvas.height;
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random()*400, 2.0, 5, 'wind'));
+        }
+
+        // Blowing Leaves
+        this.leafTimer -= dt;
+        if (this.leafTimer <= 0) {
+            this.leafTimer = 0.2 + Math.random() * 0.3; // Spawn freq
+            const cx = this.world.camera.x;
+            const cy = this.world.camera.y;
+            // Spawn off-screen right, blowing left
+            const lx = cx + this.canvas.width + 50;
+            const ly = cy + Math.random() * this.canvas.height;
+            this.leaves.push(new Leaf(lx, ly));
         }
     }
 
@@ -498,6 +540,10 @@ class Game {
         }
 
         this.world.draw(this.ctx);
+
+        // LAYER: Blowing Leaves (Background)
+        this.leaves.forEach(l => l.draw(this.ctx, this.world.camera));
+
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         
         this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
@@ -525,6 +571,10 @@ class Game {
             this.ctx.fillStyle = `rgba(0, 0, 30, ${darkness})`;
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
+        
+        // UI Debug for Season (Optional visual check)
+        // this.ctx.fillStyle = "white";
+        // this.ctx.fillText(`Season: ${this.season} | Day: ${this.dayCount}`, 10, 20);
 
         this.resources.drawUI(this.ctx);
         
