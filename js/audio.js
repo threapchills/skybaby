@@ -1,5 +1,5 @@
 /* THE CONDUCTOR (Audio Engine)
-   Definitive V3: Bulletproof Loading & Safety Checks.
+   Definitive V4: Now with Tasty Munching Sounds! 🍔
 */
 
 export class AudioManager {
@@ -15,7 +15,8 @@ export class AudioManager {
             'hit': 'assets/sounds/hit.ogg',
             'music': 'assets/sounds/music.ogg',
             'teepee': 'assets/sounds/teepee.ogg',
-            'death': 'assets/sounds/death.ogg'
+            'death': 'assets/sounds/death.ogg',
+            'munch': 'assets/sounds/munch.ogg' // NEW: The sound of healing!
         };
         
         this.loops = {};
@@ -77,8 +78,7 @@ export class AudioManager {
 
     startLoop(name, vol = 1.0) {
         if (!this.sounds[name]) {
-            // If sound isn't loaded yet, try again in 500ms, up to a limit? 
-            // For now, just return to avoid infinite recursion crashing
+            // If sound isn't loaded yet, try again in 500ms?
             return;
         }
         if (this.loops[name]) return; 
