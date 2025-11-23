@@ -1,6 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V20: COLLISIONS FIXED & PARTICLES BUFFED.
-   Now with anti-tunneling physics and chunkier effects!
+   Definitive V25: THE SEASONS & FLORA UPDATE 🍂❄️
+   - Added Leaf class for atmospheric particles.
+   - Islands now support Grass (randomized).
+   - Islands now support Winter Mode (texture swapping).
 */
 
 export class Entity {
@@ -36,14 +38,55 @@ export class Entity {
     }
 }
 
+export class Leaf extends Entity {
+    constructor(x, y) {
+        super(x, y, 0, 0, 'assets/environment/leaf.png'); // Size handled dynamically
+        
+        this.life = 5.0 + Math.random() * 5.0; // Live for 5-10 seconds
+        this.scale = 0.5 + Math.random() * 0.8; // Random size
+        this.angle = Math.random() * Math.PI * 2; // Random starting angle
+        this.rotationSpeed = (Math.random() - 0.5) * 4.0; // Spin speed
+        
+        // Wind speed (mostly moving left to right or with wind)
+        this.vx = 100 + Math.random() * 200; 
+        this.vy = 20 + Math.random() * 50; // Slowly falling
+    }
+
+    update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.angle += this.rotationSpeed * dt;
+        
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+    }
+
+    draw(ctx, camera) {
+        if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
+            this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
+
+        if (!this.imageLoaded) return;
+
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        ctx.rotate(this.angle);
+        ctx.scale(this.scale, this.scale);
+        // Draw centered
+        ctx.drawImage(this.image, -16, -16, 32, 32); 
+        ctx.restore();
+    }
+}
+
 export class Particle extends Entity {
     constructor(x, y, color, speed, life, size = 5, type = 'normal') {
-        // JUICE UPGRADE: Make everything slightly bigger by default for visibility
         let finalSize = size * 1.5; 
         
         let w = finalSize;
         let h = finalSize;
-        if (type === 'wind') { w = 60 + Math.random() * 60; h = 2; } // Thicker, longer wind
+        if (type === 'wind') { w = 60 + Math.random() * 60; h = 2; } 
         
         super(x, y, w, h, null);
         
@@ -58,7 +101,7 @@ export class Particle extends Entity {
         } else if (this.type === 'trail') {
             this.vx = (Math.random() - 0.5) * 10; 
             this.vy = (Math.random() - 0.5) * 10; 
-            this.w = 6; this.h = 6; // Make trail dots visible!
+            this.w = 6; this.h = 6; 
         } else {
             const angle = Math.random() * Math.PI * 2;
             this.vx = Math.cos(angle) * speed;
@@ -81,10 +124,10 @@ export class Particle extends Entity {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
         
-        if (screenX < -100 || screenX > camera.w + 100) return; // Cull off-screen particles
+        if (screenX < -100 || screenX > camera.w + 100) return; 
 
         ctx.save();
-        ctx.globalAlpha = Math.max(0, this.life / this.maxLife); // Prevent negative alpha
+        ctx.globalAlpha = Math.max(0, this.life / this.maxLife); 
         ctx.fillStyle = this.color;
         ctx.fillRect(screenX, screenY, this.w, this.h);
         ctx.globalAlpha = 1.0;
@@ -124,11 +167,9 @@ export class Pig extends Entity {
 
         this.onGround = false;
         
-        // COLLISION FIX: Check if we passed through an island
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x < island.x + island.w && this.x + this.w > island.x) {
-                    // Dynamic threshold based on speed to catch high-speed falling
                     const collisionThreshold = island.y + 30 + (this.vy * dt);
                     
                     if (this.y + this.h >= island.y && this.y + this.h <= collisionThreshold) {
@@ -169,7 +210,6 @@ export class Player extends Entity {
         this.fireCooldown = 0; 
         this.visitedIslands = new Set();
         
-        // AI Variables
         this.aiTargetIsland = null;
         this.aiStateTimer = 0;
         this.aiJump = false;
@@ -192,8 +232,8 @@ export class Player extends Entity {
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist < 600 && this.fireCooldown <= 0) { // Buffed AI Range
-                this.fireCooldown = 0.8; // Buffed AI Fire Rate
+            if (dist < 600 && this.fireCooldown <= 0) { 
+                this.fireCooldown = 0.8; 
                 const angle = Math.atan2(dy, dx);
                 this.shootRequest = { x: this.x, y: this.y, angle: angle };
             }
@@ -202,59 +242,42 @@ export class Player extends Entity {
         let moving = false;
         let wantJump = false;
 
-        // --- MOVEMENT LOGIC SWITCH ---
         if (this.team === 'green') {
-            // HUMAN INPUT
             if (input && input.keys) {
                 if (input.keys.a) { this.vx -= this.acceleration * dt; moving = true; }
                 if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
                 if (input.keys.space) wantJump = true;
             }
         } else {
-            // AI LOGIC (Blue Team)
-            moving = true; // AI always applies force to correct course
+            moving = true; 
 
-            // 1. Pick a Target (Prefer Green or Neutral islands)
             if (!this.aiTargetIsland || this.aiTargetIsland.team === 'blue' || this.aiStateTimer <= 0) {
-                this.aiStateTimer = 5.0 + Math.random() * 5.0; // Rethink every few seconds
+                this.aiStateTimer = 5.0 + Math.random() * 5.0; 
                 
-                // Find all potential targets (not blue)
                 const targets = islands.filter(i => i.team !== 'blue');
                 if (targets.length > 0) {
-                    // Pick random one to encourage roaming
                     this.aiTargetIsland = targets[Math.floor(Math.random() * targets.length)];
                 } else {
-                    // If everything is blue, just patrol random island
                     this.aiTargetIsland = islands[Math.floor(Math.random() * islands.length)];
                 }
             }
             this.aiStateTimer -= dt;
 
-            // 2. Move towards Target
             if (this.aiTargetIsland) {
                 const targetX = this.aiTargetIsland.x + (this.aiTargetIsland.w / 2);
-                const dist = Math.abs(this.x - targetX);
                 
                 if (this.x < targetX - 50) {
                     this.vx += this.acceleration * dt; 
                 } else if (this.x > targetX + 50) {
                     this.vx -= this.acceleration * dt; 
                 } else {
-                    // Near center, maybe jitter or stop?
-                    // Let's keep moving slightly to simulate patrolling
                     if (Math.random() < 0.05) this.vx *= -1;
                 }
 
-                // 3. Jump Logic (Parkour!)
-                // Jump if we are grounded and moving slow (stuck) OR purely random to traverse gaps
                 if (this.isGrounded) {
                     if (Math.abs(this.vx) < 50 || Math.random() < 0.015) {
                         wantJump = true;
                     }
-                    
-                    // Jump if reaching edge of current platform?
-                    // Simple heuristic: if we need to go Right, but there is a gap?
-                    // Hard to detect gaps without raycasts, but random jumping works well for this chaos.
                 }
             }
         }
@@ -272,37 +295,30 @@ export class Player extends Entity {
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
-        // SHARED JUMP / FLY LOGIC
         if (wantJump) {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
                 if(audio) audio.play('jump', 0.4, 0.1);
             } else if (this.team === 'green' && resources && resources.air > 0) {
-                // Only Green team uses resources to fly
                 this.vy -= 1500 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
                 resources.air -= 80 * dt; 
             } else if (this.team === 'blue') {
-                // AI can cheat slightly and "flutter" if stuck in air?
-                // Nah, let's keep them grounded to physics, maybe small air control
-                this.vy -= 100 * dt; // Slight float
+                this.vy -= 100 * dt; 
             }
         }
         this.y += this.vy * dt;
 
-        // --- CRASH-PROOF & FALL-PROOF COLLISION ---
         this.isGrounded = false;
         
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x < island.x + island.w && this.x + this.w > island.x) {
-                    
-                    // FIX: Dynamic threshold based on velocity to catch high-speed falling
                     const collisionThreshold = island.y + 30 + (this.vy * dt);
                     
                     if (this.y + this.h >= island.y && this.y + this.h <= collisionThreshold) {
-                        this.y = island.y - this.h + 1; // Snap to top (slight overlap to prevent jitter)
+                        this.y = island.y - this.h + 1; 
                         this.vy = 0;
                         this.isGrounded = true;
                         
@@ -362,22 +378,38 @@ export class Island extends Entity {
         super(x, y, w, h, null);
         this.team = team;
         
-        this.tileset = new Image();
-        this.tileset.src = 'assets/environment/island_tileset.png';
+        // --- PRELOAD TEXTURES (Normal & Winter) ---
+        this.imgTilesetNormal = new Image();
+        this.imgTilesetNormal.src = 'assets/environment/island_tileset.png';
         
+        this.imgTilesetWinter = new Image();
+        this.imgTilesetWinter.src = 'assets/environment/island_tileset_winter.png';
+
+        this.imgTreeNormal = new Image();
+        this.imgTreeNormal.src = 'assets/environment/tree_variant1.png';
+
+        this.imgTreeWinter = new Image();
+        this.imgTreeWinter.src = 'assets/environment/tree_variant1_winter.png';
+        
+        // Current active textures
+        this.activeTileset = this.imgTilesetNormal;
+        this.activeTree = this.imgTreeNormal;
+
+        // Grass
+        this.imgGrass = new Image();
+        this.imgGrass.src = 'assets/environment/grass.png';
+
         this.imgTeepee = new Image();
         this._updateTeepeeImage();
         
         this.imgFire = new Image();
         this.imgFire.src = 'assets/environment/fireplace_lit.png';
 
-        this.imgTree = new Image();
-        this.imgTree.src = 'assets/environment/tree_variant1.png';
-
         this.hasTeepee = true;
         this.hasFireplace = Math.random() > 0.4; 
         this.conversionTimer = 0; 
         
+        // Generate Trees
         this.trees = [];
         const numTrees = 1 + Math.floor(Math.random() * (w / 70)); 
         for (let i = 0; i < numTrees; i++) {
@@ -388,9 +420,30 @@ export class Island extends Entity {
             });
         }
 
+        // Generate Grass
+        this.grass = [];
+        const numGrass = 2 + Math.floor(Math.random() * (w / 40)); 
+        for (let i = 0; i < numGrass; i++) {
+            this.grass.push({
+                x: Math.random() * (w - 30), 
+                scale: 0.8 + Math.random() * 0.6, // Smaller variance than trees
+                hueRotate: Math.floor(Math.random() * 60) - 30 // More color variance
+            });
+        }
+
         this.vx = 0;
         this.vy = 0;
         this.friction = 0.90; 
+    }
+
+    setSeason(isWinter) {
+        if (isWinter) {
+            this.activeTileset = this.imgTilesetWinter;
+            this.activeTree = this.imgTreeWinter;
+        } else {
+            this.activeTileset = this.imgTilesetNormal;
+            this.activeTree = this.imgTreeNormal;
+        }
     }
 
     _updateTeepeeImage() {
@@ -455,32 +508,48 @@ export class Island extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
 
-        if (this.tileset.complete && this.tileset.naturalWidth > 0) {
-            const sliceW = Math.floor(this.tileset.width / 3);
-            const sliceH = this.tileset.height;
-            ctx.drawImage(this.tileset, 0, 0, sliceW, sliceH, screenX, screenY, sliceW, sliceH);
+        // Draw Tileset (Using active season image)
+        if (this.activeTileset.complete && this.activeTileset.naturalWidth > 0) {
+            const sliceW = Math.floor(this.activeTileset.width / 3);
+            const sliceH = this.activeTileset.height;
+            ctx.drawImage(this.activeTileset, 0, 0, sliceW, sliceH, screenX, screenY, sliceW, sliceH);
             const rightX = screenX + this.w - sliceW;
             const middleWidth = rightX - (screenX + sliceW);
             if (middleWidth > 0) {
-                ctx.drawImage(this.tileset, sliceW, 0, sliceW, sliceH, screenX + sliceW, screenY, middleWidth + 2, sliceH);
+                ctx.drawImage(this.activeTileset, sliceW, 0, sliceW, sliceH, screenX + sliceW, screenY, middleWidth + 2, sliceH);
             }
-            ctx.drawImage(this.tileset, sliceW * 2, 0, sliceW, sliceH, rightX, screenY, sliceW, sliceH);
+            ctx.drawImage(this.activeTileset, sliceW * 2, 0, sliceW, sliceH, rightX, screenY, sliceW, sliceH);
         } else {
             ctx.fillStyle = this.team === 'green' ? '#2E8B57' : '#4682B4';
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
+        // Draw Grass (Before trees/teepees so it's behind/around them)
+        if (this.imgGrass.complete) {
+            this.grass.forEach(g => {
+                ctx.save();
+                ctx.filter = `hue-rotate(${g.hueRotate}deg)`;
+                const grassW = 32 * g.scale;
+                const grassH = 32 * g.scale;
+                const grassY = screenY - (25 * g.scale); 
+                ctx.drawImage(this.imgGrass, screenX + g.x, grassY, grassW, grassH);
+                ctx.restore();
+            });
+        }
+
         if (this.hasTeepee && this.imgTeepee.complete) {
             ctx.drawImage(this.imgTeepee, screenX + 20, screenY - 66, 96, 96);
         }
-        if (this.imgTree.complete) {
+        
+        // Draw Trees (Using active season image)
+        if (this.activeTree.complete) {
             this.trees.forEach(tree => {
                 ctx.save();
                 ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
                 const treeW = 120 * tree.scale;
                 const treeH = 150 * tree.scale;
                 const treeY = screenY - (110 * tree.scale); 
-                ctx.drawImage(this.imgTree, screenX + tree.x, treeY, treeW, treeH);
+                ctx.drawImage(this.activeTree, screenX + tree.x, treeY, treeW, treeH);
                 ctx.restore();
             });
         }
