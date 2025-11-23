@@ -1,6 +1,6 @@
 /* THE HEART OF THE GAME
-   Definitive V21: OPTIMIZATION, SHAKE FIX & SPAWN OVERHAUL.
-   Now with buttery smooth night cycle and real population mechanics.
+   Definitive V22: OPERATION HAM & CHEESE 🐷🧀
+   Now with roaming pigs that heal you! Yum!
 */
 
 import { InputHandler } from './input.js';
@@ -77,6 +77,7 @@ class Game {
 
         const maxAttempts = 50; 
         
+        // Generate Islands
         for (let i = 0; i < 25; i++) {
             let placed = false;
             for(let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -102,15 +103,23 @@ class Game {
                     if (rx > 4500) team = 'blue';
                     const newIsland = new Island(rx, ry, rw, rh, team);
                     this.islands.push(newIsland);
-                    
-                    if (Math.random() > 0.5) {
-                        this.pigs.push(new Pig(rx + rw/2, ry - 50));
-                    }
-                    
                     placed = true;
                     break;
                 }
             }
+        }
+
+        // --- PIG SPAWNER 9000 ---
+        // Ensuring 50 to 100 pigs roam the lands!
+        const pigCount = 50 + Math.floor(Math.random() * 51); // 50 to 100
+        for (let i = 0; i < pigCount; i++) {
+            // Pick a random island
+            const home = this.islands[Math.floor(Math.random() * this.islands.length)];
+            const px = home.x + Math.random() * (home.w - 50);
+            const py = home.y - 60; // Just above the ground
+            const piggy = new Pig(px, py);
+            piggy.homeIsland = home; // Give them a home immediately so they don't wander into the void
+            this.pigs.push(piggy);
         }
 
         this.player.visitedIslands.add(this.islands[0]);
@@ -156,7 +165,6 @@ class Game {
         this.world.update(this.player);
 
         if (!this.enemyChief.dead) {
-            // UPDATED: No more manual movement here. The Enemy AI in entities.js handles it now!
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player); 
             
             if (this.enemyChief.shootRequest) {
@@ -164,13 +172,12 @@ class Game {
                 this.enemyChief.shootRequest = null; 
             }
 
-            // NEW: CONTACT KILL LOGIC
-            // The enemy shaman now ruthlessly crushes any Green team member he touches
+            // CONTACT KILL LOGIC
             this.villagers.forEach(v => {
                 if (v.team === 'green' && !v.dead) {
                     if (this._checkHit(this.enemyChief, v)) {
                         v.dead = true;
-                        this._spawnBlood(v.x, v.y, '#00ff00', 30); // Splat!
+                        this._spawnBlood(v.x, v.y, '#00ff00', 30); 
                         this.audio.play('hit', 0.5, 0.2); 
                         this.shake = 5; 
                     }
@@ -202,7 +209,6 @@ class Game {
         });
         
         this.resources.update(dt, isMoving, nearWater, nearFire);
-        // Pass specific counts to the UI
         this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
@@ -211,15 +217,53 @@ class Game {
         }
 
         this.spawnTimer += dt;
-        if (this.spawnTimer > 3.0) { // FASTER SPAWN RATE
+        if (this.spawnTimer > 3.0) { 
             this._spawnVillagers(); 
             this.spawnTimer = 0;
         }
 
         this._handleCombat(dt);
+        
+        // --- NEW: HANDLE PIGS ---
+        this._handleConsumables(dt); // Check for eating pigs!
         this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
+        this.pigs = this.pigs.filter(p => !p.dead); // Clean up eaten pigs
+
         this.particles.forEach(p => p.update(dt));
         this.particles = this.particles.filter(p => !p.dead);
+    }
+
+    // NEW: Logic for Eating Pigs
+    _handleConsumables(dt) {
+        for (let i = this.pigs.length - 1; i >= 0; i--) {
+            const pig = this.pigs[i];
+            
+            // Check Player collision (Healing)
+            if (!this.player.dead && this._checkHit(this.player, pig)) {
+                this._consumePig(pig, this.player);
+                continue; 
+            }
+
+            // Check Enemy Chief collision (Healing)
+            if (!this.enemyChief.dead && this._checkHit(this.enemyChief, pig)) {
+                this._consumePig(pig, this.enemyChief);
+                continue;
+            }
+        }
+    }
+
+    _consumePig(pig, consumer) {
+        pig.dead = true;
+        
+        // Heal 1/10th of max health (which is 100, so heal 10)
+        consumer.hp = Math.min(consumer.hp + 10, consumer.maxHp);
+        
+        // JUICY FEEDBACK
+        this.audio.play('munch', 0.6, 0.2); // Varied pitch for that 'crunch'
+        this.shake = 5; // Subtle satisfaction shake
+        
+        // Spawn PINK healing particles (Hot Pink #FF69B4)
+        this._spawnBlood(pig.x, pig.y, '#FF69B4', 15); 
     }
 
     _updateWeather(dt) {
@@ -239,7 +283,6 @@ class Game {
         const blueCount = this.villagers.filter(v => v.team === 'blue').length;
 
         if (this.player.dead) {
-            // Only lose if you have 0 villagers left
             if (greenCount > 0) {
                 this.player.respawnTimer -= dt;
                 if (this.player.respawnTimer <= 0) {
@@ -310,7 +353,6 @@ class Game {
             
             let hitSomething = false;
 
-            // GREEN PROJECTILES (Player) hitting Blue Shaman
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
                 this.enemyChief.hp -= 15; 
@@ -325,10 +367,8 @@ class Game {
                 }
             }
             
-            // BLUE PROJECTILES (Enemy) hitting Player
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                // UPDATE: 4 shots to kill (100 HP / 25 damage = 4 shots)
                 this.player.hp -= 25; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
@@ -340,18 +380,14 @@ class Game {
                 }
             }
             
-            // Projectiles hitting Villagers
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
-                    
-                    // UPDATE: Blue shaman arrows kill Green villagers instantly
                     if (p.team === 'blue') {
                         v.hp = 0;
                     } else {
                         v.hp -= 25; 
                     }
-
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
                     if (v.hp <= 0) {
@@ -421,17 +457,13 @@ class Game {
         }
     }
 
-    // NEW: Distributed Spawning Logic
     _spawnVillagers() {
-        if (this.villagers.length >= 200) return; // Global Cap
+        if (this.villagers.length >= 200) return; 
 
-        // Shuffle islands to spawn randomly across the map, not just first ones
         const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
 
         for (let island of shuffledIslands) {
-            // Only spawn if island has a teepee and belongs to a team
             if (island.hasTeepee && (island.team === 'green' || island.team === 'blue')) {
-                // 30% chance per island per spawn tick
                 if (Math.random() < 0.3) {
                     const unit = (Math.random() < 0.4) ? 
                         new Warrior(island.x + 50, island.y - 40, island.team) :
@@ -439,7 +471,6 @@ class Game {
                     unit.homeIsland = island;
                     this.villagers.push(unit);
                     
-                    // Soft cap to prevent one tick from spawning 50 units
                     if (this.villagers.length >= 200) break; 
                 }
             }
@@ -457,7 +488,6 @@ class Game {
             if (darkness > 0.8) darkness = 0.8;
         }
         
-        // FIX: Camera shake applied DIRECTLY via save/restore block
         this.ctx.save();
         if (this.shake > 0) {
             const dx = (Math.random() - 0.5) * this.shake;
@@ -467,6 +497,10 @@ class Game {
 
         this.world.draw(this.ctx);
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
+        
+        // PIGS BEFORE VILLAGERS!
+        this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
+        
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
         this.projectiles.forEach(p => p.draw(this.ctx, this.world.camera));
         if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
@@ -484,9 +518,8 @@ class Game {
             this.ctx.setLineDash([]);
         }
 
-        this.ctx.restore(); // End of Shake
+        this.ctx.restore(); 
 
-        // FIX: Night Cycle is now a simple overlay (FAST performance)
         if (darkness > 0.05) {
             this.ctx.fillStyle = `rgba(0, 0, 30, ${darkness})`;
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
