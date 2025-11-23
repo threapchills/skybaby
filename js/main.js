@@ -156,16 +156,26 @@ class Game {
         this.world.update(this.player);
 
         if (!this.enemyChief.dead) {
-            const dx = this.player.x - this.enemyChief.x;
-            const dy = this.player.y - this.enemyChief.y;
-            this.enemyChief.x += (dx * 0.15) * dt;
-            this.enemyChief.y += (dy * 0.15) * dt;
+            // UPDATED: No more manual movement here. The Enemy AI in entities.js handles it now!
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player); 
             
             if (this.enemyChief.shootRequest) {
                 this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue'));
                 this.enemyChief.shootRequest = null; 
             }
+
+            // NEW: CONTACT KILL LOGIC
+            // The enemy shaman now ruthlessly crushes any Green team member he touches
+            this.villagers.forEach(v => {
+                if (v.team === 'green' && !v.dead) {
+                    if (this._checkHit(this.enemyChief, v)) {
+                        v.dead = true;
+                        this._spawnBlood(v.x, v.y, '#00ff00', 30); // Splat!
+                        this.audio.play('hit', 0.5, 0.2); 
+                        this.shake = 5; 
+                    }
+                }
+            });
         }
 
         this._checkWinConditions(dt);
@@ -300,38 +310,48 @@ class Game {
             
             let hitSomething = false;
 
-            // BUFF: Projectiles now do more damage (15 instead of 5/10)
+            // GREEN PROJECTILES (Player) hitting Blue Shaman
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= 15; // Buffed Damage
+                this.enemyChief.hp -= 15; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.enemyChief.hp <= 0) {
                     this.enemyChief.dead = true;
-                    this.enemyChief.respawnTimer = 8.0; // Longer respawn penalty
+                    this.enemyChief.respawnTimer = 8.0; 
                     this._spawnBlood(p.x, p.y, '#cc0000', 100); 
-                    this.shake = 80; // HARDER SHAKE
+                    this.shake = 80; 
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
             
+            // BLUE PROJECTILES (Enemy) hitting Player
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= 15; // Buffed Damage
+                // UPDATE: 4 shots to kill (100 HP / 25 damage = 4 shots)
+                this.player.hp -= 25; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
                     this.player.dead = true;
                     this.player.respawnTimer = 8.0;
-                    this.shake = 80; // HARDER SHAKE
+                    this.shake = 80; 
                     this.audio.play('death', 0.8, 0.1); 
                 }
             }
             
+            // Projectiles hitting Villagers
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
-                    v.hp -= 25; // One or two shots to kill villagers
+                    
+                    // UPDATE: Blue shaman arrows kill Green villagers instantly
+                    if (p.team === 'blue') {
+                        v.hp = 0;
+                    } else {
+                        v.hp -= 25; 
+                    }
+
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
                     if (v.hp <= 0) {
