@@ -1,66 +1,94 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V29: THE SNOWSTORM UPDATE ❄️
-   - Added Snowflake class for hectic winter particles.
-   - Maintained layer ordering (Tent on top).
-   - Optimized asset handling.
+   Definitive V32: THE ANTI-FREEZE UPDATE 🚒
+   - CRITICAL FIX: All images are now preloaded in a static 'Assets' object.
+   - Leaf class now uses the shared 'Assets.leaf' (Prevents memory leak crash).
+   - Snowflake class logic secured against math errors.
+   - Reverts "shorter" logic to ensure stability.
 */
 
+// --- GLOBAL ASSET LOADER ---
+// We load these ONCE. All entities share them.
+export const Assets = {
+    // Environment
+    tilesetNormal: new Image(),
+    tilesetWinter: new Image(),
+    treeNormal: new Image(),
+    treeWinter: new Image(),
+    grass: new Image(),
+    teepeeGreen: new Image(),
+    teepeeBlue: new Image(),
+    fire: new Image(),
+    leaf: new Image(),
+    
+    // Characters
+    playerGreen: new Image(),
+    playerBlue: new Image(),
+    pig: new Image(),
+    villagerGreen: [], 
+    villagerBlue: [],
+    warriorGreen: new Image(),
+    warriorBlue: new Image(),
+    projectile: new Image()
+};
+
+// --- SOURCE ASSIGNMENT ---
+Assets.tilesetNormal.src = 'assets/environment/island_tileset.png';
+Assets.tilesetWinter.src = 'assets/environment/island_tileset_winter.png';
+Assets.treeNormal.src = 'assets/environment/tree_variant1.png';
+Assets.treeWinter.src = 'assets/environment/tree_variant1_winter.png';
+Assets.grass.src = 'assets/environment/grass.png';
+Assets.teepeeGreen.src = 'assets/environment/teepee_green.png';
+Assets.teepeeBlue.src = 'assets/environment/teepee_blue.png';
+Assets.fire.src = 'assets/environment/fireplace_lit.png';
+Assets.leaf.src = 'assets/environment/leaf.png';
+
+Assets.playerGreen.src = 'assets/sprites/player_green.png';
+Assets.playerBlue.src = 'assets/sprites/player_blue.png';
+Assets.pig.src = 'assets/sprites/pig.png';
+Assets.warriorGreen.src = 'assets/sprites/warrior_green.png';
+Assets.warriorBlue.src = 'assets/sprites/warrior_blue.png';
+Assets.projectile.src = 'assets/sprites/projectile_arrow.png';
+
+// Load Villager Variants (1-4)
+for(let i=1; i<=4; i++) {
+    let vGreen = new Image(); vGreen.src = `assets/sprites/villager_green_${i}.png`;
+    Assets.villagerGreen.push(vGreen);
+    
+    let vBlue = new Image(); vBlue.src = `assets/sprites/villager_blue_${i}.png`;
+    Assets.villagerBlue.push(vBlue);
+}
+
+// --- BASE CLASS ---
 export class Entity {
-    constructor(x, y, w, h, imagePath) {
+    constructor(x, y, w, h) {
         this.x = x;
         this.y = y;
         this.w = w;
         this.h = h;
         this.dead = false;
-        
-        this.image = null;
-        if (imagePath) {
-            this.image = new Image();
-            this.image.src = imagePath;
-            this.imageLoaded = false;
-            this.image.onload = () => { 
-                this.imageLoaded = true; 
-            };
-            this.image.onerror = () => {
-                console.warn("Failed to load image:", imagePath);
-                this.imageLoaded = false;
-            };
-        }
     }
 
-    draw(ctx, camera) {
-        if (this.x + this.w < camera.x || this.x > camera.x + camera.w ||
-            this.y + this.h < camera.y || this.y > camera.y + camera.h) return;
-
-        const screenX = Math.floor(this.x - camera.x);
-        const screenY = Math.floor(this.y - camera.y);
-
-        if (this.image && this.imageLoaded && this.image.naturalWidth > 0) {
-            try {
-                ctx.drawImage(this.image, screenX, screenY, this.w, this.h);
-            } catch (e) {
-                this._drawFallback(ctx, screenX, screenY);
-            }
+    // Helper to safely draw an image if it's loaded
+    drawSprite(ctx, img, screenX, screenY, width, height) {
+        if (img && img.complete && img.naturalWidth > 0) {
+            ctx.drawImage(img, screenX, screenY, width, height);
         } else {
-            this._drawFallback(ctx, screenX, screenY);
+            // Debug placeholder (invisible or hot pink if needed)
+            // ctx.fillStyle = 'magenta';
+            // ctx.fillRect(screenX, screenY, width, height);
         }
-    }
-
-    _drawFallback(ctx, screenX, screenY) {
-        ctx.fillStyle = '#ff00ff'; 
-        ctx.fillRect(screenX, screenY, this.w, this.h);
     }
 }
 
+// --- PARTICLES & EFFECTS ---
+
 export class Leaf extends Entity {
     constructor(x, y) {
-        super(x, y, 0, 0, 'assets/environment/leaf.png'); 
-        
+        super(x, y, 32, 32); 
         this.life = 5.0 + Math.random() * 5.0; 
         this.scale = 0.5 + Math.random() * 0.8; 
         this.angle = Math.random() * Math.PI * 2; 
         this.rotationSpeed = (Math.random() - 0.5) * 4.0; 
-        
         this.vx = 100 + Math.random() * 200; 
         this.vy = 20 + Math.random() * 50; 
     }
@@ -69,16 +97,14 @@ export class Leaf extends Entity {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.angle += this.rotationSpeed * dt;
-        
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
     }
 
     draw(ctx, camera) {
+        // Cull off-screen
         if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
             this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
-
-        if (!this.imageLoaded || this.image.naturalWidth === 0) return;
 
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
@@ -87,22 +113,22 @@ export class Leaf extends Entity {
         ctx.translate(screenX, screenY);
         ctx.rotate(this.angle);
         ctx.scale(this.scale, this.scale);
-        ctx.drawImage(this.image, -16, -16, 32, 32); 
+        // FIX: Use the Shared Asset!
+        this.drawSprite(ctx, Assets.leaf, -16, -16, 32, 32);
         ctx.restore();
     }
 }
 
-// NEW: HECTIC SNOWFLAKE ❄️
 export class Snowflake {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.vx = -50 + Math.random() * 150; // Drifts slightly right mostly
-        this.vy = 150 + Math.random() * 150; // Fast falling!
-        this.size = 2 + Math.random() * 3; // Chunkier flakes
+        this.vx = -50 + Math.random() * 150; 
+        this.vy = 150 + Math.random() * 150; 
+        this.size = 2 + Math.random() * 3; 
         this.life = 4.0; 
         this.dead = false;
-        this.sway = Math.random() * Math.PI; // For a little sine wave wobble
+        this.sway = Math.random() * Math.PI; 
     }
 
     update(dt) {
@@ -134,7 +160,7 @@ export class Particle extends Entity {
         let h = finalSize;
         if (type === 'wind') { w = 60 + Math.random() * 60; h = 2; } 
         
-        super(x, y, w, h, null);
+        super(x, y, w, h);
         
         this.color = color;
         this.type = type;
@@ -181,9 +207,11 @@ export class Particle extends Entity {
     }
 }
 
+// --- GAME OBJECTS ---
+
 export class Pig extends Entity {
     constructor(x, y) {
-        super(x, y, 32, 24, 'assets/sprites/pig.png'); 
+        super(x, y, 32, 24); 
         this.hp = 10;
         this.vx = 0;
         this.vy = 0; 
@@ -230,11 +258,18 @@ export class Pig extends Entity {
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
     }
+
+    draw(ctx, camera) {
+        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
+        const screenX = Math.floor(this.x - camera.x);
+        const screenY = Math.floor(this.y - camera.y);
+        this.drawSprite(ctx, Assets.pig, screenX, screenY, this.w, this.h);
+    }
 }
 
 export class Player extends Entity {
     constructor(x, y, team) {
-        super(x, y, 40, 40, `assets/sprites/player_${team}.png`);
+        super(x, y, 40, 40);
         this.team = team; 
         this.vx = 0;
         this.vy = 0;
@@ -398,12 +433,8 @@ export class Player extends Entity {
             ctx.fill();
         }
 
-        if (this.image && this.imageLoaded && this.image.naturalWidth > 0) {
-            ctx.drawImage(this.image, screenX - 4, screenY - 4, 48, 48);
-        } else {
-            ctx.fillStyle = this.team === 'green' ? '#0f0' : '#00f';
-            ctx.fillRect(screenX, screenY, this.w, this.h);
-        }
+        const img = (this.team === 'green') ? Assets.playerGreen : Assets.playerBlue;
+        this.drawSprite(ctx, img, screenX - 4, screenY - 4, 48, 48);
 
         ctx.fillStyle = 'red';
         ctx.fillRect(screenX, screenY - 10, this.w, 4);
@@ -412,34 +443,13 @@ export class Player extends Entity {
     }
 }
 
-// STATIC RESOURCE CACHE
-const IslandAssets = {
-    tilesetNormal: new Image(),
-    tilesetWinter: new Image(),
-    treeNormal: new Image(),
-    treeWinter: new Image(),
-    grass: new Image(),
-    teepeeGreen: new Image(),
-    teepeeBlue: new Image(),
-    fire: new Image()
-};
-
-IslandAssets.tilesetNormal.src = 'assets/environment/island_tileset.png';
-IslandAssets.tilesetWinter.src = 'assets/environment/island_tileset_winter.png';
-IslandAssets.treeNormal.src = 'assets/environment/tree_variant1.png';
-IslandAssets.treeWinter.src = 'assets/environment/tree_variant1_winter.png';
-IslandAssets.grass.src = 'assets/environment/grass.png';
-IslandAssets.teepeeGreen.src = 'assets/environment/teepee_green.png';
-IslandAssets.teepeeBlue.src = 'assets/environment/teepee_blue.png';
-IslandAssets.fire.src = 'assets/environment/fireplace_lit.png';
-
 export class Island extends Entity {
     constructor(x, y, w, h, team) {
-        super(x, y, w, h, null);
+        super(x, y, w, h);
         this.team = team;
         
-        this.activeTileset = IslandAssets.tilesetNormal;
-        this.activeTree = IslandAssets.treeNormal;
+        this.activeTileset = Assets.tilesetNormal;
+        this.activeTree = Assets.treeNormal;
 
         this.hasTeepee = true;
         this.hasFireplace = Math.random() > 0.4; 
@@ -472,11 +482,11 @@ export class Island extends Entity {
 
     setSeason(isWinter) {
         if (isWinter) {
-            this.activeTileset = IslandAssets.tilesetWinter;
-            this.activeTree = IslandAssets.treeWinter;
+            this.activeTileset = Assets.tilesetWinter;
+            this.activeTree = Assets.treeWinter;
         } else {
-            this.activeTileset = IslandAssets.tilesetNormal;
-            this.activeTree = IslandAssets.treeNormal;
+            this.activeTileset = Assets.tilesetNormal;
+            this.activeTree = Assets.treeNormal;
         }
     }
 
@@ -530,7 +540,7 @@ export class Island extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
 
-        // 1. SAFE DRAW: Tileset (Bottom)
+        // 1. Tileset (Bottom)
         if (this.activeTileset.complete && this.activeTileset.naturalWidth > 0) {
             const sliceW = Math.floor(this.activeTileset.width / 3);
             const sliceH = this.activeTileset.height;
@@ -546,21 +556,21 @@ export class Island extends Entity {
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // 2. SAFE DRAW: Grass (Layer 2)
-        if (IslandAssets.grass.complete && IslandAssets.grass.naturalWidth > 0) {
+        // 2. Grass
+        if (Assets.grass.complete) {
             this.grass.forEach(g => {
                 ctx.save();
                 ctx.filter = `hue-rotate(${g.hueRotate}deg)`;
                 const grassW = 32 * g.scale;
                 const grassH = 32 * g.scale;
                 const grassY = screenY - (25 * g.scale); 
-                ctx.drawImage(IslandAssets.grass, screenX + g.x, grassY, grassW, grassH);
+                ctx.drawImage(Assets.grass, screenX + g.x, grassY, grassW, grassH);
                 ctx.restore();
             });
         }
 
-        // 3. SAFE DRAW: Trees (Layer 3 - BEHIND Tent)
-        if (this.activeTree.complete && this.activeTree.naturalWidth > 0) {
+        // 3. Trees (BEHIND Tent)
+        if (this.activeTree.complete) {
             this.trees.forEach(tree => {
                 ctx.save();
                 ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
@@ -572,23 +582,20 @@ export class Island extends Entity {
             });
         }
 
-        // 4. SAFE DRAW: Teepee (Layer 4 - FRONT)
-        const teepeeImg = (this.team === 'green') ? IslandAssets.teepeeGreen : IslandAssets.teepeeBlue;
-        if (this.hasTeepee && teepeeImg.complete && teepeeImg.naturalWidth > 0) {
-            ctx.drawImage(teepeeImg, screenX + 20, screenY - 66, 96, 96);
-        }
+        // 4. Teepee (FRONT)
+        const teepeeImg = (this.team === 'green') ? Assets.teepeeGreen : Assets.teepeeBlue;
+        this.drawSprite(ctx, teepeeImg, screenX + 20, screenY - 66, 96, 96);
         
-        // 5. SAFE DRAW: Fire (Layer 5 - Topmost)
-        if (this.hasFireplace && IslandAssets.fire.complete && IslandAssets.fire.naturalWidth > 0) {
-            ctx.drawImage(IslandAssets.fire, screenX + (this.w/2) - 40, screenY - 54, 80, 80);
+        // 5. Fire
+        if (this.hasFireplace) {
+            this.drawSprite(ctx, Assets.fire, screenX + (this.w/2) - 40, screenY - 54, 80, 80);
         }
     }
 }
 
 export class Villager extends Entity {
     constructor(x, y, team) {
-        const variant = Math.floor(Math.random() * 4) + 1;
-        super(x, y, 24, 24, `assets/sprites/villager_${team}_${variant}.png`); 
+        super(x, y, 24, 24); 
         this.team = team;
         this.hp = 20;
         this.homeIsland = null;
@@ -597,6 +604,8 @@ export class Villager extends Entity {
         this.stateTimer = 0;
         this.onGround = false;
         this.maxFallSpeed = 800; 
+        
+        this.variantIndex = Math.floor(Math.random() * 4); 
     }
 
     update(dt, islands, worldWidth, worldHeight) {
@@ -639,15 +648,33 @@ export class Villager extends Entity {
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
     }
+
+    draw(ctx, camera) {
+        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
+        const screenX = Math.floor(this.x - camera.x);
+        const screenY = Math.floor(this.y - camera.y);
+        
+        const variants = (this.team === 'green') ? Assets.villagerGreen : Assets.villagerBlue;
+        const img = variants[this.variantIndex];
+        this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
+    }
 }
 
 export class Warrior extends Villager {
     constructor(x, y, team) {
         super(x, y, team);
         this.w = 32; this.h = 32; 
-        this.image.src = `assets/sprites/warrior_${team}.png`;
         this.hp = 50; 
         this.attackCooldown = 0;
+    }
+
+    draw(ctx, camera) {
+        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
+        const screenX = Math.floor(this.x - camera.x);
+        const screenY = Math.floor(this.y - camera.y);
+        
+        const img = (this.team === 'green') ? Assets.warriorGreen : Assets.warriorBlue;
+        this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
     }
 
     update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio) {
@@ -743,7 +770,7 @@ export class Warrior extends Villager {
 
 export class Projectile extends Entity {
     constructor(x, y, angle, team) {
-        super(x, y, 32, 10, 'assets/sprites/projectile_arrow.png'); 
+        super(x, y, 32, 10); 
         this.team = team;
         const speed = 600; 
         this.vx = Math.cos(angle) * speed;
@@ -773,12 +800,7 @@ export class Projectile extends Entity {
         ctx.save();
         ctx.translate(screenX, screenY);
         ctx.rotate(this.angle);
-        if (this.image && this.imageLoaded && this.image.naturalWidth > 0) {
-            ctx.drawImage(this.image, 0, 0, this.w, this.h);
-        } else {
-            ctx.fillStyle = 'yellow';
-            ctx.fillRect(0, 0, this.w, this.h);
-        }
+        this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
         ctx.restore();
     }
 }
