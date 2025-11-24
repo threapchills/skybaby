@@ -1,5 +1,8 @@
 /* THE STAGE MANAGER (World & Camera)
-   Fixed filenames to match your uploads!
+   Definitive V2: MOOD LIGHTING UPDATE 🎭
+   - Added season support to World.draw().
+   - Applies hue-rotate filter to background layers during Winter.
+   - Shifts reddish/mauve sky to icy blue/green.
 */
 
 export class Camera {
@@ -60,7 +63,6 @@ export class World {
         this.height = height;
         this.camera = new Camera(800, 600, width, height);
 
-        // FILENAMES UPDATED TO MATCH YOUR UPLOADS
         this.layers = [
             // Back: Sky Layer 1
             new ParallaxLayer('assets/backgrounds/sky_layer_1.png', 0.1, 0, 5),
@@ -75,7 +77,17 @@ export class World {
         this.camera.follow(player);
     }
 
-    draw(ctx) {
+    draw(ctx, season) {
+        ctx.save();
+        
+        // WINTER FILTER: Shift Hue to Blue/Green
+        // 180deg shift turns Red -> Cyan, Purple -> Greenish-Blue
+        if (season === 'winter') {
+            ctx.filter = 'hue-rotate(180deg) brightness(1.1)'; 
+        }
+
         this.layers.forEach(layer => layer.draw(ctx, this.camera));
+        
+        ctx.restore(); // Remove filter for game objects
     }
 }
