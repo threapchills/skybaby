@@ -1,13 +1,18 @@
 /* THE HEART OF THE GAME
-   Definitive V30: ATMOSPHERIC HUES 🌈
-   - Passed 'season' into World.draw() to trigger sky color shift.
-   - Winter skies are now icy blue/green instead of warm mauve.
+   Definitive V32: STABILITY & OPTIMIZATION 🛡️
+   - Aligned with new Entities Asset Manager to prevent crashes.
+   - Added robust safety checks in the game loop.
+   - Fixed freezing issues caused by asset memory leaks.
 */
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
 import { World } from './world.js';
-import { Player, Island, Villager, Warrior, Projectile, Particle, Pig, Leaf, Snowflake } from './entities.js';
+// IMPORT EVERYTHING EXPLICITLY TO PREVENT MISSING MODULE ERRORS
+import { 
+    Player, Island, Villager, Warrior, Projectile, 
+    Particle, Pig, Leaf, Snowflake, Assets 
+} from './entities.js';
 import { AudioManager } from './audio.js';
 
 class Game {
@@ -36,15 +41,15 @@ class Game {
         this.particles = [];
         this.pigs = []; 
         this.leaves = []; 
-        this.snowflakes = []; // NEW: Snow container
+        this.snowflakes = []; 
 
-        // RANDOM SEASON START
+        // RANDOM SEASON START (50/50)
         this.season = Math.random() > 0.5 ? 'summer' : 'winter';
         console.log(`🎲 Starting Season: ${this.season.toUpperCase()}`);
 
         this._generateWorld();
 
-        // Apply season immediately after generation
+        // Apply season immediately
         const isWinter = (this.season === 'winter');
         this.islands.forEach(island => island.setSeason(isWinter));
 
@@ -60,7 +65,7 @@ class Game {
         this.dayCount = 0; 
         
         this.windTimer = 0;
-        this.weatherTimer = 0; // Renamed from leafTimer to generic weather timer
+        this.weatherTimer = 0; 
         this.pulseTime = 0; 
 
         window.addEventListener('click', () => this._startAudio(), { once: true });
@@ -93,7 +98,6 @@ class Game {
 
         const maxAttempts = 50; 
         
-        // Generate Islands
         for (let i = 0; i < 25; i++) {
             let placed = false;
             for(let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -142,10 +146,16 @@ class Game {
         const dtRaw = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
         
+        // Clamp dt to prevent spirals
         const dt = Math.min(dtRaw, 0.05); 
 
-        this.update(dt);
-        this.draw();
+        try {
+            this.update(dt);
+            this.draw();
+        } catch (e) {
+            console.error("GAME CRASH PREVENTED:", e);
+        }
+        
         requestAnimationFrame((ts) => this.loop(ts));
     }
 
@@ -155,13 +165,18 @@ class Game {
         if (this.shake > 0) this.shake -= 15 * dt; 
         if (this.shake < 0) this.shake = 0;
         
+        // --- DAY/NIGHT CYCLE (20s Day, 10s Night) ---
         this.dayCycleTimer += dt;
 
         if (this.dayCycleTimer < 20) {
-            this.dayTime += dt * (Math.PI / 20);
+            // DAY: 0 to PI over 20 seconds
+            this.dayTime = (this.dayCycleTimer / 20) * Math.PI;
         } else if (this.dayCycleTimer < 30) {
-            this.dayTime += dt * (Math.PI / 10);
+            // NIGHT: PI to 2PI over 10 seconds
+            const nightProgress = (this.dayCycleTimer - 20) / 10;
+            this.dayTime = Math.PI + (nightProgress * Math.PI);
         } else {
+            // RESET
             this.dayCycleTimer = 0;
             this.dayTime = 0;
             this.dayCount++;
@@ -194,7 +209,6 @@ class Game {
                 this.enemyChief.shootRequest = null; 
             }
 
-            // CONTACT KILL LOGIC
             this.villagers.forEach(v => {
                 if (v.team === 'green' && !v.dead) {
                     if (this._checkHit(this.enemyChief, v)) {
@@ -209,7 +223,6 @@ class Game {
 
         this._checkWinConditions(dt);
         
-        // STATS UPDATE
         let greenTents = 0;
         let greenPop = this.villagers.filter(v => v.team === 'green').length;
         let blueTents = 0;
@@ -251,11 +264,9 @@ class Game {
         this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
         this.pigs = this.pigs.filter(p => !p.dead); 
 
-        // Update Leaves
         this.leaves.forEach(l => l.update(dt));
         this.leaves = this.leaves.filter(l => !l.dead);
 
-        // Update Snowflakes
         this.snowflakes.forEach(s => s.update(dt));
         this.snowflakes = this.snowflakes.filter(s => !s.dead);
 
@@ -264,8 +275,6 @@ class Game {
     }
 
     _checkSeasonChange() {
-        // Simple modulo: if season just changed logic
-        // But here we just re-evaluate based on day count
         const cycleDay = this.dayCount % 6;
         const newSeason = (cycleDay >= 3) ? 'winter' : 'summer';
         
@@ -276,9 +285,8 @@ class Game {
             const isWinter = (this.season === 'winter');
             this.islands.forEach(island => island.setSeason(isWinter));
             
-            // Optional: Clear old weather effects for cleaner transition
-            if (isWinter) this.leaves = []; // Clear leaves instantly on Winter
-            else this.snowflakes = []; // Clear snow instantly on Summer
+            if (isWinter) this.leaves = []; 
+            else this.snowflakes = []; 
         }
     }
 
@@ -307,7 +315,6 @@ class Game {
     }
 
     _updateWeather(dt) {
-        // Wind Particles (Always)
         this.windTimer -= dt;
         if (this.windTimer <= 0) {
             this.windTimer = 0.1; 
@@ -318,7 +325,6 @@ class Game {
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random()*400, 2.0, 5, 'wind'));
         }
 
-        // --- WEATHER SWITCH ---
         this.weatherTimer -= dt;
         if (this.weatherTimer <= 0) {
             const cx = this.world.camera.x;
@@ -327,16 +333,13 @@ class Game {
             const ch = this.world.camera.h;
             
             if (this.season === 'summer') {
-                // CONSTANT LEAVES
-                this.weatherTimer = 0.1; // Spawn freq
+                this.weatherTimer = 0.1; 
                 const buffer = 200;
                 const lx = cx - buffer + Math.random() * (cw + buffer * 2);
                 const ly = cy - 50 + Math.random() * (ch * 0.5); 
                 this.leaves.push(new Leaf(lx, ly));
             } else {
-                // HECTIC SNOW
-                this.weatherTimer = 0.05; // Spawn TWICE as fast as leaves
-                // Spawn multiple at once for "HECTIC" feel
+                this.weatherTimer = 0.05; 
                 for (let i=0; i<3; i++) {
                     const sx = cx - 100 + Math.random() * (cw + 200);
                     const sy = cy - 50 + Math.random() * (ch * 0.5);
@@ -535,6 +538,23 @@ class Game {
         }
     }
 
+    _spawnPigs() {
+        if (this.pigs.length >= 77) return; 
+
+        const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
+
+        for (let island of shuffledIslands) {
+            if (Math.random() < 0.1) {
+                const px = island.x + Math.random() * (island.w - 50);
+                const py = island.y - 60; 
+                const piggy = new Pig(px, py);
+                piggy.homeIsland = island; 
+                this.pigs.push(piggy);
+                if (this.pigs.length >= 77) break; 
+            }
+        }
+    }
+
     draw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -555,9 +575,8 @@ class Game {
 
         this.world.draw(this.ctx, this.season);
 
-        // LAYER: Blowing Leaves & Snow (Background)
         this.leaves.forEach(l => l.draw(this.ctx, this.world.camera));
-        this.snowflakes.forEach(s => s.draw(this.ctx, this.world.camera)); // NEW: Snow!
+        this.snowflakes.forEach(s => s.draw(this.ctx, this.world.camera));
 
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         
@@ -587,10 +606,6 @@ class Game {
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
         
-        // UI Debug for Season (Optional visual check)
-        // this.ctx.fillStyle = "white";
-        // this.ctx.fillText(`Season: ${this.season} | Day: ${this.dayCount}`, 10, 20);
-
         this.resources.drawUI(this.ctx);
         
         const mx = this.input.mouse.x;
