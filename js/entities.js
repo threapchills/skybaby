@@ -1,8 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V26: ASSET LOADING FIX 🚑
-   - Optimized Island images to be STATIC (loaded once, shared by all).
-   - Prevents browser request spamming which was breaking asset loading.
-   - Added robust safety checks for drawing images.
+   Definitive V29: THE SNOWSTORM UPDATE ❄️
+   - Added Snowflake class for hectic winter particles.
+   - Maintained layer ordering (Tent on top).
+   - Optimized asset handling.
 */
 
 export class Entity {
@@ -39,7 +39,6 @@ export class Entity {
             try {
                 ctx.drawImage(this.image, screenX, screenY, this.w, this.h);
             } catch (e) {
-                // Fallback if draw fails
                 this._drawFallback(ctx, screenX, screenY);
             }
         } else {
@@ -76,7 +75,6 @@ export class Leaf extends Entity {
     }
 
     draw(ctx, camera) {
-        // Broad phase cull
         if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
             this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
 
@@ -91,6 +89,41 @@ export class Leaf extends Entity {
         ctx.scale(this.scale, this.scale);
         ctx.drawImage(this.image, -16, -16, 32, 32); 
         ctx.restore();
+    }
+}
+
+// NEW: HECTIC SNOWFLAKE ❄️
+export class Snowflake {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = -50 + Math.random() * 150; // Drifts slightly right mostly
+        this.vy = 150 + Math.random() * 150; // Fast falling!
+        this.size = 2 + Math.random() * 3; // Chunkier flakes
+        this.life = 4.0; 
+        this.dead = false;
+        this.sway = Math.random() * Math.PI; // For a little sine wave wobble
+    }
+
+    update(dt) {
+        this.sway += dt * 5;
+        this.x += (this.vx + Math.sin(this.sway) * 50) * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+    }
+
+    draw(ctx, camera) {
+        if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
+            this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
+
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+
+        ctx.fillStyle = 'white';
+        ctx.globalAlpha = 0.8;
+        ctx.fillRect(screenX, screenY, this.size, this.size);
+        ctx.globalAlpha = 1.0;
     }
 }
 
@@ -379,7 +412,7 @@ export class Player extends Entity {
     }
 }
 
-// STATIC RESOURCE CACHE FOR ISLANDS
+// STATIC RESOURCE CACHE
 const IslandAssets = {
     tilesetNormal: new Image(),
     tilesetWinter: new Image(),
@@ -391,7 +424,6 @@ const IslandAssets = {
     fire: new Image()
 };
 
-// Start loading immediately
 IslandAssets.tilesetNormal.src = 'assets/environment/island_tileset.png';
 IslandAssets.tilesetWinter.src = 'assets/environment/island_tileset_winter.png';
 IslandAssets.treeNormal.src = 'assets/environment/tree_variant1.png';
@@ -406,7 +438,6 @@ export class Island extends Entity {
         super(x, y, w, h, null);
         this.team = team;
         
-        // Use references to the static assets
         this.activeTileset = IslandAssets.tilesetNormal;
         this.activeTree = IslandAssets.treeNormal;
 
@@ -414,7 +445,6 @@ export class Island extends Entity {
         this.hasFireplace = Math.random() > 0.4; 
         this.conversionTimer = 0; 
         
-        // Generate Trees
         this.trees = [];
         const numTrees = 1 + Math.floor(Math.random() * (w / 70)); 
         for (let i = 0; i < numTrees; i++) {
@@ -425,7 +455,6 @@ export class Island extends Entity {
             });
         }
 
-        // Generate Grass
         this.grass = [];
         const numGrass = 2 + Math.floor(Math.random() * (w / 40)); 
         for (let i = 0; i < numGrass; i++) {
@@ -501,7 +530,7 @@ export class Island extends Entity {
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
 
-        // SAFE DRAW: Tileset
+        // 1. SAFE DRAW: Tileset (Bottom)
         if (this.activeTileset.complete && this.activeTileset.naturalWidth > 0) {
             const sliceW = Math.floor(this.activeTileset.width / 3);
             const sliceH = this.activeTileset.height;
@@ -513,12 +542,11 @@ export class Island extends Entity {
             }
             ctx.drawImage(this.activeTileset, sliceW * 2, 0, sliceW, sliceH, rightX, screenY, sliceW, sliceH);
         } else {
-            // Fallback color if tileset missing
             ctx.fillStyle = this.team === 'green' ? '#2E8B57' : '#4682B4';
             ctx.fillRect(screenX, screenY, this.w, this.h);
         }
 
-        // SAFE DRAW: Grass
+        // 2. SAFE DRAW: Grass (Layer 2)
         if (IslandAssets.grass.complete && IslandAssets.grass.naturalWidth > 0) {
             this.grass.forEach(g => {
                 ctx.save();
@@ -531,13 +559,7 @@ export class Island extends Entity {
             });
         }
 
-        // SAFE DRAW: Teepee
-        const teepeeImg = (this.team === 'green') ? IslandAssets.teepeeGreen : IslandAssets.teepeeBlue;
-        if (this.hasTeepee && teepeeImg.complete && teepeeImg.naturalWidth > 0) {
-            ctx.drawImage(teepeeImg, screenX + 20, screenY - 66, 96, 96);
-        }
-        
-        // SAFE DRAW: Trees
+        // 3. SAFE DRAW: Trees (Layer 3 - BEHIND Tent)
         if (this.activeTree.complete && this.activeTree.naturalWidth > 0) {
             this.trees.forEach(tree => {
                 ctx.save();
@@ -550,7 +572,13 @@ export class Island extends Entity {
             });
         }
 
-        // SAFE DRAW: Fire
+        // 4. SAFE DRAW: Teepee (Layer 4 - FRONT)
+        const teepeeImg = (this.team === 'green') ? IslandAssets.teepeeGreen : IslandAssets.teepeeBlue;
+        if (this.hasTeepee && teepeeImg.complete && teepeeImg.naturalWidth > 0) {
+            ctx.drawImage(teepeeImg, screenX + 20, screenY - 66, 96, 96);
+        }
+        
+        // 5. SAFE DRAW: Fire (Layer 5 - Topmost)
         if (this.hasFireplace && IslandAssets.fire.complete && IslandAssets.fire.naturalWidth > 0) {
             ctx.drawImage(IslandAssets.fire, screenX + (this.w/2) - 40, screenY - 54, 80, 80);
         }
