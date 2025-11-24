@@ -1,9 +1,7 @@
 /* THE HEART OF THE GAME
-   Definitive V29: ICE AGE & RANDOM START 🎲❄️
-   - Added random start season logic (50/50).
-   - Added Snowflakes for winter (replacing leaves).
-   - Ensured weather effect density (hectic snow, constant leaves).
-   - Maintained correct time cycle (20s day / 10s night).
+   Definitive V30: ATMOSPHERIC HUES 🌈
+   - Passed 'season' into World.draw() to trigger sky color shift.
+   - Winter skies are now icy blue/green instead of warm mauve.
 */
 
 import { InputHandler } from './input.js';
@@ -537,28 +535,6 @@ class Game {
         }
     }
 
-    // NEW: The Cycle of Life (Pig Edition)
-    _spawnPigs() {
-        // THE ECONOMY OF SOULS: Strictly capped at 77
-        if (this.pigs.length >= 77) return; 
-
-        const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
-
-        for (let island of shuffledIslands) {
-            // 10% chance per island per tick (Roughly 1 for every 3 villagers who have 30% chance)
-            if (Math.random() < 0.1) {
-                const px = island.x + Math.random() * (island.w - 50);
-                const py = island.y - 60; 
-                const piggy = new Pig(px, py);
-                piggy.homeIsland = island; 
-                this.pigs.push(piggy);
-                
-                // Stop spawning in this tick if we hit the cap
-                if (this.pigs.length >= 77) break; 
-            }
-        }
-    }
-
     draw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -577,7 +553,7 @@ class Game {
             this.ctx.translate(dx, dy);
         }
 
-        this.world.draw(this.ctx);
+        this.world.draw(this.ctx, this.season);
 
         // LAYER: Blowing Leaves & Snow (Background)
         this.leaves.forEach(l => l.draw(this.ctx, this.world.camera));
