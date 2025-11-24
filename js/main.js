@@ -1,14 +1,15 @@
 /* THE HEART OF THE GAME
-   Definitive V25: LIVING WORLD 🌿
-   - Added Season cycle (3 days Summer / 3 days Winter).
-   - Added blowing leaves in the background.
-   - Updated islands to handle texture swapping for Winter.
+   Definitive V29: ICE AGE & RANDOM START 🎲❄️
+   - Added random start season logic (50/50).
+   - Added Snowflakes for winter (replacing leaves).
+   - Ensured weather effect density (hectic snow, constant leaves).
+   - Maintained correct time cycle (20s day / 10s night).
 */
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
 import { World } from './world.js';
-import { Player, Island, Villager, Warrior, Projectile, Particle, Pig, Leaf } from './entities.js';
+import { Player, Island, Villager, Warrior, Projectile, Particle, Pig, Leaf, Snowflake } from './entities.js';
 import { AudioManager } from './audio.js';
 
 class Game {
@@ -36,9 +37,18 @@ class Game {
         this.projectiles = [];
         this.particles = [];
         this.pigs = []; 
-        this.leaves = []; // NEW: Leaf container
+        this.leaves = []; 
+        this.snowflakes = []; // NEW: Snow container
+
+        // RANDOM SEASON START
+        this.season = Math.random() > 0.5 ? 'summer' : 'winter';
+        console.log(`🎲 Starting Season: ${this.season.toUpperCase()}`);
 
         this._generateWorld();
+
+        // Apply season immediately after generation
+        const isWinter = (this.season === 'winter');
+        this.islands.forEach(island => island.setSeason(isWinter));
 
         this.lastTime = 0;
         this.spawnTimer = 0;
@@ -46,12 +56,13 @@ class Game {
         this.gameOver = false;
         
         this.shake = 0;
+        
+        this.dayCycleTimer = 0; 
         this.dayTime = 0; 
-        this.dayCount = 0; // NEW: Track days passed
-        this.season = 'summer'; // 'summer' or 'winter'
+        this.dayCount = 0; 
         
         this.windTimer = 0;
-        this.leafTimer = 0; // NEW: Timer for leaf spawn
+        this.weatherTimer = 0; // Renamed from leafTimer to generic weather timer
         this.pulseTime = 0; 
 
         window.addEventListener('click', () => this._startAudio(), { once: true });
@@ -146,12 +157,17 @@ class Game {
         if (this.shake > 0) this.shake -= 15 * dt; 
         if (this.shake < 0) this.shake = 0;
         
-        // --- Day/Night & Season Cycle ---
-        const prevDayTime = this.dayTime;
-        this.dayTime += dt * 0.05; // Day progression
-        if (this.dayTime > Math.PI * 2) {
+        this.dayCycleTimer += dt;
+
+        if (this.dayCycleTimer < 20) {
+            this.dayTime += dt * (Math.PI / 20);
+        } else if (this.dayCycleTimer < 30) {
+            this.dayTime += dt * (Math.PI / 10);
+        } else {
+            this.dayCycleTimer = 0;
             this.dayTime = 0;
             this.dayCount++;
+            console.log(`🌞 Day ${this.dayCount} begins!`);
             this._checkSeasonChange();
         }
         
@@ -241,14 +257,17 @@ class Game {
         this.leaves.forEach(l => l.update(dt));
         this.leaves = this.leaves.filter(l => !l.dead);
 
+        // Update Snowflakes
+        this.snowflakes.forEach(s => s.update(dt));
+        this.snowflakes = this.snowflakes.filter(s => !s.dead);
+
         this.particles.forEach(p => p.update(dt));
         this.particles = this.particles.filter(p => !p.dead);
     }
 
     _checkSeasonChange() {
-        // Cycle: 3 days Summer, 3 days Winter (Mod 6)
-        // Days 0, 1, 2 -> Summer
-        // Days 3, 4, 5 -> Winter
+        // Simple modulo: if season just changed logic
+        // But here we just re-evaluate based on day count
         const cycleDay = this.dayCount % 6;
         const newSeason = (cycleDay >= 3) ? 'winter' : 'summer';
         
@@ -258,6 +277,10 @@ class Game {
             
             const isWinter = (this.season === 'winter');
             this.islands.forEach(island => island.setSeason(isWinter));
+            
+            // Optional: Clear old weather effects for cleaner transition
+            if (isWinter) this.leaves = []; // Clear leaves instantly on Winter
+            else this.snowflakes = []; // Clear snow instantly on Summer
         }
     }
 
@@ -286,7 +309,7 @@ class Game {
     }
 
     _updateWeather(dt) {
-        // Wind Particles
+        // Wind Particles (Always)
         this.windTimer -= dt;
         if (this.windTimer <= 0) {
             this.windTimer = 0.1; 
@@ -297,16 +320,31 @@ class Game {
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random()*400, 2.0, 5, 'wind'));
         }
 
-        // Blowing Leaves
-        this.leafTimer -= dt;
-        if (this.leafTimer <= 0) {
-            this.leafTimer = 0.2 + Math.random() * 0.3; // Spawn freq
+        // --- WEATHER SWITCH ---
+        this.weatherTimer -= dt;
+        if (this.weatherTimer <= 0) {
             const cx = this.world.camera.x;
             const cy = this.world.camera.y;
-            // Spawn off-screen right, blowing left
-            const lx = cx + this.canvas.width + 50;
-            const ly = cy + Math.random() * this.canvas.height;
-            this.leaves.push(new Leaf(lx, ly));
+            const cw = this.world.camera.w;
+            const ch = this.world.camera.h;
+            
+            if (this.season === 'summer') {
+                // CONSTANT LEAVES
+                this.weatherTimer = 0.1; // Spawn freq
+                const buffer = 200;
+                const lx = cx - buffer + Math.random() * (cw + buffer * 2);
+                const ly = cy - 50 + Math.random() * (ch * 0.5); 
+                this.leaves.push(new Leaf(lx, ly));
+            } else {
+                // HECTIC SNOW
+                this.weatherTimer = 0.05; // Spawn TWICE as fast as leaves
+                // Spawn multiple at once for "HECTIC" feel
+                for (let i=0; i<3; i++) {
+                    const sx = cx - 100 + Math.random() * (cw + 200);
+                    const sy = cy - 50 + Math.random() * (ch * 0.5);
+                    this.snowflakes.push(new Snowflake(sx, sy));
+                }
+            }
         }
     }
 
@@ -541,8 +579,9 @@ class Game {
 
         this.world.draw(this.ctx);
 
-        // LAYER: Blowing Leaves (Background)
+        // LAYER: Blowing Leaves & Snow (Background)
         this.leaves.forEach(l => l.draw(this.ctx, this.world.camera));
+        this.snowflakes.forEach(s => s.draw(this.ctx, this.world.camera)); // NEW: Snow!
 
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         
