@@ -1,8 +1,8 @@
 /* THE STAGE MANAGER (World & Camera)
-   Definitive V2: MOOD LIGHTING UPDATE 🎭
-   - Added season support to World.draw().
-   - Applies hue-rotate filter to background layers during Winter.
-   - Shifts reddish/mauve sky to icy blue/green.
+   Definitive V3: MOOD LIGHTING & HUE SHIFT 🌈
+   - Added 'season' parameter to draw() method.
+   - Applies hue-rotate filter for winter season.
+   - Shifts reddish/mauve sky to blue/green.
 */
 
 export class Camera {
