@@ -1,5 +1,5 @@
 /* THE HEART OF THE GAME
-   Definitive V33: THE GRAND ENTRANCE UPDATE 🎪
+   Definitive V33: THE GRAND ENTRANCE UPDATE 蒔
    - Added Title Screen & Tooltip sequence.
    - Game assets load in background while player admires the title.
    - Input logic updated to handle menu navigation.
@@ -55,7 +55,7 @@ class Game {
 
         // RANDOM SEASON START (50/50)
         this.season = Math.random() > 0.5 ? 'summer' : 'winter';
-        console.log(`🎲 Starting Season: ${this.season.toUpperCase()}`);
+        console.log(`軸 Starting Season: ${this.season.toUpperCase()}`);
 
         this._generateWorld();
 
@@ -214,7 +214,7 @@ class Game {
             this.dayCycleTimer = 0;
             this.dayTime = 0;
             this.dayCount++;
-            console.log(`🌞 Day ${this.dayCount} begins!`);
+            console.log(`捲 Day ${this.dayCount} begins!`);
             this._checkSeasonChange();
         }
         
@@ -239,14 +239,16 @@ class Game {
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player); 
             
             if (this.enemyChief.shootRequest) {
-                this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue'));
+                // MODIFIED: Blue Shaman Projectile Damage (25)
+                this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue', 25));
                 this.enemyChief.shootRequest = null; 
             }
 
+            // --- COLLISION: BLUE SHAMAN RUNS OVER GREEN VILLAGERS ---
             this.villagers.forEach(v => {
                 if (v.team === 'green' && !v.dead) {
                     if (this._checkHit(this.enemyChief, v)) {
-                        v.dead = true;
+                        v.dead = true; // Crush them!
                         this._spawnBlood(v.x, v.y, '#00ff00', 30); 
                         this.audio.play('hit', 0.5, 0.2); 
                         this.shake = 5; 
@@ -314,7 +316,7 @@ class Game {
         
         if (newSeason !== this.season) {
             this.season = newSeason;
-            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! ❄️🍂`);
+            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! 笶ｸ条沚Ａ);
             
             const isWinter = (this.season === 'winter');
             this.islands.forEach(island => island.setSeason(isWinter));
@@ -458,9 +460,10 @@ class Game {
             
             let hitSomething = false;
 
+            // 1. HIT ENEMY SHAMAN
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= 15; 
+                this.enemyChief.hp -= p.damage; // Use Projectile Damage
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.enemyChief.hp <= 0) {
@@ -472,9 +475,10 @@ class Game {
                 }
             }
             
+            // 2. HIT PLAYER SHAMAN
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= 25; 
+                this.player.hp -= p.damage; // Use Projectile Damage
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
@@ -485,14 +489,11 @@ class Game {
                 }
             }
             
+            // 3. HIT VILLAGERS / WARRIORS
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
-                    if (p.team === 'blue') {
-                        v.hp = 0;
-                    } else {
-                        v.hp -= 25; 
-                    }
+                    v.hp -= p.damage; // Simple subtraction
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
                     if (v.hp <= 0) {
@@ -502,18 +503,22 @@ class Game {
                 }
             }
 
+            // HIT REMOVAL (No Railgun)
             if (hitSomething) p.dead = true;
+            
             if (p.dead) this.projectiles.splice(i, 1);
         }
 
+        // SPAWN NEW WARRIOR PROJECTILES
         this.villagers.forEach(v => {
             if (v instanceof Warrior) {
                 const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
                 if (v.team === 'green' && !this.enemyChief.dead) enemies.push(this.enemyChief);
                 if (v.team === 'blue' && !this.player.dead) enemies.push(this.player);
 
-                v.update(dt, this.islands, enemies, (x, y, angle, team) => {
-                    this.projectiles.push(new Projectile(x, y, angle, team));
+                // Pass damage (10) in callback inside Warrior class, received here
+                v.update(dt, this.islands, enemies, (x, y, angle, team, damage) => {
+                    this.projectiles.push(new Projectile(x, y, angle, team, damage));
                 }, this.worldWidth, this.worldHeight, this.audio); 
             } else {
                 v.update(dt, this.islands, this.worldWidth, this.worldHeight);
@@ -546,7 +551,8 @@ class Game {
                 const mx = this.input.mouse.x + this.world.camera.x;
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
-                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green'));
+                // MODIFIED: Player Projectile Damage (25)
+                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green', 25));
                 this.audio.play('shoot', 0.4, 0.0);
             }
         }
