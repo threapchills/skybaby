@@ -83,7 +83,7 @@ export class World {
         // WINTER FILTER: Shift Hue to Blue/Green
         // 180deg shift turns Red -> Cyan, Purple -> Greenish-Blue
         if (season === 'winter') {
-            ctx.filter = 'hue-rotate(45deg) brightness(1.1)'; 
+            ctx.filter = 'hue-rotate(12deg) brightness(1.1)'; 
         }
 
         this.layers.forEach(layer => layer.draw(ctx, this.camera));
