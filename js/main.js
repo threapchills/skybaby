@@ -315,7 +315,7 @@ class Game {
         
         if (newSeason !== this.season) {
             this.season = newSeason;
-            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! 笶ｸ条沚Ａ`); // <--- THE FIX WAS HERE!
+            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! 笶ｸ条沚Ａ`);
             
             const isWinter = (this.season === 'winter');
             this.islands.forEach(island => island.setSeason(isWinter));
@@ -515,13 +515,17 @@ class Game {
                 const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
                 if (v.team === 'green' && !this.enemyChief.dead) enemies.push(this.enemyChief);
                 if (v.team === 'blue' && !this.player.dead) enemies.push(this.player);
+                
+                // --- NEW: PASS FRIENDLY LEADER ---
+                const friendlyLeader = (v.team === 'green') ? this.player : this.enemyChief;
 
                 // Pass the callback to spawn projectiles with correct damage
                 v.update(dt, this.islands, enemies, (x, y, angle, team, damage) => {
                     this.projectiles.push(new Projectile(x, y, angle, team, damage));
-                }, this.worldWidth, this.worldHeight, this.audio); 
+                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader); 
             } else {
-                v.update(dt, this.islands, this.worldWidth, this.worldHeight);
+                // Pass pigs list for milling behavior
+                v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs);
             }
         });
         this.villagers = this.villagers.filter(v => !v.dead);
