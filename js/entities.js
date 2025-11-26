@@ -1,9 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V32: THE ANTI-FREEZE UPDATE 🚒
-   - CRITICAL FIX: All images are now preloaded in a static 'Assets' object.
-   - Leaf class now uses the shared 'Assets.leaf' (Prevents memory leak crash).
-   - Snowflake class logic secured against math errors.
-   - Reverts "shorter" logic to ensure stability.
+   Definitive V33: THE TACTICAL BRAIN UPDATE 🧠
+   - Warriors now split into 'Bodyguards' and 'Raiders'.
+   - Warriors have imperfect aim.
+   - Villagers mill about near pigs and tents.
 */
 
 // --- GLOBAL ASSET LOADER ---
@@ -597,7 +596,7 @@ export class Villager extends Entity {
     constructor(x, y, team) {
         super(x, y, 24, 24); 
         this.team = team;
-        this.hp = 10; // UPDATED: Fragile little things now
+        this.hp = 10; 
         this.homeIsland = null;
         this.vx = 0;
         this.vy = 0; 
@@ -606,23 +605,72 @@ export class Villager extends Entity {
         this.maxFallSpeed = 800; 
         
         this.variantIndex = Math.floor(Math.random() * 4); 
+        this.attractorX = null; // New: Milling about target
     }
 
-    update(dt, islands, worldWidth, worldHeight) {
+    update(dt, islands, worldWidth, worldHeight, pigs) {
         this.vy += 500 * dt; 
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
         
+        // --- NEW MILLING BEHAVIOR ---
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) {
-            this.stateTimer = Math.random() * 2 + 1;
-            this.vx = (Math.random() - 0.5) * 80; 
+            this.stateTimer = Math.random() * 3 + 2; // Change mind every 2-5 seconds
+            
+            // 1. Find a point of interest (Pig or Friendly Tent)
+            let interestX = null;
+            
+            if (this.homeIsland) {
+                 // 50% chance to seek a pig if one is on the island
+                 if (Math.random() < 0.5 && pigs) {
+                     const localPigs = pigs.filter(p => p.homeIsland === this.homeIsland);
+                     if (localPigs.length > 0) {
+                         const targetPig = localPigs[Math.floor(Math.random() * localPigs.length)];
+                         interestX = targetPig.x;
+                     }
+                 }
+                 
+                 // Fallback: Seek Tent center (which is usually near start of island + 50ish)
+                 if (interestX === null && this.homeIsland.hasTeepee && this.homeIsland.team === this.team) {
+                     interestX = this.homeIsland.x + 80;
+                 }
+                 
+                 // Fallback 2: Just random point on island
+                 if (interestX === null) {
+                     interestX = this.homeIsland.x + Math.random() * this.homeIsland.w;
+                 }
+            }
+            
+            this.attractorX = interestX;
+            
+            // Set velocity towards attractor, but stop if close
+            if (this.attractorX !== null) {
+                if (Math.abs(this.x - this.attractorX) > 40) {
+                    this.vx = (this.attractorX > this.x) ? 60 : -60;
+                } else {
+                    this.vx = (Math.random() - 0.5) * 40; // Just jitter a bit
+                }
+            } else {
+                this.vx = (Math.random() - 0.5) * 60;
+            }
         }
 
+        // STUCK CHECK: If moving but not actually moving much, jump!
+        if (Math.abs(this.vx) > 10 && this.onGround && this.stateTimer < 1.0) {
+             // We don't have previous X stored, but we can assume if they are at edge they might turn
+             // Simpler jump check:
+             if (Math.random() < 0.01) {
+                 this.vy = -300; 
+                 this.onGround = false;
+             }
+        }
+
+        // Keep on home island bounds
         if (this.onGround && this.homeIsland) {
             const lookAhead = this.vx > 0 ? 10 : -10;
             const nextX = this.x + this.w/2 + lookAhead;
             if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                this.vx *= -1;
+                this.vx *= -1; // Turn around at edge
             }
         }
         
@@ -664,8 +712,10 @@ export class Warrior extends Villager {
     constructor(x, y, team) {
         super(x, y, team);
         this.w = 32; this.h = 32; 
-        this.hp = 10; // UPDATED: Warriors are now 1-hit wonders (glass cannons)
+        this.hp = 10; 
         this.attackCooldown = 0;
+        // --- NEW: ROLE ASSIGNMENT (50/50) ---
+        this.role = Math.random() < 0.5 ? 'bodyguard' : 'raider';
     }
 
     draw(ctx, camera) {
@@ -677,10 +727,11 @@ export class Warrior extends Villager {
         this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
     }
 
-    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio) {
+    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader) {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
+        // 1. COMBAT CHECK
         let target = null;
         let nearestDist = 1000; 
 
@@ -696,54 +747,103 @@ export class Warrior extends Villager {
             });
         }
 
-        if (target) {
-            if (nearestDist < 400) {
-                this.vx = 0; 
-                if (this.attackCooldown <= 0) {
-                    this.attackCooldown = 1.5;
-                    const dx = target.x - this.x;
-                    const dy = (target.y - 20) - this.y; 
-                    const angle = Math.atan2(dy, dx);
-                    // PASS 10 DAMAGE (Warriors do 10 dmg)
-                    spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
-                }
-            } else {
-                const dir = target.x > this.x ? 1 : -1;
-                this.vx = dir * 90; 
+        if (target && nearestDist < 400) {
+            // STOP AND SHOOT
+            this.vx = 0; 
+            if (this.attackCooldown <= 0) {
+                this.attackCooldown = 1.5;
+                const dx = target.x - this.x;
+                const dy = (target.y - 20) - this.y; 
+                let angle = Math.atan2(dy, dx);
+                
+                // --- NEW: ADD AIM VARIANCE ( +/- 0.25 radians is roughly 15 degrees) ---
+                const variance = (Math.random() - 0.5) * 0.25; 
+                angle += variance;
+
+                spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
             }
         } else {
-            this.stateTimer -= dt;
-            if (this.stateTimer <= 0) {
-                this.stateTimer = Math.random() * 2 + 1;
-                this.vx = (Math.random() - 0.5) * 60;
-            }
+            // 2. MOVEMENT LOGIC BASED ON ROLE
+            this.attackCooldown -= dt; // Cooldown recovers while moving
             
-            if (this.onGround && this.homeIsland) {
-                const lookAhead = this.vx > 0 ? 20 : -20;
-                const nextX = this.x + this.w/2 + lookAhead;
-                if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                    let canJump = false;
-                    for(let other of islands) {
-                        if (other === this.homeIsland) continue;
-                        if (Math.abs((this.x + (this.vx > 0 ? 150 : -150)) - other.x) < 100 || 
-                            Math.abs((this.x + (this.vx > 0 ? 150 : -150)) - (other.x + other.w)) < 100) {
-                            if (Math.abs(other.y - this.y) < 100) {
-                                canJump = true;
-                                break;
+            let moveTargetX = null;
+            let moveTargetY = null; // For jump checks
+
+            if (this.role === 'bodyguard' && friendlyLeader && !friendlyLeader.dead) {
+                // FOLLOW SHAMAN
+                moveTargetX = friendlyLeader.x;
+                moveTargetY = friendlyLeader.y;
+                
+                // Don't stand right on top of him
+                if (Math.abs(this.x - moveTargetX) < 80) moveTargetX = this.x; 
+            } else {
+                // RAIDER: SEEK ENEMY TERRITORY OR ENEMY SHAMAN
+                // Simplified: Raiders just want to go to the other side of the world
+                // Green (starts left) wants huge X. Blue (starts right) wants 0 X.
+                if (target) {
+                    // If we saw an enemy (even far away), go towards them
+                    moveTargetX = target.x;
+                    moveTargetY = target.y;
+                } else {
+                     // Go deep into enemy territory
+                     moveTargetX = (this.team === 'green') ? worldWidth : 0;
+                     moveTargetY = this.y; // Keep level
+                }
+            }
+
+            // APPLY MOVEMENT
+            if (moveTargetX !== null) {
+                if (Math.abs(this.x - moveTargetX) > 20) {
+                     const dir = (moveTargetX > this.x) ? 1 : -1;
+                     this.vx = dir * 110; // Slightly faster than villagers
+                } else {
+                    this.vx = 0;
+                }
+
+                // JUMP LOGIC
+                if (this.onGround) {
+                    let wantJump = false;
+                    
+                    // 1. Leader/Target is high up?
+                    if (moveTargetY < this.y - 100 && Math.abs(this.x - moveTargetX) < 300) {
+                        wantJump = true;
+                    }
+
+                    // 2. Gap Ahead?
+                    if (!wantJump && this.homeIsland) {
+                        const lookAhead = this.vx > 0 ? 50 : -50;
+                        const nextX = this.x + lookAhead;
+                        if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
+                            // Reached edge of current island. Look for next island.
+                            let landAhead = false;
+                             for(let other of islands) {
+                                if (other === this.homeIsland) continue;
+                                // Check if 'other' island is within jump distance
+                                if (other.x < this.x + (this.vx > 0 ? 300 : 50) && 
+                                    other.x + other.w > this.x + (this.vx > 0 ? -50 : -300)) {
+                                     // Height check
+                                     if (other.y > this.y - 250 && other.y < this.y + 200) {
+                                         landAhead = true;
+                                         break;
+                                     }
+                                }
+                            }
+                            
+                            if (landAhead) wantJump = true;
+                            else if (this.role === 'bodyguard') {
+                                // Bodyguards don't suicide jump if no land, Raiders might risk it
+                                this.vx = 0; 
                             }
                         }
                     }
-                    if (canJump) {
-                        this.vy = -400; 
-                        this.onGround = false;
-                    } else {
-                        this.vx *= -1; 
+
+                    if (wantJump) {
+                         this.vy = -450; 
+                         this.onGround = false;
                     }
                 }
             }
         }
-
-        this.attackCooldown -= dt;
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
@@ -770,10 +870,10 @@ export class Warrior extends Villager {
 }
 
 export class Projectile extends Entity {
-    constructor(x, y, angle, team, damage) { // ADDED damage param
+    constructor(x, y, angle, team, damage) { 
         super(x, y, 32, 10); 
         this.team = team;
-        this.damage = damage; // Store it!
+        this.damage = damage; 
         const speed = 600; 
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
