@@ -1,8 +1,8 @@
 /* THE HEART OF THE GAME
-   Definitive V32: STABILITY & OPTIMIZATION 🛡️
-   - Aligned with new Entities Asset Manager to prevent crashes.
-   - Added robust safety checks in the game loop.
-   - Fixed freezing issues caused by asset memory leaks.
+   Definitive V33: THE GRAND ENTRANCE UPDATE 🎪
+   - Added Title Screen & Tooltip sequence.
+   - Game assets load in background while player admires the title.
+   - Input logic updated to handle menu navigation.
 */
 
 import { InputHandler } from './input.js';
@@ -24,6 +24,16 @@ class Game {
 
         this.worldWidth = 6000; 
         this.worldHeight = 3000;
+
+        // --- NEW: UI STATE MANAGEMENT ---
+        this.uiState = 'TITLE'; // States: 'TITLE' -> 'TOOLTIP' -> 'PLAYING'
+        
+        // Load UI Images immediately
+        this.titleImg = new Image();
+        this.titleImg.src = 'assets/title.png';
+        
+        this.tooltipImg = new Image();
+        this.tooltipImg.src = 'assets/tooltip.png';
 
         this.input = new InputHandler();
         this.resources = new ResourceManager();
@@ -68,10 +78,31 @@ class Game {
         this.weatherTimer = 0; 
         this.pulseTime = 0; 
 
+        // Audio starts on first interaction, which also handles screen nav
         window.addEventListener('click', () => this._startAudio(), { once: true });
         window.addEventListener('keydown', () => this._startAudio(), { once: true });
 
+        // Screen Navigation Listener
+        this._bindNavigation();
+
         requestAnimationFrame((ts) => this.loop(ts));
+    }
+
+    _bindNavigation() {
+        const handler = () => this._handleScreenNav();
+        window.addEventListener('mousedown', handler);
+        window.addEventListener('keydown', handler);
+    }
+
+    _handleScreenNav() {
+        if (this.uiState === 'TITLE') {
+            this.uiState = 'TOOLTIP';
+            // Simple debounce to prevent clicking through both screens instantly
+            this.navCooldown = true;
+            setTimeout(() => { this.navCooldown = false; }, 200);
+        } else if (this.uiState === 'TOOLTIP' && !this.navCooldown) {
+            this.uiState = 'PLAYING';
+        }
     }
 
     _startAudio() {
@@ -160,6 +191,9 @@ class Game {
     }
 
     update(dt) {
+        // --- UI BLOCKER ---
+        if (this.uiState !== 'PLAYING') return;
+
         if (this.gameOver) return;
 
         if (this.shake > 0) this.shake -= 15 * dt; 
@@ -557,6 +591,24 @@ class Game {
 
     draw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // --- SPECIAL UI DRAWING ---
+        if (this.uiState === 'TITLE') {
+            if (this.titleImg.complete) {
+                this.ctx.drawImage(this.titleImg, 0, 0, this.canvas.width, this.canvas.height);
+            } else {
+                this.ctx.fillStyle = 'black'; this.ctx.fillRect(0,0,this.canvas.width, this.canvas.height);
+            }
+            return; 
+        }
+
+        if (this.uiState === 'TOOLTIP') {
+            if (this.tooltipImg.complete) {
+                this.ctx.drawImage(this.tooltipImg, 0, 0, this.canvas.width, this.canvas.height);
+            }
+            return;
+        }
+        // --------------------------
 
         const sunHeight = Math.sin(this.dayTime); 
         let darkness = 0;
