@@ -1,9 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V33.2: THE AGGRESSIVE AI UPDATE ⚔️
-   - Warriors prioritize targets: Enemy Warrior > Shaman > Villager.
-   - Warriors separate to avoid clustering.
-   - Warriors can "Fly" briefly to cross gaps.
-   - Villagers mill about near pigs and tents.
+   Definitive V33.3: THE RELOAD FIX & JETPACK BOOST 🚀
+   - FIXED CRITICAL BUG: Warriors now actually reload their bows while targeting enemies.
+   - BUFFED: Warriors move faster (160), jump higher (-700), and fly better.
+   - PRIORITIES: Warriors targeting logic remains aggressive.
 */
 
 // --- GLOBAL ASSET LOADER ---
@@ -732,6 +731,9 @@ export class Warrior extends Villager {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
+        // --- NEW: COOLDOWN REDUCTION ALWAYS RUNS ---
+        this.attackCooldown -= dt;
+
         // --- NEW: SEPARATION (Don't clump!) ---
         if (allVillagers) {
             allVillagers.forEach(v => {
@@ -748,7 +750,7 @@ export class Warrior extends Villager {
             });
         }
 
-        // --- NEW: PRIORITY TARGETING ---
+        // --- PRIORITY TARGETING ---
         let target = null;
         let bestScore = -Infinity;
 
@@ -776,7 +778,7 @@ export class Warrior extends Villager {
             // STOP AND SHOOT
             this.vx *= 0.8; // Slow down to aim
             if (this.attackCooldown <= 0) {
-                this.attackCooldown = 1.5;
+                this.attackCooldown = 1.5; // Reset cooldown
                 const dx = target.x - this.x;
                 const dy = (target.y - 20) - this.y; 
                 let angle = Math.atan2(dy, dx);
@@ -789,8 +791,6 @@ export class Warrior extends Villager {
             }
         } else {
             // MOVEMENT LOGIC
-            this.attackCooldown -= dt; 
-            
             let moveTargetX = null;
             let moveTargetY = null;
 
@@ -808,12 +808,13 @@ export class Warrior extends Villager {
             if (moveTargetX !== null) {
                 if (Math.abs(this.x - moveTargetX) > 20) {
                      const dir = (moveTargetX > this.x) ? 1 : -1;
-                     this.vx = dir * 140; // Increased speed
+                     // BUFF: FASTER MOVEMENT (160)
+                     this.vx = dir * 160; 
                 } else {
                     this.vx = 0;
                 }
 
-                // --- NEW: ADVANCED JUMP & FLY ---
+                // --- ADVANCED JUMP & FLY ---
                 if (this.onGround) {
                     let wantJump = false;
                     
@@ -833,15 +834,16 @@ export class Warrior extends Villager {
                     }
 
                     if (wantJump) {
-                         this.vy = -600; // Higher jump
+                         // BUFF: HIGHER JUMP (-700)
+                         this.vy = -700; 
                          this.onGround = false;
                     }
                 } else {
                     // MIDAIR "FLY" BOOST (Jetpack logic)
                     // If moving towards target and target is far away or we are falling
                     if (Math.abs(this.x - moveTargetX) > 100 && this.vy > -100) {
-                         // Apply upward force to glide/fly
-                         this.vy -= 1200 * dt;
+                         // BUFF: BETTER FLYING FORCE (1500)
+                         this.vy -= 1500 * dt;
                          if (this.vy < -500) this.vy = -500; // Cap upward speed
                     }
                 }
