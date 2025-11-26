@@ -239,16 +239,15 @@ class Game {
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player); 
             
             if (this.enemyChief.shootRequest) {
-                // MODIFIED: Blue Shaman Projectile Damage (25)
+                // ENEMY SHAMAN SHOOTS: 25 Damage
                 this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue', 25));
                 this.enemyChief.shootRequest = null; 
             }
 
-            // --- COLLISION: BLUE SHAMAN RUNS OVER GREEN VILLAGERS ---
             this.villagers.forEach(v => {
                 if (v.team === 'green' && !v.dead) {
                     if (this._checkHit(this.enemyChief, v)) {
-                        v.dead = true; // Crush them!
+                        v.dead = true;
                         this._spawnBlood(v.x, v.y, '#00ff00', 30); 
                         this.audio.play('hit', 0.5, 0.2); 
                         this.shake = 5; 
@@ -460,10 +459,10 @@ class Game {
             
             let hitSomething = false;
 
-            // 1. HIT ENEMY SHAMAN
+            // Hit Enemy Chief
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= p.damage; // Use Projectile Damage
+                this.enemyChief.hp -= p.damage; // Use dynamic damage from projectile
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.enemyChief.hp <= 0) {
@@ -475,10 +474,10 @@ class Game {
                 }
             }
             
-            // 2. HIT PLAYER SHAMAN
+            // Hit Player
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= p.damage; // Use Projectile Damage
+                this.player.hp -= p.damage; // Use dynamic damage from projectile
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
@@ -489,13 +488,17 @@ class Game {
                 }
             }
             
-            // 3. HIT VILLAGERS / WARRIORS
+            // Hit Villagers/Warriors
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
-                    v.hp -= p.damage; // Simple subtraction
+                    
+                    // APPLY DAMAGE
+                    v.hp -= p.damage; 
+
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
+                    
                     if (v.hp <= 0) {
                          v.dead = true;
                          this._spawnBlood(v.x, v.y);
@@ -503,20 +506,17 @@ class Game {
                 }
             }
 
-            // HIT REMOVAL (No Railgun)
             if (hitSomething) p.dead = true;
-            
             if (p.dead) this.projectiles.splice(i, 1);
         }
 
-        // SPAWN NEW WARRIOR PROJECTILES
         this.villagers.forEach(v => {
             if (v instanceof Warrior) {
                 const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
                 if (v.team === 'green' && !this.enemyChief.dead) enemies.push(this.enemyChief);
                 if (v.team === 'blue' && !this.player.dead) enemies.push(this.player);
 
-                // Pass damage (10) in callback inside Warrior class, received here
+                // Pass the callback to spawn projectiles with correct damage
                 v.update(dt, this.islands, enemies, (x, y, angle, team, damage) => {
                     this.projectiles.push(new Projectile(x, y, angle, team, damage));
                 }, this.worldWidth, this.worldHeight, this.audio); 
@@ -551,7 +551,8 @@ class Game {
                 const mx = this.input.mouse.x + this.world.camera.x;
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
-                // MODIFIED: Player Projectile Damage (25)
+                
+                // PLAYER SHOOTS: 25 DAMAGE
                 this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green', 25));
                 this.audio.play('shoot', 0.4, 0.0);
             }
