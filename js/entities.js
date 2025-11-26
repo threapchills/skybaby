@@ -1,8 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V33.3: THE RELOAD FIX & JETPACK BOOST 🚀
-   - FIXED CRITICAL BUG: Warriors now actually reload their bows while targeting enemies.
-   - BUFFED: Warriors move faster (160), jump higher (-700), and fly better.
-   - PRIORITIES: Warriors targeting logic remains aggressive.
+   Definitive V33.4: THE GLOBETROTTER UPDATE 🌍
+   - Raiders now patrol random islands instead of marching to world edges.
+   - Warriors now use "Smart Wrapping" to take the shortest path across world boundaries.
+   - Fixed "stuck at edge" bug by removing static edge targets.
 */
 
 // --- GLOBAL ASSET LOADER ---
@@ -716,6 +716,9 @@ export class Warrior extends Villager {
         this.attackCooldown = 0;
         this.role = Math.random() < 0.5 ? 'bodyguard' : 'raider';
         this.maxFallSpeed = 1000;
+        // --- NEW: PATROL TARGET ---
+        this.patrolTargetX = null;
+        this.patrolTimer = 0;
     }
 
     draw(ctx, camera) {
@@ -731,18 +734,17 @@ export class Warrior extends Villager {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
-        // --- NEW: COOLDOWN REDUCTION ALWAYS RUNS ---
         this.attackCooldown -= dt;
 
-        // --- NEW: SEPARATION (Don't clump!) ---
+        // --- SEPARATION ---
         if (allVillagers) {
             allVillagers.forEach(v => {
                 if (v !== this && v.team === this.team && !v.dead) {
                     const dx = v.x - this.x;
                     const dy = v.y - this.y;
                     const distSq = dx*dx + dy*dy;
-                    if (distSq < 900) { // Within 30 pixels
-                        const push = 500 * dt; // Repulsion strength
+                    if (distSq < 900) { 
+                        const push = 500 * dt; 
                         if (dx > 0) this.vx -= push;
                         else this.vx += push;
                     }
@@ -759,14 +761,10 @@ export class Warrior extends Villager {
             const dy = e.y - this.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
             
-            if (dist < 600) { // Detection range
-                let score = 1000 - dist; // Closer is better
-                
-                // Bonus for priority targets
-                if (e instanceof Warrior) score += 500; // Priority 1: Other Warriors
-                else if (e instanceof Player) score += 300; // Priority 2: Shaman (Player class)
-                // Villager gets no bonus (Priority 3)
-
+            if (dist < 600) { 
+                let score = 1000 - dist; 
+                if (e instanceof Warrior) score += 500; 
+                else if (e instanceof Player) score += 300; 
                 if (score > bestScore) {
                     bestScore = score;
                     target = e;
@@ -776,14 +774,12 @@ export class Warrior extends Villager {
 
         if (target) {
             // STOP AND SHOOT
-            this.vx *= 0.8; // Slow down to aim
+            this.vx *= 0.8; 
             if (this.attackCooldown <= 0) {
-                this.attackCooldown = 1.5; // Reset cooldown
+                this.attackCooldown = 1.5; 
                 const dx = target.x - this.x;
                 const dy = (target.y - 20) - this.y; 
                 let angle = Math.atan2(dy, dx);
-                
-                // Variance
                 const variance = (Math.random() - 0.5) * 0.25; 
                 angle += variance;
 
@@ -799,16 +795,41 @@ export class Warrior extends Villager {
                 moveTargetY = friendlyLeader.y;
                 if (Math.abs(this.x - moveTargetX) < 80) moveTargetX = this.x; 
             } else {
-                // RAIDER
-                moveTargetX = (this.team === 'green') ? worldWidth : 0;
-                moveTargetY = this.y; 
+                // --- NEW: GLOBETROTTING RAIDER LOGIC ---
+                // Pick random islands instead of hard-coded edge coordinates
+                this.patrolTimer -= dt;
+                
+                if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
+                     // Pick a new target
+                     this.patrolTimer = 5 + Math.random() * 8; // Change mind every 5-13 seconds
+                     
+                     if (islands.length > 0) {
+                         const randomIsland = islands[Math.floor(Math.random() * islands.length)];
+                         this.patrolTargetX = randomIsland.x + (randomIsland.w / 2);
+                         this.patrolTargetY = randomIsland.y - 50; 
+                     } else {
+                         this.patrolTargetX = Math.random() * worldWidth;
+                         this.patrolTargetY = this.y;
+                     }
+                }
+                
+                moveTargetX = this.patrolTargetX;
+                moveTargetY = this.patrolTargetY;
             }
 
-            // APPLY MOVEMENT
+            // APPLY MOVEMENT WITH SMART WRAP
             if (moveTargetX !== null) {
-                if (Math.abs(this.x - moveTargetX) > 20) {
-                     const dir = (moveTargetX > this.x) ? 1 : -1;
-                     // BUFF: FASTER MOVEMENT (160)
+                let dx = moveTargetX - this.x;
+                
+                // --- NEW: SMART WRAP LOGIC ---
+                // If destination is more than half the world away, it's shorter to wrap
+                if (Math.abs(dx) > worldWidth / 2) {
+                    if (dx > 0) dx -= worldWidth; // Go Left to wrap to Right
+                    else dx += worldWidth;        // Go Right to wrap to Left
+                }
+                
+                if (Math.abs(dx) > 20) {
+                     const dir = Math.sign(dx);
                      this.vx = dir * 160; 
                 } else {
                     this.vx = 0;
@@ -818,33 +839,27 @@ export class Warrior extends Villager {
                 if (this.onGround) {
                     let wantJump = false;
                     
-                    // 1. Leader/Target is high up?
                     if (moveTargetY < this.y - 100 && Math.abs(this.x - moveTargetX) < 400) {
                         wantJump = true;
                     }
 
-                    // 2. Gap Ahead?
                     if (!wantJump && this.homeIsland) {
                         const lookAhead = this.vx > 0 ? 50 : -50;
                         const nextX = this.x + lookAhead;
                         if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                             // Always jump at gaps now, more aggressive exploration
                              wantJump = true;
                         }
                     }
 
                     if (wantJump) {
-                         // BUFF: HIGHER JUMP (-700)
                          this.vy = -700; 
                          this.onGround = false;
                     }
                 } else {
-                    // MIDAIR "FLY" BOOST (Jetpack logic)
-                    // If moving towards target and target is far away or we are falling
+                    // Fly boost
                     if (Math.abs(this.x - moveTargetX) > 100 && this.vy > -100) {
-                         // BUFF: BETTER FLYING FORCE (1500)
                          this.vy -= 1500 * dt;
-                         if (this.vy < -500) this.vy = -500; // Cap upward speed
+                         if (this.vy < -500) this.vy = -500; 
                     }
                 }
             }
