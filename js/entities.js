@@ -1,7 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V33: THE TACTICAL BRAIN UPDATE 🧠
-   - Warriors now split into 'Bodyguards' and 'Raiders'.
-   - Warriors have imperfect aim.
+   Definitive V33.2: THE AGGRESSIVE AI UPDATE ⚔️
+   - Warriors prioritize targets: Enemy Warrior > Shaman > Villager.
+   - Warriors separate to avoid clustering.
+   - Warriors can "Fly" briefly to cross gaps.
    - Villagers mill about near pigs and tents.
 */
 
@@ -714,8 +715,8 @@ export class Warrior extends Villager {
         this.w = 32; this.h = 32; 
         this.hp = 10; 
         this.attackCooldown = 0;
-        // --- NEW: ROLE ASSIGNMENT (50/50) ---
         this.role = Math.random() < 0.5 ? 'bodyguard' : 'raider';
+        this.maxFallSpeed = 1000;
     }
 
     draw(ctx, camera) {
@@ -727,85 +728,97 @@ export class Warrior extends Villager {
         this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
     }
 
-    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader) {
+    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers) {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
-        // 1. COMBAT CHECK
-        let target = null;
-        let nearestDist = 1000; 
-
-        if (enemies.length > 0) {
-            enemies.forEach(e => {
-                const dx = e.x - this.x;
-                const dy = e.y - this.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                if (dist < nearestDist) {
-                    nearestDist = dist;
-                    target = e;
+        // --- NEW: SEPARATION (Don't clump!) ---
+        if (allVillagers) {
+            allVillagers.forEach(v => {
+                if (v !== this && v.team === this.team && !v.dead) {
+                    const dx = v.x - this.x;
+                    const dy = v.y - this.y;
+                    const distSq = dx*dx + dy*dy;
+                    if (distSq < 900) { // Within 30 pixels
+                        const push = 500 * dt; // Repulsion strength
+                        if (dx > 0) this.vx -= push;
+                        else this.vx += push;
+                    }
                 }
             });
         }
 
-        if (target && nearestDist < 400) {
+        // --- NEW: PRIORITY TARGETING ---
+        let target = null;
+        let bestScore = -Infinity;
+
+        enemies.forEach(e => {
+            const dx = e.x - this.x;
+            const dy = e.y - this.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist < 600) { // Detection range
+                let score = 1000 - dist; // Closer is better
+                
+                // Bonus for priority targets
+                if (e instanceof Warrior) score += 500; // Priority 1: Other Warriors
+                else if (e instanceof Player) score += 300; // Priority 2: Shaman (Player class)
+                // Villager gets no bonus (Priority 3)
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    target = e;
+                }
+            }
+        });
+
+        if (target) {
             // STOP AND SHOOT
-            this.vx = 0; 
+            this.vx *= 0.8; // Slow down to aim
             if (this.attackCooldown <= 0) {
                 this.attackCooldown = 1.5;
                 const dx = target.x - this.x;
                 const dy = (target.y - 20) - this.y; 
                 let angle = Math.atan2(dy, dx);
                 
-                // --- NEW: ADD AIM VARIANCE ( +/- 0.25 radians is roughly 15 degrees) ---
+                // Variance
                 const variance = (Math.random() - 0.5) * 0.25; 
                 angle += variance;
 
                 spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
             }
         } else {
-            // 2. MOVEMENT LOGIC BASED ON ROLE
-            this.attackCooldown -= dt; // Cooldown recovers while moving
+            // MOVEMENT LOGIC
+            this.attackCooldown -= dt; 
             
             let moveTargetX = null;
-            let moveTargetY = null; // For jump checks
+            let moveTargetY = null;
 
             if (this.role === 'bodyguard' && friendlyLeader && !friendlyLeader.dead) {
-                // FOLLOW SHAMAN
                 moveTargetX = friendlyLeader.x;
                 moveTargetY = friendlyLeader.y;
-                
-                // Don't stand right on top of him
                 if (Math.abs(this.x - moveTargetX) < 80) moveTargetX = this.x; 
             } else {
-                // RAIDER: SEEK ENEMY TERRITORY OR ENEMY SHAMAN
-                // Simplified: Raiders just want to go to the other side of the world
-                // Green (starts left) wants huge X. Blue (starts right) wants 0 X.
-                if (target) {
-                    // If we saw an enemy (even far away), go towards them
-                    moveTargetX = target.x;
-                    moveTargetY = target.y;
-                } else {
-                     // Go deep into enemy territory
-                     moveTargetX = (this.team === 'green') ? worldWidth : 0;
-                     moveTargetY = this.y; // Keep level
-                }
+                // RAIDER
+                moveTargetX = (this.team === 'green') ? worldWidth : 0;
+                moveTargetY = this.y; 
             }
 
             // APPLY MOVEMENT
             if (moveTargetX !== null) {
                 if (Math.abs(this.x - moveTargetX) > 20) {
                      const dir = (moveTargetX > this.x) ? 1 : -1;
-                     this.vx = dir * 110; // Slightly faster than villagers
+                     this.vx = dir * 140; // Increased speed
                 } else {
                     this.vx = 0;
                 }
 
-                // JUMP LOGIC
+                // --- NEW: ADVANCED JUMP & FLY ---
                 if (this.onGround) {
                     let wantJump = false;
                     
                     // 1. Leader/Target is high up?
-                    if (moveTargetY < this.y - 100 && Math.abs(this.x - moveTargetX) < 300) {
+                    if (moveTargetY < this.y - 100 && Math.abs(this.x - moveTargetX) < 400) {
                         wantJump = true;
                     }
 
@@ -814,32 +827,22 @@ export class Warrior extends Villager {
                         const lookAhead = this.vx > 0 ? 50 : -50;
                         const nextX = this.x + lookAhead;
                         if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                            // Reached edge of current island. Look for next island.
-                            let landAhead = false;
-                             for(let other of islands) {
-                                if (other === this.homeIsland) continue;
-                                // Check if 'other' island is within jump distance
-                                if (other.x < this.x + (this.vx > 0 ? 300 : 50) && 
-                                    other.x + other.w > this.x + (this.vx > 0 ? -50 : -300)) {
-                                     // Height check
-                                     if (other.y > this.y - 250 && other.y < this.y + 200) {
-                                         landAhead = true;
-                                         break;
-                                     }
-                                }
-                            }
-                            
-                            if (landAhead) wantJump = true;
-                            else if (this.role === 'bodyguard') {
-                                // Bodyguards don't suicide jump if no land, Raiders might risk it
-                                this.vx = 0; 
-                            }
+                             // Always jump at gaps now, more aggressive exploration
+                             wantJump = true;
                         }
                     }
 
                     if (wantJump) {
-                         this.vy = -450; 
+                         this.vy = -600; // Higher jump
                          this.onGround = false;
+                    }
+                } else {
+                    // MIDAIR "FLY" BOOST (Jetpack logic)
+                    // If moving towards target and target is far away or we are falling
+                    if (Math.abs(this.x - moveTargetX) > 100 && this.vy > -100) {
+                         // Apply upward force to glide/fly
+                         this.vy -= 1200 * dt;
+                         if (this.vy < -500) this.vy = -500; // Cap upward speed
                     }
                 }
             }
