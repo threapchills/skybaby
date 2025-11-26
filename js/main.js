@@ -1,5 +1,6 @@
 /* THE HEART OF THE GAME
-   Definitive V33.1: THE TYPO SLAYER UPDATE 蒔
+   Definitive V33.2: THE AGGRESSIVE AI UPDATE ⚔️
+   - Warriors now receive the full villager list to calculate separation/clustering.
    - Fixed a critical syntax error (missing backtick) that caused the Black Screen of Doom.
    - Game assets load in background while player admires the title.
    - Input logic updated to handle menu navigation.
@@ -516,13 +517,13 @@ class Game {
                 if (v.team === 'green' && !this.enemyChief.dead) enemies.push(this.enemyChief);
                 if (v.team === 'blue' && !this.player.dead) enemies.push(this.player);
                 
-                // --- NEW: PASS FRIENDLY LEADER ---
+                // --- NEW: PASS FRIENDLY LEADER & ALL VILLAGERS (For Separation) ---
                 const friendlyLeader = (v.team === 'green') ? this.player : this.enemyChief;
 
                 // Pass the callback to spawn projectiles with correct damage
                 v.update(dt, this.islands, enemies, (x, y, angle, team, damage) => {
                     this.projectiles.push(new Projectile(x, y, angle, team, damage));
-                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader); 
+                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader, this.villagers); 
             } else {
                 // Pass pigs list for milling behavior
                 v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs);
