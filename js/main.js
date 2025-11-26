@@ -1,6 +1,6 @@
 /* THE HEART OF THE GAME
-   Definitive V33: THE GRAND ENTRANCE UPDATE 蒔
-   - Added Title Screen & Tooltip sequence.
+   Definitive V33.1: THE TYPO SLAYER UPDATE 蒔
+   - Fixed a critical syntax error (missing backtick) that caused the Black Screen of Doom.
    - Game assets load in background while player admires the title.
    - Input logic updated to handle menu navigation.
 */
@@ -315,7 +315,7 @@ class Game {
         
         if (newSeason !== this.season) {
             this.season = newSeason;
-            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! 笶ｸ条沚Ａ);
+            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! 笶ｸ条沚Ａ`); // <--- THE FIX WAS HERE!
             
             const isWinter = (this.season === 'winter');
             this.islands.forEach(island => island.setSeason(isWinter));
