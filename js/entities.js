@@ -1,8 +1,9 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V33: THE BALANCING ACT UPDATE ⚖️
-   - FIXED: Villagers and Warriors now have 10 HP (One-shot kill range).
-   - FIXED: Projectiles now carry specific damage values.
-   - FIXED: Warrior arrows deal 10 dmg, Shaman arrows deal 25 dmg.
+   Definitive V32: THE ANTI-FREEZE UPDATE 🚒
+   - CRITICAL FIX: All images are now preloaded in a static 'Assets' object.
+   - Leaf class now uses the shared 'Assets.leaf' (Prevents memory leak crash).
+   - Snowflake class logic secured against math errors.
+   - Reverts "shorter" logic to ensure stability.
 */
 
 // --- GLOBAL ASSET LOADER ---
@@ -71,6 +72,10 @@ export class Entity {
     drawSprite(ctx, img, screenX, screenY, width, height) {
         if (img && img.complete && img.naturalWidth > 0) {
             ctx.drawImage(img, screenX, screenY, width, height);
+        } else {
+            // Debug placeholder (invisible or hot pink if needed)
+            // ctx.fillStyle = 'magenta';
+            // ctx.fillRect(screenX, screenY, width, height);
         }
     }
 }
@@ -97,6 +102,7 @@ export class Leaf extends Entity {
     }
 
     draw(ctx, camera) {
+        // Cull off-screen
         if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
             this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
 
@@ -107,6 +113,7 @@ export class Leaf extends Entity {
         ctx.translate(screenX, screenY);
         ctx.rotate(this.angle);
         ctx.scale(this.scale, this.scale);
+        // FIX: Use the Shared Asset!
         this.drawSprite(ctx, Assets.leaf, -16, -16, 32, 32);
         ctx.restore();
     }
@@ -590,7 +597,7 @@ export class Villager extends Entity {
     constructor(x, y, team) {
         super(x, y, 24, 24); 
         this.team = team;
-        this.hp = 10; // MODIFIED: Low HP
+        this.hp = 10; // UPDATED: Fragile little things now
         this.homeIsland = null;
         this.vx = 0;
         this.vy = 0; 
@@ -657,7 +664,7 @@ export class Warrior extends Villager {
     constructor(x, y, team) {
         super(x, y, team);
         this.w = 32; this.h = 32; 
-        this.hp = 10; // MODIFIED: Low HP so 1 arrow kills
+        this.hp = 10; // UPDATED: Warriors are now 1-hit wonders (glass cannons)
         this.attackCooldown = 0;
     }
 
@@ -697,7 +704,7 @@ export class Warrior extends Villager {
                     const dx = target.x - this.x;
                     const dy = (target.y - 20) - this.y; 
                     const angle = Math.atan2(dy, dx);
-                    // MODIFIED: Pass damage (10)
+                    // PASS 10 DAMAGE (Warriors do 10 dmg)
                     spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
                 }
             } else {
@@ -763,11 +770,10 @@ export class Warrior extends Villager {
 }
 
 export class Projectile extends Entity {
-    // MODIFIED: Accepts damage
-    constructor(x, y, angle, team, damage) {
+    constructor(x, y, angle, team, damage) { // ADDED damage param
         super(x, y, 32, 10); 
         this.team = team;
-        this.damage = damage; // Store damage
+        this.damage = damage; // Store it!
         const speed = 600; 
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
