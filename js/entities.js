@@ -1,12 +1,12 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V33.4: THE GLOBETROTTER UPDATE 🌍
-   - Raiders now patrol random islands instead of marching to world edges.
-   - Warriors now use "Smart Wrapping" to take the shortest path across world boundaries.
-   - Fixed "stuck at edge" bug by removing static edge targets.
+   Definitive V33.5: THE "NO MORE HUDDLING" UPDATE 🙅‍♂️
+   - FIXED: "Stacking" bug. Units now physically push each other apart.
+   - FIXED: "Stalemate" bug. Units enter "Bloodhound Mode" when enemies are few.
+   - NEW: Dynamic Role Balancing. If too many Bodyguards, some become Raiders.
+   - IMPROVED: Raiders are now relentless and won't get stuck at edges.
 */
 
 // --- GLOBAL ASSET LOADER ---
-// We load these ONCE. All entities share them.
 export const Assets = {
     // Environment
     tilesetNormal: new Image(),
@@ -67,14 +67,9 @@ export class Entity {
         this.dead = false;
     }
 
-    // Helper to safely draw an image if it's loaded
     drawSprite(ctx, img, screenX, screenY, width, height) {
         if (img && img.complete && img.naturalWidth > 0) {
             ctx.drawImage(img, screenX, screenY, width, height);
-        } else {
-            // Debug placeholder (invisible or hot pink if needed)
-            // ctx.fillStyle = 'magenta';
-            // ctx.fillRect(screenX, screenY, width, height);
         }
     }
 }
@@ -101,7 +96,6 @@ export class Leaf extends Entity {
     }
 
     draw(ctx, camera) {
-        // Cull off-screen
         if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
             this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
 
@@ -112,7 +106,6 @@ export class Leaf extends Entity {
         ctx.translate(screenX, screenY);
         ctx.rotate(this.angle);
         ctx.scale(this.scale, this.scale);
-        // FIX: Use the Shared Asset!
         this.drawSprite(ctx, Assets.leaf, -16, -16, 32, 32);
         ctx.restore();
     }
@@ -719,6 +712,7 @@ export class Warrior extends Villager {
         // --- NEW: PATROL TARGET ---
         this.patrolTargetX = null;
         this.patrolTimer = 0;
+        this.roleTimer = 0;
     }
 
     draw(ctx, camera) {
@@ -736,17 +730,41 @@ export class Warrior extends Villager {
 
         this.attackCooldown -= dt;
 
-        // --- SEPARATION ---
+        // --- ROLE BALANCING ---
+        // Periodically check if we should switch roles
+        this.roleTimer -= dt;
+        if (this.roleTimer <= 0) {
+            this.roleTimer = 10 + Math.random() * 10; // Check every 10-20 seconds
+            
+            // If bodyguard, small chance to become raider to prevent accumulation
+            if (this.role === 'bodyguard' && Math.random() < 0.2) {
+                this.role = 'raider';
+            }
+        }
+
+        // --- BLOODHOUND MODE ---
+        // If enemies are few (< 5), force everyone to be Raiders to hunt them down
+        if (enemies.length < 5 && enemies.length > 0) {
+            this.role = 'raider';
+        }
+
+        // --- SEPARATION (Improved Anti-Stacking) ---
         if (allVillagers) {
             allVillagers.forEach(v => {
-                if (v !== this && v.team === this.team && !v.dead) {
-                    const dx = v.x - this.x;
-                    const dy = v.y - this.y;
+                if (v !== this && !v.dead) {
+                    const dx = this.x - v.x;
+                    const dy = this.y - v.y;
                     const distSq = dx*dx + dy*dy;
-                    if (distSq < 900) { 
-                        const push = 500 * dt; 
-                        if (dx > 0) this.vx -= push;
-                        else this.vx += push;
+                    // Hard separation if too close
+                    if (distSq < 400) { // 20px radius
+                        const dist = Math.sqrt(distSq);
+                        if (dist < 1) return; // Prevent div by zero
+                        
+                        const pushForce = (20 - dist) * 10; // Stronger push when closer
+                        const nx = dx / dist;
+                        
+                        this.vx += nx * pushForce * 5; // Impulse
+                        this.x += nx * 2; // Direct position nudge
                     }
                 }
             });
@@ -756,13 +774,16 @@ export class Warrior extends Villager {
         let target = null;
         let bestScore = -Infinity;
 
+        // BLOODHOUND LOGIC: Range becomes infinite if few enemies remain
+        const detectionRange = (enemies.length < 5) ? 10000 : 600;
+
         enemies.forEach(e => {
             const dx = e.x - this.x;
             const dy = e.y - this.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
             
-            if (dist < 600) { 
-                let score = 1000 - dist; 
+            if (dist < detectionRange) { 
+                let score = 10000 - dist; 
                 if (e instanceof Warrior) score += 500; 
                 else if (e instanceof Player) score += 300; 
                 if (score > bestScore) {
@@ -772,8 +793,8 @@ export class Warrior extends Villager {
             }
         });
 
-        if (target) {
-            // STOP AND SHOOT
+        if (target && (enemies.length < 5 || Math.sqrt((target.x-this.x)**2 + (target.y-this.y)**2) < 600)) {
+            // ATTACK MODE
             this.vx *= 0.8; 
             if (this.attackCooldown <= 0) {
                 this.attackCooldown = 1.5; 
@@ -785,6 +806,13 @@ export class Warrior extends Villager {
 
                 spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
             }
+            
+            // If Bloodhound mode, move towards target even while shooting
+            if (enemies.length < 5) {
+                 const dir = Math.sign(target.x - this.x);
+                 this.vx += dir * 50;
+            }
+
         } else {
             // MOVEMENT LOGIC
             let moveTargetX = null;
@@ -793,15 +821,29 @@ export class Warrior extends Villager {
             if (this.role === 'bodyguard' && friendlyLeader && !friendlyLeader.dead) {
                 moveTargetX = friendlyLeader.x;
                 moveTargetY = friendlyLeader.y;
-                if (Math.abs(this.x - moveTargetX) < 80) moveTargetX = this.x; 
+                if (Math.abs(this.x - moveTargetX) < 100) {
+                    // Wander around leader slightly instead of standing on top
+                    moveTargetX = friendlyLeader.x + (Math.random() - 0.5) * 150;
+                }
             } else {
-                // --- NEW: GLOBETROTTING RAIDER LOGIC ---
+                // --- GLOBETROTTING RAIDER LOGIC ---
                 // Pick random islands instead of hard-coded edge coordinates
                 this.patrolTimer -= dt;
                 
-                if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
-                     // Pick a new target
-                     this.patrolTimer = 5 + Math.random() * 8; // Change mind every 5-13 seconds
+                // If hunting last enemies, target them directly
+                if (enemies.length < 5 && enemies.length > 0) {
+                    // Target the nearest enemy
+                    let nearest = enemies[0];
+                    let minD = Infinity;
+                    enemies.forEach(e => {
+                        const d = Math.abs(e.x - this.x);
+                        if (d < minD) { minD = d; nearest = e; }
+                    });
+                    this.patrolTargetX = nearest.x;
+                    this.patrolTargetY = nearest.y;
+                } else if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
+                     // Pick a new patrol target
+                     this.patrolTimer = 8 + Math.random() * 12; 
                      
                      if (islands.length > 0) {
                          const randomIsland = islands[Math.floor(Math.random() * islands.length)];
@@ -821,11 +863,10 @@ export class Warrior extends Villager {
             if (moveTargetX !== null) {
                 let dx = moveTargetX - this.x;
                 
-                // --- NEW: SMART WRAP LOGIC ---
-                // If destination is more than half the world away, it's shorter to wrap
+                // --- SMART WRAP LOGIC ---
                 if (Math.abs(dx) > worldWidth / 2) {
-                    if (dx > 0) dx -= worldWidth; // Go Left to wrap to Right
-                    else dx += worldWidth;        // Go Right to wrap to Left
+                    if (dx > 0) dx -= worldWidth; 
+                    else dx += worldWidth;        
                 }
                 
                 if (Math.abs(dx) > 20) {
