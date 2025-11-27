@@ -1,18 +1,18 @@
 /* THE HEART OF THE GAME
-   Definitive V33.2: THE AGGRESSIVE AI UPDATE ⚔️
-   - Warriors now receive the full villager list to calculate separation/clustering.
-   - Fixed a critical syntax error (missing backtick) that caused the Black Screen of Doom.
-   - Game assets load in background while player admires the title.
-   - Input logic updated to handle menu navigation.
+   Definitive V34.2: THE ELEMENTAL CHAOS UPDATE 🧙‍♂️🏝️
+   - Implemented "Elemental Overload" (Fireball, Stone Wall, Water Spawn).
+   - Implemented "Island Bumper Cars" (Collision Physics & Crunch).
+   - Implemented "Air" resource cost for Hookshot.
+   - Added Anime Impact Frames & Lightning.
 */
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
 import { World } from './world.js';
-// IMPORT EVERYTHING EXPLICITLY TO PREVENT MISSING MODULE ERRORS
 import { 
     Player, Island, Villager, Warrior, Projectile, 
-    Particle, Pig, Leaf, Snowflake, Assets 
+    Particle, Pig, Leaf, Snowflake, Assets,
+    Fireball, StoneWall, RainCloud, VisualEffect
 } from './entities.js';
 import { AudioManager } from './audio.js';
 
@@ -26,17 +26,18 @@ class Game {
         this.worldWidth = 6000; 
         this.worldHeight = 3000;
 
-        // --- NEW: UI STATE MANAGEMENT ---
-        this.uiState = 'TITLE'; // States: 'TITLE' -> 'TOOLTIP' -> 'PLAYING'
+        this.uiState = 'TITLE'; 
         
-        // Load UI Images immediately
-        this.titleImg = new Image();
-        this.titleImg.src = 'assets/title.png';
-        
-        this.tooltipImg = new Image();
-        this.tooltipImg.src = 'assets/tooltip.png';
+        this.titleImg = new Image(); this.titleImg.src = 'assets/title.png';
+        this.tooltipImg = new Image(); this.tooltipImg.src = 'assets/tooltip.png';
 
         this.input = new InputHandler();
+        
+        // Bind Spell Wheel
+        this.input.onScroll((delta) => {
+             this.resources.cycleSpell(delta > 0 ? 1 : -1);
+        });
+
         this.resources = new ResourceManager();
         this.world = new World(this.worldWidth, this.worldHeight);
         
@@ -49,18 +50,20 @@ class Game {
         this.islands = [];
         this.villagers = [];
         this.projectiles = [];
+        this.fireballs = []; // NEW
+        this.walls = []; // NEW
         this.particles = [];
+        this.visualEffects = []; // NEW
         this.pigs = []; 
         this.leaves = []; 
         this.snowflakes = []; 
+        this.rainClouds = []; // NEW
 
-        // RANDOM SEASON START (50/50)
         this.season = Math.random() > 0.5 ? 'summer' : 'winter';
         console.log(`軸 Starting Season: ${this.season.toUpperCase()}`);
 
         this._generateWorld();
 
-        // Apply season immediately
         const isWinter = (this.season === 'winter');
         this.islands.forEach(island => island.setSeason(isWinter));
 
@@ -69,7 +72,7 @@ class Game {
         this.hookTarget = null;
         this.gameOver = false;
         
-        this.shake = 0;
+        this.impactFrameTimer = 0; // Anime finisher timer
         
         this.dayCycleTimer = 0; 
         this.dayTime = 0; 
@@ -78,12 +81,11 @@ class Game {
         this.windTimer = 0;
         this.weatherTimer = 0; 
         this.pulseTime = 0; 
+        this.lightningTimer = 0;
 
-        // Audio starts on first interaction, which also handles screen nav
         window.addEventListener('click', () => this._startAudio(), { once: true });
         window.addEventListener('keydown', () => this._startAudio(), { once: true });
 
-        // Screen Navigation Listener
         this._bindNavigation();
 
         requestAnimationFrame((ts) => this.loop(ts));
@@ -98,7 +100,6 @@ class Game {
     _handleScreenNav() {
         if (this.uiState === 'TITLE') {
             this.uiState = 'TOOLTIP';
-            // Simple debounce to prevent clicking through both screens instantly
             this.navCooldown = true;
             setTimeout(() => { this.navCooldown = false; }, 200);
         } else if (this.uiState === 'TOOLTIP' && !this.navCooldown) {
@@ -192,35 +193,36 @@ class Game {
     }
 
     update(dt) {
-        // --- UI BLOCKER ---
         if (this.uiState !== 'PLAYING') return;
-
         if (this.gameOver) return;
 
-        if (this.shake > 0) this.shake -= 15 * dt; 
-        if (this.shake < 0) this.shake = 0;
-        
-        // --- DAY/NIGHT CYCLE (20s Day, 10s Night) ---
-        this.dayCycleTimer += dt;
+        // Spell Key Shortcuts
+        if (this.input.keys.digit1) this.resources.setSpell(0);
+        if (this.input.keys.digit2) this.resources.setSpell(1);
+        if (this.input.keys.digit3) this.resources.setSpell(2);
+        if (this.input.keys.digit4) this.resources.setSpell(3);
 
+        if (this.impactFrameTimer > 0) {
+            this.impactFrameTimer -= dt;
+            // Freeze logic during impact frame (but continue drawing)
+            if (this.impactFrameTimer > 0.1) return; 
+        }
+
+        // --- DAY/NIGHT CYCLE ---
+        this.dayCycleTimer += dt;
         if (this.dayCycleTimer < 20) {
-            // DAY: 0 to PI over 20 seconds
             this.dayTime = (this.dayCycleTimer / 20) * Math.PI;
         } else if (this.dayCycleTimer < 30) {
-            // NIGHT: PI to 2PI over 10 seconds
             const nightProgress = (this.dayCycleTimer - 20) / 10;
             this.dayTime = Math.PI + (nightProgress * Math.PI);
         } else {
-            // RESET
             this.dayCycleTimer = 0;
             this.dayTime = 0;
             this.dayCount++;
-            console.log(`捲 Day ${this.dayCount} begins!`);
             this._checkSeasonChange();
         }
         
         this.pulseTime += dt * 5; 
-
         this._updateWeather(dt);
 
         if (this.audio.initialized) {
@@ -233,28 +235,16 @@ class Game {
             }
         }
 
-        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief);
-        this.world.update(this.player);
+        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
+        this.world.update(this.player, dt);
 
         if (!this.enemyChief.dead) {
-            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player); 
+            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls); 
             
             if (this.enemyChief.shootRequest) {
-                // ENEMY SHAMAN SHOOTS: 25 Damage
                 this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue', 25));
                 this.enemyChief.shootRequest = null; 
             }
-
-            this.villagers.forEach(v => {
-                if (v.team === 'green' && !v.dead) {
-                    if (this._checkHit(this.enemyChief, v)) {
-                        v.dead = true;
-                        this._spawnBlood(v.x, v.y, '#00ff00', 30); 
-                        this.audio.play('hit', 0.5, 0.2); 
-                        this.shake = 5; 
-                    }
-                }
-            });
         }
 
         this._checkWinConditions(dt);
@@ -266,25 +256,81 @@ class Game {
 
         let nearWater = false;
         let nearFire = false;
-        this.islands.forEach(island => {
-            island.update(dt, this.player, this.enemyChief, this.audio); 
+        
+        // --- ISLAND PHYSICS (CRUNCH TIME) ---
+        for (let i = 0; i < this.islands.length; i++) {
+            let islandA = this.islands[i];
             
-            if (island.team === 'green' && island.hasTeepee) greenTents++;
-            if (island.team === 'blue' && island.hasTeepee) blueTents++;
+            islandA.update(dt, this.player, this.enemyChief, this.audio); 
+            
+            if (islandA.team === 'green' && islandA.hasTeepee) greenTents++;
+            if (islandA.team === 'blue' && islandA.hasTeepee) blueTents++;
 
-            const dist = Math.sqrt((island.x - this.player.x)**2 + (island.y - this.player.y)**2);
+            const dist = Math.sqrt((islandA.x - this.player.x)**2 + (islandA.y - this.player.y)**2);
             if (dist < 400) {
                 nearWater = true; 
-                if (island.hasFireplace) nearFire = true;
+                if (islandA.hasFireplace) nearFire = true;
             }
-        });
+
+            // Check Collision with other Islands
+            for (let j = i + 1; j < this.islands.length; j++) {
+                let islandB = this.islands[j];
+                
+                if (islandA.x < islandB.x + islandB.w &&
+                    islandA.x + islandA.w > islandB.x &&
+                    islandA.y < islandB.y + islandB.h &&
+                    islandA.y + islandA.h > islandB.y) {
+                    
+                    // CRUNCH!
+                    const vRel = Math.sqrt((islandA.vx - islandB.vx)**2 + (islandA.vy - islandB.vy)**2);
+                    
+                    if (vRel > 100) {
+                        this.world.camera.shake = vRel / 20; // Massive shake
+                        this.audio.play('hit', 1.0, 0.5); // Loud crunch
+                        
+                        // Kill units in the crunch zone
+                        this.villagers.forEach(v => {
+                             if (!v.dead && 
+                                 v.x > Math.max(islandA.x, islandB.x) && 
+                                 v.x < Math.min(islandA.x + islandA.w, islandB.x + islandB.w)) {
+                                 v.dead = true;
+                                 this._spawnBlood(v.x, v.y, '#cc0000', 50);
+                             }
+                        });
+
+                        // Particle Explosion
+                        const cx = (Math.max(islandA.x, islandB.x) + Math.min(islandA.x+islandA.w, islandB.x+islandB.w)) / 2;
+                        const cy = (Math.max(islandA.y, islandB.y) + Math.min(islandA.y+islandA.h, islandB.y+islandB.h)) / 2;
+                        for(let k=0; k<20; k++) {
+                            this.particles.push(new Particle(cx, cy, '#8B4513', Math.random()*500, 1.0, 10));
+                        }
+                    }
+
+                    // BOUNCE
+                    const tempVx = islandA.vx;
+                    const tempVy = islandA.vy;
+                    islandA.vx = islandB.vx * 0.5;
+                    islandA.vy = islandB.vy * 0.5;
+                    islandB.vx = tempVx * 0.5;
+                    islandB.vy = tempVy * 0.5;
+
+                    // Separate slightly to prevent sticking
+                    if (islandA.x < islandB.x) islandA.x -= 5; else islandA.x += 5;
+                }
+            }
+        }
         
         this.resources.update(dt, isMoving, nearWater, nearFire);
         this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
             this._handleShooting(dt);
-            this._handleHookshot(dt);
+            // ONLY ALLOW HOOKSHOT IF AIR SPELL IS ACTIVE
+            if (this.resources.currentSpell === 1) { // 1 is Air
+                this._handleHookshot(dt);
+            } else {
+                this.hookTarget = null; // Clear line render
+            }
         }
 
         this.spawnTimer += dt;
@@ -300,14 +346,23 @@ class Game {
         this.pigs.forEach(pig => pig.update(dt, this.islands, this.worldWidth, this.worldHeight));
         this.pigs = this.pigs.filter(p => !p.dead); 
 
+        this.walls.forEach(w => w.update(dt, this.islands, this.worldHeight));
+        this.walls = this.walls.filter(w => !w.dead);
+
         this.leaves.forEach(l => l.update(dt));
         this.leaves = this.leaves.filter(l => !l.dead);
 
         this.snowflakes.forEach(s => s.update(dt));
         this.snowflakes = this.snowflakes.filter(s => !s.dead);
 
+        this.rainClouds.forEach(r => r.update(dt));
+        this.rainClouds = this.rainClouds.filter(r => !r.dead);
+
         this.particles.forEach(p => p.update(dt));
         this.particles = this.particles.filter(p => !p.dead);
+
+        this.visualEffects.forEach(e => e.update(dt));
+        this.visualEffects = this.visualEffects.filter(e => !e.dead);
     }
 
     _checkSeasonChange() {
@@ -346,7 +401,7 @@ class Game {
         pig.dead = true;
         consumer.hp = Math.min(consumer.hp + 10, consumer.maxHp);
         this.audio.play('munch', 0.6, 0.2); 
-        this.shake = 5; 
+        this.world.camera.shake = 5; 
         this._spawnBlood(pig.x, pig.y, '#FF69B4', 15); 
     }
 
@@ -359,6 +414,17 @@ class Game {
             const px = cx + this.canvas.width + 50; 
             const py = cy + Math.random() * this.canvas.height;
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random()*400, 2.0, 5, 'wind'));
+        }
+
+        // Lightning Logic
+        this.lightningTimer -= dt;
+        if (this.season === 'summer' && this.lightningTimer <= 0) {
+            // Rare summer storms
+            if (Math.random() < 0.001) {
+                this.lightningTimer = 0.2;
+                this.visualEffects.push(new VisualEffect(this.world.camera.x + Math.random()*800, 0, 'lightning'));
+                this.audio.play('shoot', 0.1, 0.5); // Placeholder thunder
+            }
         }
 
         this.weatherTimer -= dt;
@@ -422,28 +488,31 @@ class Game {
     }
 
     _handleHookshot(dt) {
+        // Only if we have Air
         if (this.input.mouse.rightDown) {
-            const mx = this.input.mouse.x + this.world.camera.x;
-            const my = this.input.mouse.y + this.world.camera.y;
+            if (this.resources.spendAir(dt)) {
+                const mx = this.input.mouse.x + this.world.camera.x;
+                const my = this.input.mouse.y + this.world.camera.y;
 
-            let hit = false;
-            for (let island of this.islands) {
-                if (mx >= island.x && mx <= island.x + island.w &&
-                    my >= island.y && my <= island.y + island.h) {
-                    
-                    hit = true;
-                    this.selectedIsland = island;
-                    
-                    const dx = this.player.x - island.x;
-                    const dy = this.player.y - island.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    island.vx += (dx / dist) * 1200 * dt;
-                    island.vy += (dy / dist) * 1200 * dt;
-                    
-                    break;
+                let hit = false;
+                for (let island of this.islands) {
+                    if (mx >= island.x && mx <= island.x + island.w &&
+                        my >= island.y && my <= island.y + island.h) {
+                        
+                        hit = true;
+                        this.selectedIsland = island;
+                        
+                        const dx = this.player.x - island.x;
+                        const dy = this.player.y - island.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        island.vx += (dx / dist) * 1200 * dt;
+                        island.vy += (dy / dist) * 1200 * dt;
+                        
+                        break;
+                    }
                 }
+                this.hookTarget = {x: mx, y: my, hit: hit};
             }
-            this.hookTarget = {x: mx, y: my, hit: hit};
         } else {
             this.hookTarget = null;
             this.selectedIsland = null;
@@ -451,41 +520,35 @@ class Game {
     }
 
     _handleCombat(dt) {
+        // --- 1. PROJECTILES ---
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const p = this.projectiles[i];
             
             p.update(dt, (x, y, color) => {
                 this.particles.push(new Particle(x, y, color, 0, 0.4, 3, 'trail'));
-            });
+            }, this.walls);
             
             let hitSomething = false;
 
             // Hit Enemy Chief
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
                 this._spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= p.damage; // Use dynamic damage from projectile
+                this.enemyChief.hp -= p.damage; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.enemyChief.hp <= 0) {
-                    this.enemyChief.dead = true;
-                    this.enemyChief.respawnTimer = 8.0; 
-                    this._spawnBlood(p.x, p.y, '#cc0000', 100); 
-                    this.shake = 80; 
-                    this.audio.play('death', 0.8, 0.1); 
+                    this._killChief(this.enemyChief);
                 }
             }
             
             // Hit Player
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
                 this._spawnBlood(p.x, p.y);
-                this.player.hp -= p.damage; // Use dynamic damage from projectile
+                this.player.hp -= p.damage; 
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
                 if (this.player.hp <= 0) {
-                    this.player.dead = true;
-                    this.player.respawnTimer = 8.0;
-                    this.shake = 80; 
-                    this.audio.play('death', 0.8, 0.1); 
+                    this._killChief(this.player);
                 }
             }
             
@@ -493,13 +556,9 @@ class Game {
             for (let v of this.villagers) {
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     this._spawnBlood(v.x, v.y);
-                    
-                    // APPLY DAMAGE
                     v.hp -= p.damage; 
-
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
-                    
                     if (v.hp <= 0) {
                          v.dead = true;
                          this._spawnBlood(v.x, v.y);
@@ -511,25 +570,76 @@ class Game {
             if (p.dead) this.projectiles.splice(i, 1);
         }
 
+        // --- 2. FIREBALLS (NEW) ---
+        for (let i = this.fireballs.length - 1; i >= 0; i--) {
+            const f = this.fireballs[i];
+            f.update(dt);
+            
+            let hit = false;
+            
+            // Wall Hit
+            for (let w of this.walls) {
+                if(this._checkHit(f, w)) {
+                    w.hp -= 200 * dt; // Melts walls
+                    f.dead = true;
+                    hit = true;
+                    break;
+                }
+            }
+
+            // Burn Enemy Chief
+            if (!this.enemyChief.dead && this._checkHit(f, this.enemyChief)) {
+                 this.enemyChief.hp -= 40 * dt; // DoT
+            }
+            
+            // INSTA-KILL Enemy Villagers in path
+            this.villagers.forEach(v => {
+                if (!v.dead && v.team !== 'green' && this._checkHit(f, v)) {
+                    v.dead = true;
+                    this._spawnBlood(v.x, v.y, '#FF4500', 20); // Fire blood!
+                }
+            });
+
+            // Decorate Trees (Visual Only)
+            this.islands.forEach(island => {
+                if (f.x > island.x && f.x < island.x + island.w && Math.abs(f.y - island.y) < 100) {
+                    island.trees.forEach(t => {
+                        if (Math.abs((island.x + t.x) - f.x) < 50) t.burnt = true;
+                    });
+                }
+            });
+            
+            if (f.dead) this.fireballs.splice(i, 1);
+        }
+
         this.villagers.forEach(v => {
             if (v instanceof Warrior) {
                 const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
                 if (v.team === 'green' && !this.enemyChief.dead) enemies.push(this.enemyChief);
                 if (v.team === 'blue' && !this.player.dead) enemies.push(this.player);
                 
-                // --- NEW: PASS FRIENDLY LEADER & ALL VILLAGERS (For Separation) ---
                 const friendlyLeader = (v.team === 'green') ? this.player : this.enemyChief;
 
-                // Pass the callback to spawn projectiles with correct damage
                 v.update(dt, this.islands, enemies, (x, y, angle, team, damage) => {
                     this.projectiles.push(new Projectile(x, y, angle, team, damage));
-                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader, this.villagers); 
+                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader, this.villagers, this.walls); 
             } else {
-                // Pass pigs list for milling behavior
-                v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs);
+                v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls);
             }
         });
         this.villagers = this.villagers.filter(v => !v.dead);
+    }
+
+    _killChief(chief) {
+        chief.dead = true;
+        chief.respawnTimer = 8.0; 
+        this._spawnBlood(chief.x, chief.y, '#cc0000', 100); 
+        this.world.camera.shake = 80; 
+        this.audio.play('death', 0.8, 0.1); 
+        
+        // ANIME IMPACT
+        this.impactFrameTimer = 0.2; // Freeze for 0.2s
+        this.visualEffects.push(new VisualEffect(0,0,'impact'));
     }
 
     _checkHit(entity1, entity2) {
@@ -551,15 +661,77 @@ class Game {
             if (!this.player.fireCooldown) this.player.fireCooldown = 0;
             this.player.fireCooldown -= dt;
 
-            if (this.player.fireCooldown <= 0 && this.resources.spendFire()) {
-                this.player.fireCooldown = 0.2; 
+            if (this.player.fireCooldown <= 0) {
                 const mx = this.input.mouse.x + this.world.camera.x;
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
+
+                // --- SPELL LOGIC ---
+                const spell = this.resources.currentSpell;
+
+                // 0: FIREBALL
+                if (spell === 0 && this.resources.spendFire()) {
+                    this.player.fireCooldown = 0.5; // Slower fire rate
+                    this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle));
+                    this.audio.play('shoot', 0.4, -0.2); // Deeper sound
+                }
                 
-                // PLAYER SHOOTS: 25 DAMAGE
-                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green', 25));
-                this.audio.play('shoot', 0.4, 0.0);
+                // 1: AIR (Handled by Right Click, Left Click does nothing or simple attack?)
+                // Let's make Left Click shoot normal weak arrow if Air is selected, or nothing.
+                // User said: "Air spell is... the current island pull system"
+                // So Left Click does nothing here.
+
+                // 2: EARTH WALL
+                else if (spell === 2 && this.resources.spendEarth()) {
+                    this.player.fireCooldown = 1.0;
+                    // Spawn wall at cursor, clamped to ground? Or just drop it?
+                    // User said "Instantly spawn". Let's drop it from cursor.
+                    this.walls.push(new StoneWall(mx, my));
+                    this.audio.play('land', 0.8, 0.1); // Heavy thud
+                    this.world.camera.shake = 5;
+                }
+
+                // 3: WATER (SPAWN)
+                else if (spell === 3 && this.resources.spendWater()) {
+                    this.player.fireCooldown = 1.0;
+                    this.rainClouds.push(new RainCloud(mx, my));
+                    this._forceSpawnVillagers(mx, my);
+                    this.audio.play('teepee', 0.5, 0.5); // Magic chimes
+                }
+            }
+        }
+    }
+
+    _forceSpawnVillagers(x, y) {
+        // Find nearest friendly hut to cursor
+        let bestDist = Infinity;
+        let bestIsland = null;
+        
+        this.islands.forEach(island => {
+            if (island.team === 'green' && island.hasTeepee) {
+                const d = Math.sqrt((island.x - x)**2 + (island.y - y)**2);
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestIsland = island;
+                }
+            }
+        });
+
+        if (bestIsland && bestDist < 800) {
+            // Spawn 3-5 units instantly
+            const count = 3 + Math.floor(Math.random() * 3);
+            for(let i=0; i<count; i++) {
+                if (this.villagers.length >= 200) {
+                     // CAP STRATEGY: Do nothing, let the cap block enemies
+                     break; 
+                }
+                const unit = (Math.random() < 0.4) ? 
+                        new Warrior(bestIsland.x + 50, bestIsland.y - 40, 'green') :
+                        new Villager(bestIsland.x + 50, bestIsland.y - 40, 'green');
+                unit.homeIsland = bestIsland;
+                unit.vx = (Math.random() - 0.5) * 200;
+                unit.vy = -300; // Pop out!
+                this.villagers.push(unit);
             }
         }
     }
@@ -631,26 +803,32 @@ class Game {
         }
         
         this.ctx.save();
-        if (this.shake > 0) {
-            const dx = (Math.random() - 0.5) * this.shake;
-            const dy = (Math.random() - 0.5) * this.shake;
-            this.ctx.translate(dx, dy);
+        if (this.world.camera.shake > 0) {
+            // Apply camera shake logic from World/Camera
         }
 
-        this.world.draw(this.ctx, this.season);
+        // Pass Impact Frame boolean to World Draw
+        const isImpactFrame = (this.impactFrameTimer > 0);
+        this.world.draw(this.ctx, this.season, isImpactFrame);
 
         this.leaves.forEach(l => l.draw(this.ctx, this.world.camera));
         this.snowflakes.forEach(s => s.draw(this.ctx, this.world.camera));
+        this.rainClouds.forEach(r => r.draw(this.ctx, this.world.camera));
 
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
+        this.walls.forEach(w => w.draw(this.ctx, this.world.camera));
         
         this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
         
         this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
         this.projectiles.forEach(p => p.draw(this.ctx, this.world.camera));
+        this.fireballs.forEach(f => f.draw(this.ctx, this.world.camera));
+        
         if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
         if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
+        
         this.particles.forEach(p => p.draw(this.ctx, this.world.camera));
+        this.visualEffects.forEach(e => e.draw(this.ctx, this.world.camera));
         
         if (this.hookTarget) {
             this.ctx.strokeStyle = this.hookTarget.hit ? 'cyan' : 'gray';
