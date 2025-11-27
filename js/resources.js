@@ -1,8 +1,9 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Definitive V22: NO REGEN UPDATE 🛑
-   - Automatic regeneration removed for spells.
-   - Added replenishAll() for when Enemy Chief dies.
-   - Fire resource is now exclusively for Fireball Spell (not Arrows).
+   Definitive V24: THE "EARNED WATER" UPDATE 💧
+   - Water: Now requires ~20 kills to refill (5 per kill).
+   - Fire: Refuels near fireplaces (Arrows are free).
+   - Earth: Refuels when walking on ground.
+   - Air: Refuels when flying/falling.
 */
 
 export class ResourceManager {
@@ -18,7 +19,7 @@ export class ResourceManager {
         this.spellNames = ["FIREBALL", "AEROKINESIS", "STONE WALL", "TIDE OF LIFE"];
         this.spellColors = ["#FF4500", "#87CEEB", "#8B4513", "#00BFFF"];
 
-        // RESOURCES (Rare/Limited)
+        // RESOURCES
         this.earth = 50; 
         this.maxEarth = 200;
         this.earthCost = 30;
@@ -27,13 +28,13 @@ export class ResourceManager {
         this.maxAir = 100;
         this.airCostPerSecond = 40; 
 
-        this.water = 100;
+        this.water = 25; // Start with a little bit, but you gotta earn the rest!
         this.maxWater = 100;
         this.waterCost = 50; 
 
         this.fire = 5; 
         this.maxFire = 10;
-        // Fire regen removed (Arrows are infinite, Fireball is limited)
+        this.fireRegenTimer = 0;
     }
 
     cycleSpell(direction) {
@@ -55,18 +56,14 @@ export class ResourceManager {
         console.log("🌟 MANA RUSH! Resources Replenished!");
     }
 
+    // New: Water from Blood (Kills)
+    // 5 points per kill = 20 kills to fill 100 water.
+    addWater(amount) {
+        this.water += amount;
+        if (this.water > this.maxWater) this.water = this.maxWater;
+    }
+
     // --- SPENDING ---
-
-    addEarth(amount) {
-        // Passive earth from island capture still allowed? 
-        // User said "Only upon killing enemy shaman". 
-        // I will disable passive collection to be strict with the new rule.
-        // this.earth += amount;
-    }
-
-    addPassiveEarth(amount) {
-        // Disabled for strict mana rules
-    }
 
     spendEarth() {
         if (this.earth >= this.earthCost) {
@@ -101,9 +98,32 @@ export class ResourceManager {
         return false;
     }
 
-    update(dt, isMoving, isNearWaterSource, isNearFireSource) {
-        // REGEN DISABLED as per new requirements.
-        // Resources are now a finite tactical pool until victory.
+    // UPDATED REGEN LOGIC
+    update(dt, isGrounded, isMoving, isNearFire) {
+        // 2) Fire: Stand near fire to refuel (For Spells only, arrows are free)
+        if (isNearFire && this.fire < this.maxFire) {
+            this.fireRegenTimer += dt;
+            if (this.fireRegenTimer > 0.5) { // 1 charge every 0.5s
+                this.fire++;
+                this.fireRegenTimer = 0;
+            }
+        } else {
+            this.fireRegenTimer = 0;
+        }
+
+        // 3) Earth: Walk on ground to refuel
+        if (isGrounded && isMoving && this.earth < this.maxEarth) {
+            this.earth += 40 * dt; // Fast refill while walking
+        }
+
+        // 4) Air: Fly/Fall to refuel
+        if (!isGrounded && this.air < this.maxAir) {
+            this.air += 30 * dt; // Refill while airborne
+        }
+        
+        // Cap values just in case
+        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
+        if (this.air > this.maxAir) this.air = this.maxAir;
     }
 
     updateStats(gTents, gPop, bTents, bPop) {
@@ -168,20 +188,20 @@ export class ResourceManager {
 
         // BARS
         let yPos = startY + padding + 25;
-        this._drawBar(ctx, startX, yPos, this.air, this.maxAir, "#FFFFFF", "#87CEEB", "AIR (Hookshot)");
+        this._drawBar(ctx, startX, yPos, this.air, this.maxAir, "#FFFFFF", "#87CEEB", "AIR (Refills in Sky)");
 
         yPos += padding;
-        this._drawBar(ctx, startX, yPos, this.water, this.maxWater, "#00BFFF", "#00008B", "WATER (Summon)");
+        this._drawBar(ctx, startX, yPos, this.water, this.maxWater, "#00BFFF", "#00008B", "WATER (Refills on Kills)");
 
         yPos += padding;
-        this._drawBar(ctx, startX, yPos, this.earth, this.maxEarth, "#CD853F", "#8B4513", "EARTH (Wall)");
+        this._drawBar(ctx, startX, yPos, this.earth, this.maxEarth, "#CD853F", "#8B4513", "EARTH (Refills Walking)");
 
         yPos += padding;
         ctx.fillStyle = "#FF4500"; 
-        ctx.fillText("FIRE (Ball):", startX, yPos + 10);
+        ctx.fillText("FIRE (Refills at Fire):", startX, yPos + 10);
         
         for (let i = 0; i < this.maxFire; i++) {
-            const pipX = startX + 100 + (i * 18);
+            const pipX = startX + 160 + (i * 18);
             const pipY = yPos + 10;
             ctx.beginPath();
             ctx.arc(pipX, pipY, 6, 0, Math.PI * 2);
