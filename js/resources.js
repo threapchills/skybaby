@@ -1,6 +1,8 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Definitive V20: FIXED UI COUNTERS.
-   Now correctly tracks Tents and Villagers for both sides.
+   Definitive V21: ELEMENTAL OVERLOAD UPDATE 🧙‍♂️
+   - Tracks current Spell Selection.
+   - Handles costs for Earth (Wall) and Water (Spawn).
+   - Draws the new Spell Wheel UI.
 */
 
 export class ResourceManager {
@@ -10,39 +12,92 @@ export class ResourceManager {
         this.blueTents = 1;
         this.bluePop = 0;
         
-        this.earth = 0;
+        // --- SPELL SYSTEM ---
+        // 0: FIRE (Default), 1: AIR (Push/Move), 2: EARTH (Wall), 3: WATER (Spawn)
+        this.currentSpell = 0; 
+        this.spellNames = ["FIREBALL", "AEROKINESIS", "STONE WALL", "TIDE OF LIFE"];
+        this.spellColors = ["#FF4500", "#87CEEB", "#8B4513", "#00BFFF"];
+
+        // RESOURCES
+        this.earth = 50; // Start with some earth for walls
+        this.maxEarth = 200;
 
         this.air = 100;
         this.maxAir = 100;
         this.airRegenRate = 30; 
-        this.airDepletionRate = 60; 
+        
+        // Hookshot drains air now
+        this.airCostPerSecond = 40; 
 
         this.water = 100;
         this.maxWater = 100;
-        this.waterRegenRate = 20;
+        this.waterRegenRate = 15;
+        this.waterCost = 50; // Cost for Spawn Spell
 
         this.fire = 5;
         this.maxFire = 10;
         this.fireRegenTimer = 0; 
+        this.earthCost = 30; // Cost for Wall
+    }
+
+    cycleSpell(direction) {
+        this.currentSpell += direction;
+        if (this.currentSpell > 3) this.currentSpell = 0;
+        if (this.currentSpell < 0) this.currentSpell = 3;
+    }
+
+    setSpell(index) {
+        if (index >= 0 && index <= 3) this.currentSpell = index;
     }
 
     addEarth(amount) {
         this.earth += amount;
+        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
     }
 
     addPassiveEarth(amount) {
         this.earth += amount;
+        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
+    }
+
+    spendEarth() {
+        if (this.earth >= this.earthCost) {
+            this.earth -= this.earthCost;
+            return true;
+        }
+        return false;
+    }
+
+    spendWater() {
+        if (this.water >= this.waterCost) {
+            this.water -= this.waterCost;
+            return true;
+        }
+        return false;
+    }
+
+    // Spend Air over time (dt)
+    spendAir(dt) {
+        const cost = this.airCostPerSecond * dt;
+        if (this.air >= cost) {
+            this.air -= cost;
+            return true;
+        }
+        return false;
     }
 
     update(dt, isMoving, isNearWaterSource, isNearFireSource) {
+        // Regen Air
         this.air += this.airRegenRate * dt;
         if (this.air > this.maxAir) this.air = this.maxAir;
 
+        // Regen Water
         if (isNearWaterSource) {
             this.water += this.waterRegenRate * dt;
             if (this.water > this.maxWater) this.water = this.maxWater;
         }
 
+        // Regen Fire
         if (isNearFireSource && this.fire < this.maxFire) {
             this.fireRegenTimer += dt;
             if (this.fireRegenTimer > 0.25) { 
@@ -62,7 +117,6 @@ export class ResourceManager {
         return false;
     }
 
-    // UPDATED: Receives all 4 stats
     updateStats(gTents, gPop, bTents, bPop) {
         this.greenTents = gTents;
         this.greenPop = gPop;
@@ -83,6 +137,33 @@ export class ResourceManager {
         ctx.shadowBlur = 4;
         ctx.lineWidth = 2;
 
+        // --- SPELL SELECTOR (New!) ---
+        const spellX = startX + 500;
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(spellX - 10, startY - 15, 250, 40);
+        
+        ctx.fillStyle = "#FFF";
+        ctx.fillText("SPELL:", spellX, startY + 5);
+        ctx.fillStyle = this.spellColors[this.currentSpell];
+        ctx.font = "bold 20px 'Segoe UI', sans-serif";
+        ctx.fillText(this.spellNames[this.currentSpell], spellX + 60, startY + 5);
+        
+        // Draw little icons/dots for selection
+        for(let i=0; i<4; i++) {
+            ctx.beginPath();
+            ctx.arc(spellX + 65 + (i*20), startY + 25, 6, 0, Math.PI*2);
+            if(i === this.currentSpell) {
+                ctx.fillStyle = this.spellColors[i];
+                ctx.fill();
+                ctx.strokeStyle = "white";
+                ctx.stroke();
+            } else {
+                ctx.strokeStyle = "gray";
+                ctx.stroke();
+            }
+        }
+        // -----------------------------
+
         // SCOREBOARD
         ctx.fillStyle = "#8B4513"; 
         ctx.fillText(`WAR STATUS:`, startX, startY);
@@ -99,10 +180,13 @@ export class ResourceManager {
 
         // BARS
         let yPos = startY + padding + 25;
-        this._drawBar(ctx, startX, yPos, this.air, this.maxAir, "#FFFFFF", "#87CEEB", "AIR");
+        this._drawBar(ctx, startX, yPos, this.air, this.maxAir, "#FFFFFF", "#87CEEB", "AIR (Right Click)");
 
         yPos += padding;
         this._drawBar(ctx, startX, yPos, this.water, this.maxWater, "#00BFFF", "#00008B", "WATER");
+
+        yPos += padding;
+        this._drawBar(ctx, startX, yPos, this.earth, this.maxEarth, "#CD853F", "#8B4513", "EARTH");
 
         yPos += padding;
         ctx.fillStyle = "#FF4500"; 
