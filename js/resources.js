@@ -1,9 +1,7 @@
 /* THE SPIRIT LEDGER (Resource Manager)
-   Definitive V24: THE "EARNED WATER" UPDATE 💧
-   - Water: Now requires ~20 kills to refill (5 per kill).
-   - Fire: Refuels near fireplaces (Arrows are free).
-   - Earth: Refuels when walking on ground.
-   - Air: Refuels when flying/falling.
+   Definitive V25: THE "SLOW BURN" UPDATE 🔥
+   - Fireball regen slowed down to 1 charge every 3 seconds.
+   - Water refuel confirmed at 5 per kill (20 kills to full).
 */
 
 export class ResourceManager {
@@ -28,7 +26,7 @@ export class ResourceManager {
         this.maxAir = 100;
         this.airCostPerSecond = 40; 
 
-        this.water = 25; // Start with a little bit, but you gotta earn the rest!
+        this.water = 25; 
         this.maxWater = 100;
         this.waterCost = 50; 
 
@@ -57,7 +55,6 @@ export class ResourceManager {
     }
 
     // New: Water from Blood (Kills)
-    // 5 points per kill = 20 kills to fill 100 water.
     addWater(amount) {
         this.water += amount;
         if (this.water > this.maxWater) this.water = this.maxWater;
@@ -100,10 +97,11 @@ export class ResourceManager {
 
     // UPDATED REGEN LOGIC
     update(dt, isGrounded, isMoving, isNearFire) {
-        // 2) Fire: Stand near fire to refuel (For Spells only, arrows are free)
+        // 2) Fire: Stand near fire to refuel
+        // Slowed down to 4.0s per charge!
         if (isNearFire && this.fire < this.maxFire) {
             this.fireRegenTimer += dt;
-            if (this.fireRegenTimer > 0.5) { // 1 charge every 0.5s
+            if (this.fireRegenTimer > 4.0) { 
                 this.fire++;
                 this.fireRegenTimer = 0;
             }
@@ -113,12 +111,12 @@ export class ResourceManager {
 
         // 3) Earth: Walk on ground to refuel
         if (isGrounded && isMoving && this.earth < this.maxEarth) {
-            this.earth += 40 * dt; // Fast refill while walking
+            this.earth += 40 * dt; 
         }
 
         // 4) Air: Fly/Fall to refuel
         if (!isGrounded && this.air < this.maxAir) {
-            this.air += 30 * dt; // Refill while airborne
+            this.air += 30 * dt; 
         }
         
         // Cap values just in case
