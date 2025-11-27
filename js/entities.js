@@ -1,9 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V34.0: THE ELEMENTAL UPDATE 🔥🪨⛈️
-   - ADDED: Fireball (Particle Projectile)
-   - ADDED: StoneWall (Destructible Physics Object)
-   - ADDED: RainCloud (Spawn Booster)
-   - ADDED: VisualEffects (Lightning, Impact Frames)
+   Definitive V34.5: TEAM AWARE SPELLS 🧙‍♂️
+   - Updated Fireball to support 'team' (Green vs Blue).
+   - Updated RainCloud to support 'team'.
+   - Player class updated with AI Spell Cooldowns.
 */
 
 // --- GLOBAL ASSET LOADER ---
@@ -48,7 +47,6 @@ Assets.warriorGreen.src = 'assets/sprites/warrior_green.png';
 Assets.warriorBlue.src = 'assets/sprites/warrior_blue.png';
 Assets.projectile.src = 'assets/sprites/projectile_arrow.png';
 
-// Load Villager Variants (1-4)
 for(let i=1; i<=4; i++) {
     let vGreen = new Image(); vGreen.src = `assets/sprites/villager_green_${i}.png`;
     Assets.villagerGreen.push(vGreen);
@@ -78,20 +76,19 @@ export class Entity {
 
 export class StoneWall extends Entity {
     constructor(x, y) {
-        super(x, y, 40, 120); // Tall and thin
+        super(x, y, 40, 120); 
         this.hp = 250;
         this.maxHp = 250;
         this.vx = 0;
         this.vy = 0;
         this.onGround = false;
-        this.team = 'green'; // Usually created by player
+        // Wall is neutral physics object really, but let's say it blocks everyone
     }
 
     update(dt, islands, worldHeight) {
-        this.vy += 1000 * dt; // Heavy gravity
+        this.vy += 1000 * dt; 
         this.y += this.vy * dt;
 
-        // Collision with islands
         this.onGround = false;
         if (this.vy >= 0) {
             for (let island of islands) {
@@ -101,8 +98,6 @@ export class StoneWall extends Entity {
                         this.y = island.y - this.h;
                         this.vy = 0;
                         this.onGround = true;
-                        
-                        // Walls attach to islands and move with them
                         this.x += island.vx * dt;
                         this.y += island.vy * dt;
                     }
@@ -119,15 +114,13 @@ export class StoneWall extends Entity {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
 
-        // Draw cracked stone look
-        ctx.fillStyle = '#696969'; // Dim Gray
+        ctx.fillStyle = '#696969'; 
         ctx.fillRect(screenX, screenY, this.w, this.h);
         
         ctx.strokeStyle = '#2f2f2f';
         ctx.lineWidth = 3;
         ctx.strokeRect(screenX, screenY, this.w, this.h);
         
-        // Cracks based on HP
         const damage = 1.0 - (this.hp / this.maxHp);
         if (damage > 0.2) {
             ctx.beginPath();
@@ -145,15 +138,16 @@ export class StoneWall extends Entity {
 }
 
 export class Fireball extends Entity {
-    constructor(x, y, angle) {
-        super(x, y, 60, 60); // Hitbox size
-        const speed = 400; // Slower than arrows
+    constructor(x, y, angle, team) {
+        super(x, y, 60, 60); 
+        this.team = team; // 'green' or 'blue'
+        const speed = 400; 
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
         this.angle = angle;
         this.life = 4.0;
         this.particles = [];
-        this.damage = 100; // HIGH DAMAGE, INSTA-KILL VILLAGERS
+        this.damage = 100; 
     }
 
     update(dt) {
@@ -162,7 +156,6 @@ export class Fireball extends Entity {
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
 
-        // Generate Trail Particles
         for(let i=0; i<3; i++) {
             this.particles.push({
                 x: this.x + Math.random() * 40 - 20,
@@ -171,11 +164,10 @@ export class Fireball extends Entity {
                 vy: (Math.random() - 0.5) * 50,
                 life: 0.3 + Math.random() * 0.4,
                 size: 10 + Math.random() * 20,
-                color: Math.random() > 0.5 ? '#FF4500' : '#FFFF00'
+                color: this.team === 'green' ? '#FF4500' : '#8A2BE2' // Orange for player, Purple for enemy
             });
         }
 
-        // Update internal particles
         for(let i=this.particles.length-1; i>=0; i--) {
             let p = this.particles[i];
             p.x += p.vx * dt;
@@ -191,7 +183,7 @@ export class Fireball extends Entity {
         const screenY = this.y - camera.y;
 
         ctx.save();
-        ctx.globalCompositeOperation = 'lighter'; // Additive blending for glow
+        ctx.globalCompositeOperation = 'lighter'; 
         this.particles.forEach(p => {
             ctx.fillStyle = p.color;
             ctx.globalAlpha = p.life;
@@ -204,9 +196,10 @@ export class Fireball extends Entity {
 }
 
 export class RainCloud extends Entity {
-    constructor(x, y) {
+    constructor(x, y, team) {
         super(x, y, 100, 50);
-        this.life = 2.0; // Short burst
+        this.team = team;
+        this.life = 2.0; 
         this.drops = [];
     }
 
@@ -214,7 +207,6 @@ export class RainCloud extends Entity {
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
         
-        // Spawn rain drops
         for(let i=0; i<5; i++) {
             this.drops.push({
                 x: this.x + (Math.random() - 0.5) * 150,
@@ -224,7 +216,6 @@ export class RainCloud extends Entity {
             });
         }
 
-        // Update drops
         for(let i=this.drops.length-1; i>=0; i--) {
             let d = this.drops[i];
             d.y += d.vy * dt;
@@ -234,18 +225,16 @@ export class RainCloud extends Entity {
     }
 
     draw(ctx, camera) {
-        // Draw the cloud
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
 
-        ctx.fillStyle = 'rgba(200, 200, 255, 0.4)';
+        ctx.fillStyle = this.team === 'green' ? 'rgba(200, 200, 255, 0.4)' : 'rgba(100, 0, 100, 0.4)';
         ctx.beginPath();
         ctx.arc(screenX, screenY, 40, 0, Math.PI*2);
         ctx.arc(screenX + 30, screenY - 10, 50, 0, Math.PI*2);
         ctx.arc(screenX - 30, screenY - 10, 50, 0, Math.PI*2);
         ctx.fill();
 
-        // Draw Rain
         ctx.strokeStyle = '#87CEEB';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -294,7 +283,6 @@ export class VisualEffect extends Entity {
             ctx.stroke();
             ctx.restore();
             
-            // Flash screen
             if (Math.random() > 0.5) {
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
                 ctx.fillRect(0, 0, camera.w, camera.h);
@@ -303,7 +291,7 @@ export class VisualEffect extends Entity {
     }
 }
 
-// --- EXISTING ENTITIES (Unchanged Logic, just helper methods added) ---
+// --- STANDARD ENTITIES ---
 
 export class Leaf extends Entity {
     constructor(x, y) {
@@ -511,6 +499,9 @@ export class Player extends Entity {
         this.aiTargetIsland = null;
         this.aiStateTimer = 0;
         this.aiJump = false;
+
+        // AI Spell Stats
+        this.aiSpellCooldown = 5.0; 
     }
 
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy, walls) {
@@ -526,6 +517,7 @@ export class Player extends Entity {
         }
 
         if (this.team === 'blue' && enemy) {
+            // Standard Arrow Shooting (Legacy)
             this.fireCooldown -= dt;
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
@@ -608,9 +600,12 @@ export class Player extends Entity {
                 this.isGrounded = false;
                 if(audio) audio.play('jump', 0.4, 0.1);
             } else if (this.team === 'green' && resources && resources.air > 0) {
+                // OLD AIR LOGIC: REMOVE AIR COST FOR FLYING since Air is now rare spell resource
+                // Just let them fly with a basic cooldown or small infinite resource?
+                // For now, let's say flying is free but weak to not break game loop
                 this.vy -= 1500 * dt; 
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
-                resources.air -= 80 * dt; 
+                // resources.air -= 80 * dt; // REMOVED COST
             } else if (this.team === 'blue') {
                 this.vy -= 100 * dt; 
             }
@@ -634,10 +629,10 @@ export class Player extends Entity {
                         if (this.team === 'green' && resources) {
                            if (!this.visitedIslands.has(island)) {
                                this.visitedIslands.add(island);
-                               resources.addEarth(20); 
+                               // resources.addEarth(20); // REMOVED
                            }
                            if (Math.abs(this.vx) > 10) { 
-                               resources.addPassiveEarth(10 * dt);
+                               // resources.addPassiveEarth(10 * dt); // REMOVED
                            }
                         }
                     }
