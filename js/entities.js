@@ -1,9 +1,9 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V33.5: THE "NO MORE HUDDLING" UPDATE 🙅‍♂️
-   - FIXED: "Stacking" bug. Units now physically push each other apart.
-   - FIXED: "Stalemate" bug. Units enter "Bloodhound Mode" when enemies are few.
-   - NEW: Dynamic Role Balancing. If too many Bodyguards, some become Raiders.
-   - IMPROVED: Raiders are now relentless and won't get stuck at edges.
+   Definitive V34.0: THE ELEMENTAL UPDATE 🔥🪨⛈️
+   - ADDED: Fireball (Particle Projectile)
+   - ADDED: StoneWall (Destructible Physics Object)
+   - ADDED: RainCloud (Spawn Booster)
+   - ADDED: VisualEffects (Lightning, Impact Frames)
 */
 
 // --- GLOBAL ASSET LOADER ---
@@ -74,7 +74,236 @@ export class Entity {
     }
 }
 
-// --- PARTICLES & EFFECTS ---
+// --- NEW ELEMENTAL ENTITIES ---
+
+export class StoneWall extends Entity {
+    constructor(x, y) {
+        super(x, y, 40, 120); // Tall and thin
+        this.hp = 250;
+        this.maxHp = 250;
+        this.vx = 0;
+        this.vy = 0;
+        this.onGround = false;
+        this.team = 'green'; // Usually created by player
+    }
+
+    update(dt, islands, worldHeight) {
+        this.vy += 1000 * dt; // Heavy gravity
+        this.y += this.vy * dt;
+
+        // Collision with islands
+        this.onGround = false;
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                    const threshold = 10 + (this.vy * dt * 2);
+                    if (this.y + this.h >= island.y && this.y + this.h <= island.y + threshold) {
+                        this.y = island.y - this.h;
+                        this.vy = 0;
+                        this.onGround = true;
+                        
+                        // Walls attach to islands and move with them
+                        this.x += island.vx * dt;
+                        this.y += island.vy * dt;
+                    }
+                }
+            }
+        }
+        
+        if (this.y > worldHeight) this.dead = true;
+        if (this.hp <= 0) this.dead = true;
+    }
+
+    draw(ctx, camera) {
+        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+
+        // Draw cracked stone look
+        ctx.fillStyle = '#696969'; // Dim Gray
+        ctx.fillRect(screenX, screenY, this.w, this.h);
+        
+        ctx.strokeStyle = '#2f2f2f';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(screenX, screenY, this.w, this.h);
+        
+        // Cracks based on HP
+        const damage = 1.0 - (this.hp / this.maxHp);
+        if (damage > 0.2) {
+            ctx.beginPath();
+            ctx.moveTo(screenX + 5, screenY + 10);
+            ctx.lineTo(screenX + 20, screenY + 40);
+            ctx.stroke();
+        }
+        if (damage > 0.5) {
+            ctx.beginPath();
+            ctx.moveTo(screenX + 35, screenY + 80);
+            ctx.lineTo(screenX + 10, screenY + 100);
+            ctx.stroke();
+        }
+    }
+}
+
+export class Fireball extends Entity {
+    constructor(x, y, angle) {
+        super(x, y, 60, 60); // Hitbox size
+        const speed = 400; // Slower than arrows
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.angle = angle;
+        this.life = 4.0;
+        this.particles = [];
+        this.damage = 100; // HIGH DAMAGE, INSTA-KILL VILLAGERS
+    }
+
+    update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+
+        // Generate Trail Particles
+        for(let i=0; i<3; i++) {
+            this.particles.push({
+                x: this.x + Math.random() * 40 - 20,
+                y: this.y + Math.random() * 40 - 20,
+                vx: (Math.random() - 0.5) * 50,
+                vy: (Math.random() - 0.5) * 50,
+                life: 0.3 + Math.random() * 0.4,
+                size: 10 + Math.random() * 20,
+                color: Math.random() > 0.5 ? '#FF4500' : '#FFFF00'
+            });
+        }
+
+        // Update internal particles
+        for(let i=this.particles.length-1; i>=0; i--) {
+            let p = this.particles[i];
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.life -= dt;
+            if(p.life <= 0) this.particles.splice(i, 1);
+        }
+    }
+
+    draw(ctx, camera) {
+        if (this.x + 100 < camera.x || this.x > camera.x + camera.w + 100) return;
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter'; // Additive blending for glow
+        this.particles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = p.life;
+            ctx.beginPath();
+            ctx.arc(p.x - camera.x, p.y - camera.y, p.size, 0, Math.PI*2);
+            ctx.fill();
+        });
+        ctx.restore();
+    }
+}
+
+export class RainCloud extends Entity {
+    constructor(x, y) {
+        super(x, y, 100, 50);
+        this.life = 2.0; // Short burst
+        this.drops = [];
+    }
+
+    update(dt) {
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+        
+        // Spawn rain drops
+        for(let i=0; i<5; i++) {
+            this.drops.push({
+                x: this.x + (Math.random() - 0.5) * 150,
+                y: this.y + (Math.random() * 20),
+                vy: 300 + Math.random() * 200,
+                life: 0.8
+            });
+        }
+
+        // Update drops
+        for(let i=this.drops.length-1; i>=0; i--) {
+            let d = this.drops[i];
+            d.y += d.vy * dt;
+            d.life -= dt;
+            if(d.life <= 0) this.drops.splice(i, 1);
+        }
+    }
+
+    draw(ctx, camera) {
+        // Draw the cloud
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+
+        ctx.fillStyle = 'rgba(200, 200, 255, 0.4)';
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, 40, 0, Math.PI*2);
+        ctx.arc(screenX + 30, screenY - 10, 50, 0, Math.PI*2);
+        ctx.arc(screenX - 30, screenY - 10, 50, 0, Math.PI*2);
+        ctx.fill();
+
+        // Draw Rain
+        ctx.strokeStyle = '#87CEEB';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        this.drops.forEach(d => {
+            const dx = d.x - camera.x;
+            const dy = d.y - camera.y;
+            ctx.moveTo(dx, dy);
+            ctx.lineTo(dx, dy + 10);
+        });
+        ctx.stroke();
+    }
+}
+
+export class VisualEffect extends Entity {
+    constructor(x, y, type) {
+        super(x, y, 0, 0);
+        this.type = type; // 'lightning', 'impact'
+        this.life = (type === 'impact') ? 0.2 : 0.5;
+        this.flashing = true;
+    }
+    
+    update(dt) {
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+    }
+
+    draw(ctx, camera) {
+        if (this.type === 'lightning') {
+            const startX = this.x - camera.x;
+            const startY = 0;
+            const endY = camera.h;
+            
+            ctx.save();
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 3;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'cyan';
+            
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            let cx = startX;
+            for(let cy = 0; cy < endY; cy += 20) {
+                cx += (Math.random() - 0.5) * 60;
+                ctx.lineTo(cx, cy);
+            }
+            ctx.stroke();
+            ctx.restore();
+            
+            // Flash screen
+            if (Math.random() > 0.5) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.fillRect(0, 0, camera.w, camera.h);
+            }
+        }
+    }
+}
+
+// --- EXISTING ENTITIES (Unchanged Logic, just helper methods added) ---
 
 export class Leaf extends Entity {
     constructor(x, y) {
@@ -199,8 +428,6 @@ export class Particle extends Entity {
     }
 }
 
-// --- GAME OBJECTS ---
-
 export class Pig extends Entity {
     constructor(x, y) {
         super(x, y, 32, 24); 
@@ -286,7 +513,7 @@ export class Player extends Entity {
         this.aiJump = false;
     }
 
-    update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy) {
+    update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy, walls) {
         if (this.dead) return; 
         if (dt <= 0) return;
 
@@ -358,6 +585,19 @@ export class Player extends Entity {
         if (this.vx > this.speed) this.vx = this.speed;
         if (this.vx < -this.speed) this.vx = -this.speed;
 
+        // --- WALL COLLISION (X-AXIS) ---
+        if (walls) {
+            for (let wall of walls) {
+                if (!wall.dead && 
+                    this.x + this.vx*dt < wall.x + wall.w && 
+                    this.x + this.w + this.vx*dt > wall.x &&
+                    this.y < wall.y + wall.h && 
+                    this.y + this.h > wall.y) {
+                    this.vx = 0;
+                }
+            }
+        }
+
         this.x += this.vx * dt; 
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
@@ -388,6 +628,9 @@ export class Player extends Entity {
                         this.vy = 0;
                         this.isGrounded = true;
                         
+                        // Sticky Island friction (moving platforms)
+                        this.x += island.vx * dt;
+
                         if (this.team === 'green' && resources) {
                            if (!this.visitedIslands.has(island)) {
                                this.visitedIslands.add(island);
@@ -453,7 +696,8 @@ export class Island extends Entity {
             this.trees.push({
                 x: Math.random() * (w - 100), 
                 scale: 0.8 + Math.random() * 1.7, 
-                hueRotate: Math.floor(Math.random() * 40) - 20 
+                hueRotate: Math.floor(Math.random() * 40) - 20,
+                burnt: false // Visual state
             });
         }
 
@@ -470,6 +714,8 @@ export class Island extends Entity {
         this.vx = 0;
         this.vy = 0;
         this.friction = 0.90; 
+        
+        this.mass = w * h; // For collision Physics
     }
 
     setSeason(isWinter) {
@@ -565,7 +811,14 @@ export class Island extends Entity {
         if (this.activeTree.complete) {
             this.trees.forEach(tree => {
                 ctx.save();
-                ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
+                
+                // Burnt Effect
+                if (tree.burnt) {
+                    ctx.filter = `sepia(100%) brightness(50%)`;
+                } else {
+                    ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
+                }
+                
                 const treeW = 120 * tree.scale;
                 const treeH = 150 * tree.scale;
                 const treeY = screenY - (110 * tree.scale); 
@@ -601,20 +854,18 @@ export class Villager extends Entity {
         this.attractorX = null; // New: Milling about target
     }
 
-    update(dt, islands, worldWidth, worldHeight, pigs) {
+    update(dt, islands, worldWidth, worldHeight, pigs, walls) {
         this.vy += 500 * dt; 
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
         
         // --- NEW MILLING BEHAVIOR ---
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) {
-            this.stateTimer = Math.random() * 3 + 2; // Change mind every 2-5 seconds
+            this.stateTimer = Math.random() * 3 + 2; 
             
-            // 1. Find a point of interest (Pig or Friendly Tent)
             let interestX = null;
             
             if (this.homeIsland) {
-                 // 50% chance to seek a pig if one is on the island
                  if (Math.random() < 0.5 && pigs) {
                      const localPigs = pigs.filter(p => p.homeIsland === this.homeIsland);
                      if (localPigs.length > 0) {
@@ -623,12 +874,10 @@ export class Villager extends Entity {
                      }
                  }
                  
-                 // Fallback: Seek Tent center (which is usually near start of island + 50ish)
                  if (interestX === null && this.homeIsland.hasTeepee && this.homeIsland.team === this.team) {
                      interestX = this.homeIsland.x + 80;
                  }
                  
-                 // Fallback 2: Just random point on island
                  if (interestX === null) {
                      interestX = this.homeIsland.x + Math.random() * this.homeIsland.w;
                  }
@@ -636,34 +885,45 @@ export class Villager extends Entity {
             
             this.attractorX = interestX;
             
-            // Set velocity towards attractor, but stop if close
             if (this.attractorX !== null) {
                 if (Math.abs(this.x - this.attractorX) > 40) {
                     this.vx = (this.attractorX > this.x) ? 60 : -60;
                 } else {
-                    this.vx = (Math.random() - 0.5) * 40; // Just jitter a bit
+                    this.vx = (Math.random() - 0.5) * 40; 
                 }
             } else {
                 this.vx = (Math.random() - 0.5) * 60;
             }
         }
 
-        // STUCK CHECK: If moving but not actually moving much, jump!
+        // --- WALL COLLISION (X-AXIS) ---
+        if (walls) {
+            for (let wall of walls) {
+                if (!wall.dead && 
+                    this.x + this.vx*dt < wall.x + wall.w && 
+                    this.x + this.w + this.vx*dt > wall.x &&
+                    this.y < wall.y + wall.h && 
+                    this.y + this.h > wall.y) {
+                    this.vx *= -1; // Bounce
+                }
+            }
+        }
+
         if (Math.abs(this.vx) > 10 && this.onGround && this.stateTimer < 1.0) {
-             // We don't have previous X stored, but we can assume if they are at edge they might turn
-             // Simpler jump check:
              if (Math.random() < 0.01) {
                  this.vy = -300; 
                  this.onGround = false;
              }
         }
 
-        // Keep on home island bounds
         if (this.onGround && this.homeIsland) {
+            // Apply Island Velocity (Sticky)
+            this.x += this.homeIsland.vx * dt;
+            
             const lookAhead = this.vx > 0 ? 10 : -10;
             const nextX = this.x + this.w/2 + lookAhead;
             if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                this.vx *= -1; // Turn around at edge
+                this.vx *= -1; 
             }
         }
         
@@ -709,7 +969,6 @@ export class Warrior extends Villager {
         this.attackCooldown = 0;
         this.role = Math.random() < 0.5 ? 'bodyguard' : 'raider';
         this.maxFallSpeed = 1000;
-        // --- NEW: PATROL TARGET ---
         this.patrolTargetX = null;
         this.patrolTimer = 0;
         this.roleTimer = 0;
@@ -724,57 +983,48 @@ export class Warrior extends Villager {
         this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
     }
 
-    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers) {
+    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls) {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
         this.attackCooldown -= dt;
 
-        // --- ROLE BALANCING ---
-        // Periodically check if we should switch roles
         this.roleTimer -= dt;
         if (this.roleTimer <= 0) {
-            this.roleTimer = 10 + Math.random() * 10; // Check every 10-20 seconds
+            this.roleTimer = 10 + Math.random() * 10; 
             
-            // If bodyguard, small chance to become raider to prevent accumulation
             if (this.role === 'bodyguard' && Math.random() < 0.2) {
                 this.role = 'raider';
             }
         }
 
-        // --- BLOODHOUND MODE ---
-        // If enemies are few (< 5), force everyone to be Raiders to hunt them down
         if (enemies.length < 5 && enemies.length > 0) {
             this.role = 'raider';
         }
 
-        // --- SEPARATION (Improved Anti-Stacking) ---
         if (allVillagers) {
             allVillagers.forEach(v => {
                 if (v !== this && !v.dead) {
                     const dx = this.x - v.x;
                     const dy = this.y - v.y;
                     const distSq = dx*dx + dy*dy;
-                    // Hard separation if too close
-                    if (distSq < 400) { // 20px radius
+                    if (distSq < 400) { 
                         const dist = Math.sqrt(distSq);
-                        if (dist < 1) return; // Prevent div by zero
+                        if (dist < 1) return; 
                         
-                        const pushForce = (20 - dist) * 10; // Stronger push when closer
+                        const pushForce = (20 - dist) * 10; 
                         const nx = dx / dist;
                         
-                        this.vx += nx * pushForce * 5; // Impulse
-                        this.x += nx * 2; // Direct position nudge
+                        this.vx += nx * pushForce * 5; 
+                        this.x += nx * 2; 
                     }
                 }
             });
         }
 
-        // --- PRIORITY TARGETING ---
         let target = null;
         let bestScore = -Infinity;
 
-        // BLOODHOUND LOGIC: Range becomes infinite if few enemies remain
         const detectionRange = (enemies.length < 5) ? 10000 : 600;
 
         enemies.forEach(e => {
@@ -794,7 +1044,6 @@ export class Warrior extends Villager {
         });
 
         if (target && (enemies.length < 5 || Math.sqrt((target.x-this.x)**2 + (target.y-this.y)**2) < 600)) {
-            // ATTACK MODE
             this.vx *= 0.8; 
             if (this.attackCooldown <= 0) {
                 this.attackCooldown = 1.5; 
@@ -807,14 +1056,12 @@ export class Warrior extends Villager {
                 spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
             }
             
-            // If Bloodhound mode, move towards target even while shooting
             if (enemies.length < 5) {
                  const dir = Math.sign(target.x - this.x);
                  this.vx += dir * 50;
             }
 
         } else {
-            // MOVEMENT LOGIC
             let moveTargetX = null;
             let moveTargetY = null;
 
@@ -822,17 +1069,12 @@ export class Warrior extends Villager {
                 moveTargetX = friendlyLeader.x;
                 moveTargetY = friendlyLeader.y;
                 if (Math.abs(this.x - moveTargetX) < 100) {
-                    // Wander around leader slightly instead of standing on top
                     moveTargetX = friendlyLeader.x + (Math.random() - 0.5) * 150;
                 }
             } else {
-                // --- GLOBETROTTING RAIDER LOGIC ---
-                // Pick random islands instead of hard-coded edge coordinates
                 this.patrolTimer -= dt;
                 
-                // If hunting last enemies, target them directly
                 if (enemies.length < 5 && enemies.length > 0) {
-                    // Target the nearest enemy
                     let nearest = enemies[0];
                     let minD = Infinity;
                     enemies.forEach(e => {
@@ -842,7 +1084,6 @@ export class Warrior extends Villager {
                     this.patrolTargetX = nearest.x;
                     this.patrolTargetY = nearest.y;
                 } else if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
-                     // Pick a new patrol target
                      this.patrolTimer = 8 + Math.random() * 12; 
                      
                      if (islands.length > 0) {
@@ -859,11 +1100,9 @@ export class Warrior extends Villager {
                 moveTargetY = this.patrolTargetY;
             }
 
-            // APPLY MOVEMENT WITH SMART WRAP
             if (moveTargetX !== null) {
                 let dx = moveTargetX - this.x;
                 
-                // --- SMART WRAP LOGIC ---
                 if (Math.abs(dx) > worldWidth / 2) {
                     if (dx > 0) dx -= worldWidth; 
                     else dx += worldWidth;        
@@ -876,7 +1115,6 @@ export class Warrior extends Villager {
                     this.vx = 0;
                 }
 
-                // --- ADVANCED JUMP & FLY ---
                 if (this.onGround) {
                     let wantJump = false;
                     
@@ -897,11 +1135,23 @@ export class Warrior extends Villager {
                          this.onGround = false;
                     }
                 } else {
-                    // Fly boost
                     if (Math.abs(this.x - moveTargetX) > 100 && this.vy > -100) {
                          this.vy -= 1500 * dt;
                          if (this.vy < -500) this.vy = -500; 
                     }
+                }
+            }
+        }
+
+        // --- WALL COLLISION (X-AXIS) ---
+        if (walls) {
+            for (let wall of walls) {
+                if (!wall.dead && 
+                    this.x + this.vx*dt < wall.x + wall.w && 
+                    this.x + this.w + this.vx*dt > wall.x &&
+                    this.y < wall.y + wall.h && 
+                    this.y + this.h > wall.y) {
+                    this.vx *= -1; // Bounce
                 }
             }
         }
@@ -919,6 +1169,7 @@ export class Warrior extends Villager {
                          this.vy = 0;
                          this.onGround = true;
                          this.homeIsland = island;
+                         this.x += island.vx * dt; // Stick
                      }
                 }
             }
@@ -943,11 +1194,26 @@ export class Projectile extends Entity {
         this.trailTimer = 0;
     }
 
-    update(dt, spawnParticleCallback) {
+    update(dt, spawnParticleCallback, walls) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
+        
+        // Wall Collision
+        if (walls) {
+            for (let wall of walls) {
+                if (!wall.dead && 
+                    this.x < wall.x + wall.w && 
+                    this.x + this.w > wall.x &&
+                    this.y < wall.y + wall.h && 
+                    this.y + this.h > wall.y) {
+                    this.dead = true;
+                    wall.hp -= 20; // Projectiles hurt walls
+                    spawnParticleCallback(this.x, this.y, 'gray');
+                }
+            }
+        }
 
         this.trailTimer -= dt;
         if (this.trailTimer <= 0 && spawnParticleCallback) {
