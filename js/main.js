@@ -1,9 +1,6 @@
 /* THE HEART OF THE GAME
-   Definitive V37.0: THE UN-FROZEN TIMER FIX 🕒🔥
-   - CRITICAL FIX: Cooldowns now tick down every frame (not just when shooting).
-   - RESULT: Right-click Spells (Fire, Earth, Water) now actually fire!
-   - LOGIC: Left Click = Arrows (Infinite). Right Click = Spells (Resource Cost).
-   - REFUELING: Implemented the 'Earn Your Mana' system correctly.
+   Definitive V38.0: THE "TREE HEALING" UPDATE 🌳✨
+   - ADDED: Logic to set tree burn timer when hit by fireball.
 */
 
 import { InputHandler } from './input.js';
@@ -675,7 +672,10 @@ class Game {
             this.islands.forEach(island => {
                 if (f.x > island.x && f.x < island.x + island.w && Math.abs(f.y - island.y) < 100) {
                     island.trees.forEach(t => {
-                        if (Math.abs((island.x + t.x) - f.x) < 50) t.burnt = true;
+                        if (Math.abs((island.x + t.x) - f.x) < 50) {
+                            t.burnt = true;
+                            t.burntTimer = 10.0; // Heal in 10s
+                        }
                     });
                 }
             });
