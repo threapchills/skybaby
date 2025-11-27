@@ -1,8 +1,7 @@
 /* THE STAGE MANAGER (World & Camera)
-   Definitive V3: MOOD LIGHTING & HUE SHIFT 🌈
-   - Added 'season' parameter to draw() method.
-   - Applies hue-rotate filter for winter season.
-   - Shifts reddish/mauve sky to blue/green.
+   Definitive V4: VISUAL JUICE UPDATE 🥤
+   - Handles "Bloom" logic in main draw.
+   - Adds Impact Frames helper.
 */
 
 export class Camera {
@@ -13,17 +12,31 @@ export class Camera {
         this.h = viewportHeight;
         this.worldW = worldWidth;
         this.worldH = worldHeight;
+        this.shake = 0;
     }
 
-    follow(target) {
-        // Smooth locking
-        this.x = target.x - this.w / 2;
-        this.y = target.y - this.h / 2;
+    follow(target, dt) {
+        if (this.shake > 0) {
+            this.shake -= 20 * dt;
+            if (this.shake < 0) this.shake = 0;
+        }
 
-        if (this.x < 0) this.x = 0;
-        if (this.x + this.w > this.worldW) this.x = this.worldW - this.w;
-        if (this.y < 0) this.y = 0;
-        if (this.y + this.h > this.worldH) this.y = this.worldH - this.h;
+        // Smooth locking
+        let tx = target.x - this.w / 2;
+        let ty = target.y - this.h / 2;
+
+        if (tx < 0) tx = 0;
+        if (tx + this.w > this.worldW) tx = this.worldW - this.w;
+        if (ty < 0) ty = 0;
+        if (ty + this.h > this.worldH) ty = this.worldH - this.h;
+        
+        this.x = tx;
+        this.y = ty;
+
+        if (this.shake > 0) {
+            this.x += (Math.random() - 0.5) * this.shake * 10;
+            this.y += (Math.random() - 0.5) * this.shake * 10;
+        }
     }
 }
 
@@ -73,16 +86,19 @@ export class World {
         ];
     }
 
-    update(player) {
-        this.camera.follow(player);
+    update(player, dt) {
+        this.camera.follow(player, dt);
     }
 
-    draw(ctx, season) {
+    draw(ctx, season, invertColors = false) {
         ctx.save();
         
+        // IMPACT FRAME: Invert Everything
+        if (invertColors) {
+            ctx.filter = 'invert(100%)';
+        }
         // WINTER FILTER: Shift Hue to Blue/Green
-        // 180deg shift turns Red -> Cyan, Purple -> Greenish-Blue
-        if (season === 'winter') {
+        else if (season === 'winter') {
             ctx.filter = 'hue-rotate(12deg) brightness(1.1)'; 
         }
 
