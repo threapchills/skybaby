@@ -1,9 +1,9 @@
 /* THE HEART OF THE GAME
-   Definitive V34.2: THE ELEMENTAL CHAOS UPDATE 🧙‍♂️🏝️
-   - Implemented "Elemental Overload" (Fireball, Stone Wall, Water Spawn).
-   - Implemented "Island Bumper Cars" (Collision Physics & Crunch).
-   - Implemented "Air" resource cost for Hookshot.
-   - Added Anime Impact Frames & Lightning.
+   Definitive V35.0: THE FIX (LEFT CLICK SHOOT, RIGHT CLICK SPELL) 🧙‍♂️🏹
+   - FIXED: Left Click is now Arrows. Right Click is Spells.
+   - FIXED: Enemy AI now uses Spells (Fire, Wall, Water).
+   - FIXED: Mana Economy (Regen removed, replenish on kill).
+   - FIXED: Audio for Spells.
 */
 
 import { InputHandler } from './input.js';
@@ -50,14 +50,14 @@ class Game {
         this.islands = [];
         this.villagers = [];
         this.projectiles = [];
-        this.fireballs = []; // NEW
-        this.walls = []; // NEW
+        this.fireballs = []; 
+        this.walls = []; 
         this.particles = [];
-        this.visualEffects = []; // NEW
+        this.visualEffects = []; 
         this.pigs = []; 
         this.leaves = []; 
         this.snowflakes = []; 
-        this.rainClouds = []; // NEW
+        this.rainClouds = []; 
 
         this.season = Math.random() > 0.5 ? 'summer' : 'winter';
         console.log(`軸 Starting Season: ${this.season.toUpperCase()}`);
@@ -72,7 +72,7 @@ class Game {
         this.hookTarget = null;
         this.gameOver = false;
         
-        this.impactFrameTimer = 0; // Anime finisher timer
+        this.impactFrameTimer = 0; 
         
         this.dayCycleTimer = 0; 
         this.dayTime = 0; 
@@ -178,8 +178,6 @@ class Game {
     loop(timestamp) {
         const dtRaw = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
-        
-        // Clamp dt to prevent spirals
         const dt = Math.min(dtRaw, 0.05); 
 
         try {
@@ -204,11 +202,9 @@ class Game {
 
         if (this.impactFrameTimer > 0) {
             this.impactFrameTimer -= dt;
-            // Freeze logic during impact frame (but continue drawing)
             if (this.impactFrameTimer > 0.1) return; 
         }
 
-        // --- DAY/NIGHT CYCLE ---
         this.dayCycleTimer += dt;
         if (this.dayCycleTimer < 20) {
             this.dayTime = (this.dayCycleTimer / 20) * Math.PI;
@@ -241,6 +237,9 @@ class Game {
         if (!this.enemyChief.dead) {
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls); 
             
+            // AI SPELL CASTING
+            this._updateEnemyAI(dt);
+
             if (this.enemyChief.shootRequest) {
                 this.projectiles.push(new Projectile(this.enemyChief.shootRequest.x, this.enemyChief.shootRequest.y, this.enemyChief.shootRequest.angle, 'blue', 25));
                 this.enemyChief.shootRequest = null; 
@@ -257,7 +256,6 @@ class Game {
         let nearWater = false;
         let nearFire = false;
         
-        // --- ISLAND PHYSICS (CRUNCH TIME) ---
         for (let i = 0; i < this.islands.length; i++) {
             let islandA = this.islands[i];
             
@@ -272,7 +270,6 @@ class Game {
                 if (islandA.hasFireplace) nearFire = true;
             }
 
-            // Check Collision with other Islands
             for (let j = i + 1; j < this.islands.length; j++) {
                 let islandB = this.islands[j];
                 
@@ -281,14 +278,12 @@ class Game {
                     islandA.y < islandB.y + islandB.h &&
                     islandA.y + islandA.h > islandB.y) {
                     
-                    // CRUNCH!
                     const vRel = Math.sqrt((islandA.vx - islandB.vx)**2 + (islandA.vy - islandB.vy)**2);
                     
                     if (vRel > 100) {
-                        this.world.camera.shake = vRel / 20; // Massive shake
-                        this.audio.play('hit', 1.0, 0.5); // Loud crunch
+                        this.world.camera.shake = vRel / 20; 
+                        this.audio.play('hit', 1.0, 0.5); 
                         
-                        // Kill units in the crunch zone
                         this.villagers.forEach(v => {
                              if (!v.dead && 
                                  v.x > Math.max(islandA.x, islandB.x) && 
@@ -298,7 +293,6 @@ class Game {
                              }
                         });
 
-                        // Particle Explosion
                         const cx = (Math.max(islandA.x, islandB.x) + Math.min(islandA.x+islandA.w, islandB.x+islandB.w)) / 2;
                         const cy = (Math.max(islandA.y, islandB.y) + Math.min(islandA.y+islandA.h, islandB.y+islandB.h)) / 2;
                         for(let k=0; k<20; k++) {
@@ -306,7 +300,6 @@ class Game {
                         }
                     }
 
-                    // BOUNCE
                     const tempVx = islandA.vx;
                     const tempVy = islandA.vy;
                     islandA.vx = islandB.vx * 0.5;
@@ -314,7 +307,6 @@ class Game {
                     islandB.vx = tempVx * 0.5;
                     islandB.vy = tempVy * 0.5;
 
-                    // Separate slightly to prevent sticking
                     if (islandA.x < islandB.x) islandA.x -= 5; else islandA.x += 5;
                 }
             }
@@ -324,13 +316,11 @@ class Game {
         this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
+            // Left Click (Arrows)
             this._handleShooting(dt);
-            // ONLY ALLOW HOOKSHOT IF AIR SPELL IS ACTIVE
-            if (this.resources.currentSpell === 1) { // 1 is Air
-                this._handleHookshot(dt);
-            } else {
-                this.hookTarget = null; // Clear line render
-            }
+            
+            // Right Click (Spells)
+            this._handleSpellCasting(dt);
         }
 
         this.spawnTimer += dt;
@@ -363,6 +353,36 @@ class Game {
 
         this.visualEffects.forEach(e => e.update(dt));
         this.visualEffects = this.visualEffects.filter(e => !e.dead);
+    }
+
+    _updateEnemyAI(dt) {
+        if (!this.enemyChief.dead) {
+            this.enemyChief.aiSpellCooldown -= dt;
+            if (this.enemyChief.aiSpellCooldown <= 0) {
+                this.enemyChief.aiSpellCooldown = 6.0 + Math.random() * 8.0; // Cast every 6-14s
+
+                const distToPlayer = Math.sqrt((this.player.x - this.enemyChief.x)**2 + (this.player.y - this.enemyChief.y)**2);
+                const roll = Math.random();
+
+                // 1. Defensive Heal (Water) if HP < 40
+                if (this.enemyChief.hp < 40 && roll < 0.6) {
+                    this.rainClouds.push(new RainCloud(this.enemyChief.x, this.enemyChief.y, 'blue'));
+                    this._forceSpawnVillagers(this.enemyChief.x, this.enemyChief.y, 'blue');
+                    this.audio.playSpell();
+                }
+                // 2. Aggressive Fireball if Player close
+                else if (distToPlayer < 700 && roll < 0.7) {
+                    const angle = Math.atan2(this.player.y - this.enemyChief.y, this.player.x - this.enemyChief.x);
+                    this.fireballs.push(new Fireball(this.enemyChief.x, this.enemyChief.y, angle, 'blue'));
+                    this.audio.playSpell();
+                }
+                // 3. Defensive Wall if being shot at (Simplified: Random chance when high HP)
+                else if (this.enemyChief.hp > 80 && roll < 0.3) {
+                     this.walls.push(new StoneWall(this.enemyChief.x + (Math.random()-0.5)*100, this.enemyChief.y));
+                     this.audio.play('land', 0.8, 0.1); 
+                }
+            }
+        }
     }
 
     _checkSeasonChange() {
@@ -416,14 +436,12 @@ class Game {
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random()*400, 2.0, 5, 'wind'));
         }
 
-        // Lightning Logic
         this.lightningTimer -= dt;
         if (this.season === 'summer' && this.lightningTimer <= 0) {
-            // Rare summer storms
             if (Math.random() < 0.001) {
                 this.lightningTimer = 0.2;
                 this.visualEffects.push(new VisualEffect(this.world.camera.x + Math.random()*800, 0, 'lightning'));
-                this.audio.play('shoot', 0.1, 0.5); // Placeholder thunder
+                this.audio.play('shoot', 0.1, 0.5); 
             }
         }
 
@@ -487,36 +505,65 @@ class Game {
         }
     }
 
-    _handleHookshot(dt) {
-        // Only if we have Air
+    _handleSpellCasting(dt) {
+        // RIGHT CLICK = CAST SPELL
         if (this.input.mouse.rightDown) {
-            if (this.resources.spendAir(dt)) {
-                const mx = this.input.mouse.x + this.world.camera.x;
-                const my = this.input.mouse.y + this.world.camera.y;
+            if (!this.player.fireCooldown) this.player.fireCooldown = 0; // Shared CD or separate?
+            
+            const mx = this.input.mouse.x + this.world.camera.x;
+            const my = this.input.mouse.y + this.world.camera.y;
+            const spell = this.resources.currentSpell;
 
-                let hit = false;
-                for (let island of this.islands) {
-                    if (mx >= island.x && mx <= island.x + island.w &&
-                        my >= island.y && my <= island.y + island.h) {
-                        
-                        hit = true;
-                        this.selectedIsland = island;
-                        
-                        const dx = this.player.x - island.x;
-                        const dy = this.player.y - island.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy);
-                        island.vx += (dx / dist) * 1200 * dt;
-                        island.vy += (dy / dist) * 1200 * dt;
-                        
-                        break;
-                    }
+            // 1: AIR (Hookshot)
+            if (spell === 1) {
+                if (this.resources.spendAir(dt)) {
+                    this._doHookshotLogic(dt, mx, my);
                 }
-                this.hookTarget = {x: mx, y: my, hit: hit};
+            } 
+            else if (this.player.fireCooldown <= 0) {
+                 // 0: FIREBALL
+                if (spell === 0 && this.resources.spendFire()) {
+                    this.player.fireCooldown = 0.5; 
+                    const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
+                    this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle, 'green'));
+                    this.audio.playSpell();
+                }
+                // 2: EARTH WALL
+                else if (spell === 2 && this.resources.spendEarth()) {
+                    this.player.fireCooldown = 1.0;
+                    this.walls.push(new StoneWall(mx, my));
+                    this.audio.play('land', 0.8, 0.1); 
+                    this.world.camera.shake = 5;
+                }
+                // 3: WATER (SPAWN)
+                else if (spell === 3 && this.resources.spendWater()) {
+                    this.player.fireCooldown = 1.0;
+                    this.rainClouds.push(new RainCloud(mx, my, 'green'));
+                    this._forceSpawnVillagers(mx, my, 'green');
+                    this.audio.playSpell();
+                }
             }
         } else {
             this.hookTarget = null;
-            this.selectedIsland = null;
         }
+    }
+
+    _doHookshotLogic(dt, mx, my) {
+        let hit = false;
+        for (let island of this.islands) {
+            if (mx >= island.x && mx <= island.x + island.w &&
+                my >= island.y && my <= island.y + island.h) {
+                
+                hit = true;
+                const dx = this.player.x - island.x;
+                const dy = this.player.y - island.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                island.vx += (dx / dist) * 1200 * dt;
+                island.vy += (dy / dist) * 1200 * dt;
+                break;
+            }
+        }
+        this.hookTarget = {x: mx, y: my, hit: hit};
     }
 
     _handleCombat(dt) {
@@ -570,7 +617,7 @@ class Game {
             if (p.dead) this.projectiles.splice(i, 1);
         }
 
-        // --- 2. FIREBALLS (NEW) ---
+        // --- 2. FIREBALLS ---
         for (let i = this.fireballs.length - 1; i >= 0; i--) {
             const f = this.fireballs[i];
             f.update(dt);
@@ -580,23 +627,27 @@ class Game {
             // Wall Hit
             for (let w of this.walls) {
                 if(this._checkHit(f, w)) {
-                    w.hp -= 200 * dt; // Melts walls
+                    w.hp -= 200 * dt; 
                     f.dead = true;
                     hit = true;
                     break;
                 }
             }
 
-            // Burn Enemy Chief
-            if (!this.enemyChief.dead && this._checkHit(f, this.enemyChief)) {
-                 this.enemyChief.hp -= 40 * dt; // DoT
+            // Burn Enemy Chief (if Green fireball)
+            if (f.team === 'green' && !this.enemyChief.dead && this._checkHit(f, this.enemyChief)) {
+                 this.enemyChief.hp -= 40 * dt; 
+            }
+            // Burn Player (if Blue fireball)
+            if (f.team === 'blue' && !this.player.dead && this._checkHit(f, this.player)) {
+                 this.player.hp -= 40 * dt;
             }
             
-            // INSTA-KILL Enemy Villagers in path
+            // INSTA-KILL Villagers of opposite team
             this.villagers.forEach(v => {
-                if (!v.dead && v.team !== 'green' && this._checkHit(f, v)) {
+                if (!v.dead && v.team !== f.team && this._checkHit(f, v)) {
                     v.dead = true;
-                    this._spawnBlood(v.x, v.y, '#FF4500', 20); // Fire blood!
+                    this._spawnBlood(v.x, v.y, '#FF4500', 20); 
                 }
             });
 
@@ -638,8 +689,13 @@ class Game {
         this.audio.play('death', 0.8, 0.1); 
         
         // ANIME IMPACT
-        this.impactFrameTimer = 0.2; // Freeze for 0.2s
+        this.impactFrameTimer = 0.2; 
         this.visualEffects.push(new VisualEffect(0,0,'impact'));
+
+        // REPLENISH MANA ON KILL
+        if (chief === this.enemyChief) {
+            this.resources.replenishAll();
+        }
     }
 
     _checkHit(entity1, entity2) {
@@ -657,58 +713,30 @@ class Game {
     }
 
     _handleShooting(dt) {
+        // LEFT CLICK = ALWAYS ARROWS
         if (this.input.mouse.leftDown) {
             if (!this.player.fireCooldown) this.player.fireCooldown = 0;
             this.player.fireCooldown -= dt;
 
             if (this.player.fireCooldown <= 0) {
+                this.player.fireCooldown = 0.2; // Fast fire for arrows
                 const mx = this.input.mouse.x + this.world.camera.x;
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y+20), mx - (this.player.x+20));
 
-                // --- SPELL LOGIC ---
-                const spell = this.resources.currentSpell;
-
-                // 0: FIREBALL
-                if (spell === 0 && this.resources.spendFire()) {
-                    this.player.fireCooldown = 0.5; // Slower fire rate
-                    this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle));
-                    this.audio.play('shoot', 0.4, -0.2); // Deeper sound
-                }
-                
-                // 1: AIR (Handled by Right Click, Left Click does nothing or simple attack?)
-                // Let's make Left Click shoot normal weak arrow if Air is selected, or nothing.
-                // User said: "Air spell is... the current island pull system"
-                // So Left Click does nothing here.
-
-                // 2: EARTH WALL
-                else if (spell === 2 && this.resources.spendEarth()) {
-                    this.player.fireCooldown = 1.0;
-                    // Spawn wall at cursor, clamped to ground? Or just drop it?
-                    // User said "Instantly spawn". Let's drop it from cursor.
-                    this.walls.push(new StoneWall(mx, my));
-                    this.audio.play('land', 0.8, 0.1); // Heavy thud
-                    this.world.camera.shake = 5;
-                }
-
-                // 3: WATER (SPAWN)
-                else if (spell === 3 && this.resources.spendWater()) {
-                    this.player.fireCooldown = 1.0;
-                    this.rainClouds.push(new RainCloud(mx, my));
-                    this._forceSpawnVillagers(mx, my);
-                    this.audio.play('teepee', 0.5, 0.5); // Magic chimes
-                }
+                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green', 25));
+                this.audio.play('shoot', 0.4, 0.0);
             }
         }
     }
 
-    _forceSpawnVillagers(x, y) {
+    _forceSpawnVillagers(x, y, team) {
         // Find nearest friendly hut to cursor
         let bestDist = Infinity;
         let bestIsland = null;
         
         this.islands.forEach(island => {
-            if (island.team === 'green' && island.hasTeepee) {
+            if (island.team === team && island.hasTeepee) {
                 const d = Math.sqrt((island.x - x)**2 + (island.y - y)**2);
                 if (d < bestDist) {
                     bestDist = d;
@@ -717,17 +745,14 @@ class Game {
             }
         });
 
-        if (bestIsland && bestDist < 800) {
-            // Spawn 3-5 units instantly
+        if (bestIsland && bestDist < 1000) {
             const count = 3 + Math.floor(Math.random() * 3);
             for(let i=0; i<count; i++) {
-                if (this.villagers.length >= 200) {
-                     // CAP STRATEGY: Do nothing, let the cap block enemies
-                     break; 
-                }
+                if (this.villagers.length >= 200) break; 
+                
                 const unit = (Math.random() < 0.4) ? 
-                        new Warrior(bestIsland.x + 50, bestIsland.y - 40, 'green') :
-                        new Villager(bestIsland.x + 50, bestIsland.y - 40, 'green');
+                        new Warrior(bestIsland.x + 50, bestIsland.y - 40, team) :
+                        new Villager(bestIsland.x + 50, bestIsland.y - 40, team);
                 unit.homeIsland = bestIsland;
                 unit.vx = (Math.random() - 0.5) * 200;
                 unit.vy = -300; // Pop out!
@@ -804,10 +829,9 @@ class Game {
         
         this.ctx.save();
         if (this.world.camera.shake > 0) {
-            // Apply camera shake logic from World/Camera
+            // Camera shake handled in world.draw/camera.follow
         }
 
-        // Pass Impact Frame boolean to World Draw
         const isImpactFrame = (this.impactFrameTimer > 0);
         this.world.draw(this.ctx, this.season, isImpactFrame);
 
