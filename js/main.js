@@ -1,8 +1,9 @@
 /* THE HEART OF THE GAME
-   Definitive V36.1: BALANCED ECONOMY FIX ⚖️
-   - UPDATED: Water refuel rate set to 5 per kill (20 kills for full tank).
-   - FIXED: Left Click arrows are infinite/free.
-   - FIXED: Spell logic strictly adheres to resource rules.
+   Definitive V37.0: THE UN-FROZEN TIMER FIX 🕒🔥
+   - CRITICAL FIX: Cooldowns now tick down every frame (not just when shooting).
+   - RESULT: Right-click Spells (Fire, Earth, Water) now actually fire!
+   - LOGIC: Left Click = Arrows (Infinite). Right Click = Spells (Resource Cost).
+   - REFUELING: Implemented the 'Earn Your Mana' system correctly.
 */
 
 import { InputHandler } from './input.js';
@@ -320,6 +321,10 @@ class Game {
         this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
+            // FIX: DECREMENT COOLDOWN EVERY FRAME
+            if (this.player.fireCooldown === undefined) this.player.fireCooldown = 0;
+            if (this.player.fireCooldown > 0) this.player.fireCooldown -= dt;
+
             // Left Click (Arrows)
             this._handleShooting(dt);
             
@@ -512,18 +517,19 @@ class Game {
     _handleSpellCasting(dt) {
         // RIGHT CLICK = CAST SPELL
         if (this.input.mouse.rightDown) {
-            if (!this.player.fireCooldown) this.player.fireCooldown = 0; // Shared CD or separate?
-            
             const mx = this.input.mouse.x + this.world.camera.x;
             const my = this.input.mouse.y + this.world.camera.y;
             const spell = this.resources.currentSpell;
 
-            // 1: AIR (Hookshot)
+            // 1: AIR (Hookshot) - Special case, needs continuous drain logic if held? 
+            // Previous implementations treated it as hold-to-drag. 
+            // We'll run it every frame if mouse is down.
             if (spell === 1) {
                 if (this.resources.spendAir(dt)) {
                     this._doHookshotLogic(dt, mx, my);
                 }
             } 
+            // OTHER SPELLS (Instant Cast)
             else if (this.player.fireCooldown <= 0) {
                  // 0: FIREBALL
                 if (spell === 0 && this.resources.spendFire()) {
@@ -729,9 +735,6 @@ class Game {
     _handleShooting(dt) {
         // LEFT CLICK = ALWAYS ARROWS
         if (this.input.mouse.leftDown) {
-            if (!this.player.fireCooldown) this.player.fireCooldown = 0;
-            this.player.fireCooldown -= dt;
-
             if (this.player.fireCooldown <= 0) {
                 this.player.fireCooldown = 0.2; // Fast fire for arrows
                 const mx = this.input.mouse.x + this.world.camera.x;
