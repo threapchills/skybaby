@@ -1,5 +1,6 @@
 /* THE CONDUCTOR (Audio Engine)
-   Definitive V4: Now with Tasty Munching Sounds! 🍔
+   Definitive V5: SPELL SOUNDS ADDED 🧙‍♂️🎵
+   - Added playSpell() for pitched-down magical effects.
 */
 
 export class AudioManager {
@@ -16,7 +17,7 @@ export class AudioManager {
             'music': 'assets/sounds/music.ogg',
             'teepee': 'assets/sounds/teepee.ogg',
             'death': 'assets/sounds/death.ogg',
-            'munch': 'assets/sounds/munch.ogg' // NEW: The sound of healing!
+            'munch': 'assets/sounds/munch.ogg'
         };
         
         this.loops = {};
@@ -39,7 +40,6 @@ export class AudioManager {
             this.sounds[key] = audioBuffer;
         } catch (e) {
             console.warn(`⚠️ Sound file missing or broken: ${url}. Error: ${e.message}`);
-            // We don't re-throw, so Promise.all continues
         }
     }
 
@@ -76,11 +76,29 @@ export class AudioManager {
         }
     }
 
-    startLoop(name, vol = 1.0) {
-        if (!this.sounds[name]) {
-            // If sound isn't loaded yet, try again in 500ms?
-            return;
+    // NEW: Specialized Spell Sound (Pitched down Teepee)
+    playSpell() {
+        if (!this.sounds['teepee']) return;
+        try {
+            const source = this.ctx.createBufferSource();
+            source.buffer = this.sounds['teepee'];
+            
+            // Pitch down by one octave (0.5 rate)
+            source.playbackRate.value = 0.5;
+
+            const gainNode = this.ctx.createGain();
+            gainNode.gain.value = 0.8; // Louder
+
+            source.connect(gainNode);
+            gainNode.connect(this.ctx.destination);
+            source.start(0);
+        } catch (e) {
+            console.warn("Spell audio error:", e);
         }
+    }
+
+    startLoop(name, vol = 1.0) {
+        if (!this.sounds[name]) return;
         if (this.loops[name]) return; 
 
         try {
