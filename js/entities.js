@@ -1,8 +1,8 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V34.5: TEAM AWARE SPELLS 🧙‍♂️
-   - Updated Fireball to support 'team' (Green vs Blue).
-   - Updated RainCloud to support 'team'.
-   - Player class updated with AI Spell Cooldowns.
+   Definitive V35.0: THE "GRAVITY KILLS" UPDATE 💀
+   - FIXED: Villagers/Warriors now die if they fall off the world (preventing sky-loops).
+   - UPDATED: Trees now heal from burns after 10 seconds.
+   - UPDATED: Island class handles tree regeneration.
 */
 
 // --- GLOBAL ASSET LOADER ---
@@ -692,7 +692,8 @@ export class Island extends Entity {
                 x: Math.random() * (w - 100), 
                 scale: 0.8 + Math.random() * 1.7, 
                 hueRotate: Math.floor(Math.random() * 40) - 20,
-                burnt: false // Visual state
+                burnt: false, // Visual state
+                burntTimer: 0 // New: Heal timer
             });
         }
 
@@ -728,6 +729,16 @@ export class Island extends Entity {
         this.y += this.vy * dt;
         this.vx *= this.friction;
         this.vy *= this.friction;
+
+        // HEAL BURNT TREES
+        this.trees.forEach(tree => {
+            if (tree.burnt) {
+                tree.burntTimer -= dt;
+                if (tree.burntTimer <= 0) {
+                    tree.burnt = false;
+                }
+            }
+        });
 
         if (this.conversionTimer > 0) {
             this.conversionTimer -= dt;
@@ -940,7 +951,8 @@ export class Villager extends Entity {
             }
         }
         
-        if (this.y > worldHeight) this.y = -50; 
+        // DEATH BOUNDARY (Prevents infinite falling loops)
+        if (this.y > worldHeight) this.dead = true; 
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
     }
@@ -1170,7 +1182,8 @@ export class Warrior extends Villager {
             }
         }
 
-        if (this.y > worldHeight) this.y = -50;
+        // DEATH BOUNDARY (Prevents infinite falling loops)
+        if (this.y > worldHeight) this.dead = true;
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
     }
