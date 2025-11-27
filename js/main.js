@@ -1,9 +1,8 @@
 /* THE HEART OF THE GAME
-   Definitive V35.0: THE FIX (LEFT CLICK SHOOT, RIGHT CLICK SPELL) 🧙‍♂️🏹
-   - FIXED: Left Click is now Arrows. Right Click is Spells.
-   - FIXED: Enemy AI now uses Spells (Fire, Wall, Water).
-   - FIXED: Mana Economy (Regen removed, replenish on kill).
-   - FIXED: Audio for Spells.
+   Definitive V36.1: BALANCED ECONOMY FIX ⚖️
+   - UPDATED: Water refuel rate set to 5 per kill (20 kills for full tank).
+   - FIXED: Left Click arrows are infinite/free.
+   - FIXED: Spell logic strictly adheres to resource rules.
 */
 
 import { InputHandler } from './input.js';
@@ -312,7 +311,12 @@ class Game {
             }
         }
         
-        this.resources.update(dt, isMoving, nearWater, nearFire);
+        // --- NEW RESOURCE REGEN LOGIC ---
+        const isPlayerGrounded = this.player.isGrounded; 
+        const isPlayerMoving = (Math.abs(this.player.vx) > 10);
+        
+        // Pass states to resources: dt, isGrounded, isMoving, isNearFire
+        this.resources.update(dt, isPlayerGrounded, isPlayerMoving, nearFire);
         this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
@@ -609,6 +613,11 @@ class Game {
                     if (v.hp <= 0) {
                          v.dead = true;
                          this._spawnBlood(v.x, v.y);
+                         
+                         // REFUEL WATER ON KILL (Only if green projectile kills enemy)
+                         if (p.team === 'green') {
+                             this.resources.addWater(5); // 5 points per kill
+                         }
                     }
                 }
             }
@@ -648,6 +657,11 @@ class Game {
                 if (!v.dead && v.team !== f.team && this._checkHit(f, v)) {
                     v.dead = true;
                     this._spawnBlood(v.x, v.y, '#FF4500', 20); 
+                    
+                     // REFUEL WATER ON KILL
+                     if (f.team === 'green') {
+                         this.resources.addWater(5); // 5 points per kill
+                     }
                 }
             });
 
