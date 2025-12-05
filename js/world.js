@@ -29,9 +29,10 @@ export class Camera {
         if (tx + this.w > this.worldW) tx = this.worldW - this.w;
         if (ty < 0) ty = 0;
         if (ty + this.h > this.worldH) ty = this.worldH - this.h;
-        
-        this.x = tx;
-        this.y = ty;
+
+        // Lerp
+        this.x += (tx - this.x) * 5 * dt;
+        this.y += (ty - this.y) * 5 * dt;
 
         if (this.shake > 0) {
             this.x += (Math.random() - 0.5) * this.shake * 10;
@@ -44,7 +45,7 @@ class ParallaxLayer {
     constructor(imagePath, speed, yOffset = 0, autoScrollSpeed = 0) {
         this.image = new Image();
         this.image.src = imagePath;
-        this.speed = speed; 
+        this.speed = speed;
         this.autoScrollSpeed = autoScrollSpeed;
         this.yOffset = yOffset;
         this.loaded = false;
@@ -54,18 +55,18 @@ class ParallaxLayer {
     draw(ctx, camera) {
         if (!this.loaded) return;
 
-        const windOffset = (Date.now() / 1000) * this.autoScrollSpeed; 
+        const windOffset = (Date.now() / 1000) * this.autoScrollSpeed;
         const totalX = -(camera.x * this.speed) - windOffset;
-        
+
         // Use Math.floor to prevent sub-pixel tearing lines
         const xPos = Math.floor(totalX % this.image.width);
-        
+
         ctx.drawImage(this.image, xPos, this.yOffset);
         ctx.drawImage(this.image, xPos + this.image.width, this.yOffset);
         ctx.drawImage(this.image, xPos + this.image.width * 2, this.yOffset);
-        
+
         if (xPos > 0) {
-             ctx.drawImage(this.image, xPos - this.image.width, this.yOffset);
+            ctx.drawImage(this.image, xPos - this.image.width, this.yOffset);
         }
     }
 }
@@ -82,7 +83,7 @@ export class World {
             // Mid: Sky Layer 2
             new ParallaxLayer('assets/backgrounds/sky_layer_2.png', 0.5, 0, 20),
             // Front: Clouds FG
-            new ParallaxLayer('assets/backgrounds/clouds_fg.png', 0.8, 100, 50)     
+            new ParallaxLayer('assets/backgrounds/clouds_fg.png', 0.8, 100, 50)
         ];
     }
 
@@ -90,20 +91,16 @@ export class World {
         this.camera.follow(player, dt);
     }
 
-    draw(ctx, season, invertColors = false) {
+    draw(ctx, season) {
         ctx.save();
-        
-        // IMPACT FRAME: Invert Everything
-        if (invertColors) {
-            ctx.filter = 'invert(100%)';
-        }
+
         // WINTER FILTER: Shift Hue to Blue/Green
-        else if (season === 'winter') {
-            ctx.filter = 'hue-rotate(12deg) brightness(1.1)'; 
+        if (season === 'winter') {
+            ctx.filter = 'hue-rotate(12deg) brightness(1.1)';
         }
 
         this.layers.forEach(layer => layer.draw(ctx, this.camera));
-        
+
         ctx.restore(); // Remove filter for game objects
     }
 }
