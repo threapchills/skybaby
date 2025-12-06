@@ -85,6 +85,11 @@ class Game {
         this.pulseTime = 0;
         this.lightningTimer = 0;
 
+        // WAR DIRECTOR
+        this.warState = 'BUILD'; // BUILD -> GATHER -> ATTACK
+        this.warTimer = 40.0;
+        console.log("WAR DIRECTOR STARTED: BUILD PHASE");
+
         window.addEventListener('click', () => this._startAudio(), { once: true });
         window.addEventListener('keydown', () => this._startAudio(), { once: true });
 
@@ -248,6 +253,9 @@ class Game {
             }
         }
 
+        // --- WAR DIRECTOR ---
+        this._updateWarDirector(dt);
+
         this._checkWinConditions(dt);
 
         let greenTents = 0;
@@ -392,6 +400,31 @@ class Game {
                     this.audio.play('land', 0.8, 0.1);
                 }
             }
+        }
+    }
+
+    _updateWarDirector(dt) {
+        this.warTimer -= dt;
+        if (this.warTimer <= 0) {
+            if (this.warState === 'BUILD') {
+                this.warState = 'GATHER';
+                this.warTimer = 10.0;
+                this.resources.showFloatingMessage("WAR DRUMS SOUND! ARMIES GATHER!", "#FFD700");
+                this.audio.play('shoot', 0.5, 0.1); // Placeholder sound
+            }
+            else if (this.warState === 'GATHER') {
+                this.warState = 'ATTACK';
+                this.warTimer = 30.0;
+                this.resources.showFloatingMessage("CHARGE!!!", "#FF0000");
+                this.world.camera.shake = 10;
+                this.audio.play('death', 0.5, 0.5); // Placeholder battle cry
+            }
+            else if (this.warState === 'ATTACK') {
+                this.warState = 'BUILD';
+                this.warTimer = 40.0;
+                this.resources.showFloatingMessage("The dust settles... Build and recover.", "#FFFFFF");
+            }
+            console.log(`WAR PHASE CHANGED: ${this.warState}`);
         }
     }
 
@@ -717,9 +750,9 @@ class Game {
 
                 v.update(dt, this.islands, enemies, (x, y, angle, team, damage) => {
                     this.projectiles.push(new Projectile(x, y, angle, team, damage));
-                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader, this.villagers, this.walls);
+                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader, this.villagers, this.walls, this.warState);
             } else {
-                v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls);
+                v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls, this.warState);
             }
         });
         this.villagers = this.villagers.filter(v => !v.dead);

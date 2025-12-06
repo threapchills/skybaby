@@ -17,12 +17,12 @@ export const Assets = {
     teepeeBlue: new Image(),
     fire: new Image(),
     leaf: new Image(),
-    
+
     // Characters
     playerGreen: new Image(),
     playerBlue: new Image(),
     pig: new Image(),
-    villagerGreen: [], 
+    villagerGreen: [],
     villagerBlue: [],
     warriorGreen: new Image(),
     warriorBlue: new Image(),
@@ -47,10 +47,10 @@ Assets.warriorGreen.src = 'assets/sprites/warrior_green.png';
 Assets.warriorBlue.src = 'assets/sprites/warrior_blue.png';
 Assets.projectile.src = 'assets/sprites/projectile_arrow.png';
 
-for(let i=1; i<=4; i++) {
+for (let i = 1; i <= 4; i++) {
     let vGreen = new Image(); vGreen.src = `assets/sprites/villager_green_${i}.png`;
     Assets.villagerGreen.push(vGreen);
-    
+
     let vBlue = new Image(); vBlue.src = `assets/sprites/villager_blue_${i}.png`;
     Assets.villagerBlue.push(vBlue);
 }
@@ -76,7 +76,7 @@ export class Entity {
 
 export class StoneWall extends Entity {
     constructor(x, y) {
-        super(x, y, 40, 120); 
+        super(x, y, 40, 120);
         this.hp = 250;
         this.maxHp = 250;
         this.vx = 0;
@@ -86,7 +86,7 @@ export class StoneWall extends Entity {
     }
 
     update(dt, islands, worldHeight) {
-        this.vy += 1000 * dt; 
+        this.vy += 1000 * dt;
         this.y += this.vy * dt;
 
         this.onGround = false;
@@ -104,7 +104,7 @@ export class StoneWall extends Entity {
                 }
             }
         }
-        
+
         if (this.y > worldHeight) this.dead = true;
         if (this.hp <= 0) this.dead = true;
     }
@@ -114,13 +114,13 @@ export class StoneWall extends Entity {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
 
-        ctx.fillStyle = '#696969'; 
+        ctx.fillStyle = '#696969';
         ctx.fillRect(screenX, screenY, this.w, this.h);
-        
+
         ctx.strokeStyle = '#2f2f2f';
         ctx.lineWidth = 3;
         ctx.strokeRect(screenX, screenY, this.w, this.h);
-        
+
         const damage = 1.0 - (this.hp / this.maxHp);
         if (damage > 0.2) {
             ctx.beginPath();
@@ -139,15 +139,15 @@ export class StoneWall extends Entity {
 
 export class Fireball extends Entity {
     constructor(x, y, angle, team) {
-        super(x, y, 60, 60); 
+        super(x, y, 60, 60);
         this.team = team; // 'green' or 'blue'
-        const speed = 400; 
+        const speed = 400;
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
         this.angle = angle;
         this.life = 4.0;
         this.particles = [];
-        this.damage = 100; 
+        this.damage = 100;
     }
 
     update(dt) {
@@ -156,7 +156,7 @@ export class Fireball extends Entity {
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
 
-        for(let i=0; i<3; i++) {
+        for (let i = 0; i < 3; i++) {
             this.particles.push({
                 x: this.x + Math.random() * 40 - 20,
                 y: this.y + Math.random() * 40 - 20,
@@ -168,12 +168,12 @@ export class Fireball extends Entity {
             });
         }
 
-        for(let i=this.particles.length-1; i>=0; i--) {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
             let p = this.particles[i];
             p.x += p.vx * dt;
             p.y += p.vy * dt;
             p.life -= dt;
-            if(p.life <= 0) this.particles.splice(i, 1);
+            if (p.life <= 0) this.particles.splice(i, 1);
         }
     }
 
@@ -183,12 +183,12 @@ export class Fireball extends Entity {
         const screenY = this.y - camera.y;
 
         ctx.save();
-        ctx.globalCompositeOperation = 'lighter'; 
+        ctx.globalCompositeOperation = 'lighter';
         this.particles.forEach(p => {
             ctx.fillStyle = p.color;
             ctx.globalAlpha = p.life;
             ctx.beginPath();
-            ctx.arc(p.x - camera.x, p.y - camera.y, p.size, 0, Math.PI*2);
+            ctx.arc(p.x - camera.x, p.y - camera.y, p.size, 0, Math.PI * 2);
             ctx.fill();
         });
         ctx.restore();
@@ -199,15 +199,15 @@ export class RainCloud extends Entity {
     constructor(x, y, team) {
         super(x, y, 100, 50);
         this.team = team;
-        this.life = 2.0; 
+        this.life = 2.0;
         this.drops = [];
     }
 
     update(dt) {
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
-        
-        for(let i=0; i<5; i++) {
+
+        for (let i = 0; i < 5; i++) {
             this.drops.push({
                 x: this.x + (Math.random() - 0.5) * 150,
                 y: this.y + (Math.random() * 20),
@@ -216,11 +216,11 @@ export class RainCloud extends Entity {
             });
         }
 
-        for(let i=this.drops.length-1; i>=0; i--) {
+        for (let i = this.drops.length - 1; i >= 0; i--) {
             let d = this.drops[i];
             d.y += d.vy * dt;
             d.life -= dt;
-            if(d.life <= 0) this.drops.splice(i, 1);
+            if (d.life <= 0) this.drops.splice(i, 1);
         }
     }
 
@@ -230,9 +230,9 @@ export class RainCloud extends Entity {
 
         ctx.fillStyle = this.team === 'green' ? 'rgba(200, 200, 255, 0.4)' : 'rgba(100, 0, 100, 0.4)';
         ctx.beginPath();
-        ctx.arc(screenX, screenY, 40, 0, Math.PI*2);
-        ctx.arc(screenX + 30, screenY - 10, 50, 0, Math.PI*2);
-        ctx.arc(screenX - 30, screenY - 10, 50, 0, Math.PI*2);
+        ctx.arc(screenX, screenY, 40, 0, Math.PI * 2);
+        ctx.arc(screenX + 30, screenY - 10, 50, 0, Math.PI * 2);
+        ctx.arc(screenX - 30, screenY - 10, 50, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = '#87CEEB';
@@ -255,7 +255,7 @@ export class VisualEffect extends Entity {
         this.life = (type === 'impact') ? 0.2 : 0.5;
         this.flashing = true;
     }
-    
+
     update(dt) {
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
@@ -266,23 +266,23 @@ export class VisualEffect extends Entity {
             const startX = this.x - camera.x;
             const startY = 0;
             const endY = camera.h;
-            
+
             ctx.save();
             ctx.strokeStyle = 'white';
             ctx.lineWidth = 3;
             ctx.shadowBlur = 20;
             ctx.shadowColor = 'cyan';
-            
+
             ctx.beginPath();
             ctx.moveTo(startX, startY);
             let cx = startX;
-            for(let cy = 0; cy < endY; cy += 20) {
+            for (let cy = 0; cy < endY; cy += 20) {
                 cx += (Math.random() - 0.5) * 60;
                 ctx.lineTo(cx, cy);
             }
             ctx.stroke();
             ctx.restore();
-            
+
             if (Math.random() > 0.5) {
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
                 ctx.fillRect(0, 0, camera.w, camera.h);
@@ -295,13 +295,13 @@ export class VisualEffect extends Entity {
 
 export class Leaf extends Entity {
     constructor(x, y) {
-        super(x, y, 32, 32); 
-        this.life = 5.0 + Math.random() * 5.0; 
-        this.scale = 0.5 + Math.random() * 0.8; 
-        this.angle = Math.random() * Math.PI * 2; 
-        this.rotationSpeed = (Math.random() - 0.5) * 4.0; 
-        this.vx = 100 + Math.random() * 200; 
-        this.vy = 20 + Math.random() * 50; 
+        super(x, y, 32, 32);
+        this.life = 5.0 + Math.random() * 5.0;
+        this.scale = 0.5 + Math.random() * 0.8;
+        this.angle = Math.random() * Math.PI * 2;
+        this.rotationSpeed = (Math.random() - 0.5) * 4.0;
+        this.vx = 100 + Math.random() * 200;
+        this.vy = 20 + Math.random() * 50;
     }
 
     update(dt) {
@@ -332,12 +332,12 @@ export class Snowflake {
     constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.vx = -50 + Math.random() * 150; 
-        this.vy = 150 + Math.random() * 150; 
-        this.size = 2 + Math.random() * 3; 
-        this.life = 4.0; 
+        this.vx = -50 + Math.random() * 150;
+        this.vy = 150 + Math.random() * 150;
+        this.size = 2 + Math.random() * 3;
+        this.life = 4.0;
         this.dead = false;
-        this.sway = Math.random() * Math.PI; 
+        this.sway = Math.random() * Math.PI;
     }
 
     update(dt) {
@@ -364,35 +364,35 @@ export class Snowflake {
 
 export class Particle extends Entity {
     constructor(x, y, color, speed, life, size = 5, type = 'normal') {
-        let finalSize = size * 1.5; 
+        let finalSize = size * 1.5;
         let w = finalSize;
         let h = finalSize;
-        if (type === 'wind') { w = 60 + Math.random() * 60; h = 2; } 
-        
+        if (type === 'wind') { w = 60 + Math.random() * 60; h = 2; }
+
         super(x, y, w, h);
-        
+
         this.color = color;
         this.type = type;
         this.maxLife = life;
         this.life = life;
 
         if (this.type === 'wind') {
-            this.vx = speed; 
-            this.vy = (Math.random() - 0.5) * 20; 
+            this.vx = speed;
+            this.vy = (Math.random() - 0.5) * 20;
         } else if (this.type === 'trail') {
-            this.vx = (Math.random() - 0.5) * 10; 
-            this.vy = (Math.random() - 0.5) * 10; 
-            this.w = 6; this.h = 6; 
+            this.vx = (Math.random() - 0.5) * 10;
+            this.vy = (Math.random() - 0.5) * 10;
+            this.w = 6; this.h = 6;
         } else {
             const angle = Math.random() * Math.PI * 2;
             this.vx = Math.cos(angle) * speed;
-            this.vy = Math.sin(angle) * speed - 50; 
+            this.vy = Math.sin(angle) * speed - 50;
         }
     }
 
     update(dt) {
         if (this.type === 'normal') {
-            this.vy += 500 * dt; 
+            this.vy += 500 * dt;
         }
 
         this.x += this.vx * dt;
@@ -404,11 +404,11 @@ export class Particle extends Entity {
     draw(ctx, camera) {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
-        
-        if (screenX < -100 || screenX > camera.w + 100) return; 
+
+        if (screenX < -100 || screenX > camera.w + 100) return;
 
         ctx.save();
-        ctx.globalAlpha = Math.max(0, this.life / this.maxLife); 
+        ctx.globalAlpha = Math.max(0, this.life / this.maxLife);
         ctx.fillStyle = this.color;
         ctx.fillRect(screenX, screenY, this.w, this.h);
         ctx.globalAlpha = 1.0;
@@ -418,31 +418,31 @@ export class Particle extends Entity {
 
 export class Pig extends Entity {
     constructor(x, y) {
-        super(x, y, 32, 24); 
+        super(x, y, 32, 24);
         this.hp = 10;
         this.vx = 0;
-        this.vy = 0; 
+        this.vy = 0;
         this.stateTimer = 0;
         this.onGround = false;
-        this.maxFallSpeed = 800; 
+        this.maxFallSpeed = 800;
         this.homeIsland = null;
     }
 
     update(dt, islands, worldWidth, worldHeight) {
-        this.vy += 800 * dt; 
-        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
-        
+        this.vy += 800 * dt;
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
+
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) {
-            this.stateTimer = Math.random() * 3 + 2; 
-            this.vx = (Math.random() - 0.5) * 40; 
+            this.stateTimer = Math.random() * 3 + 2;
+            this.vx = (Math.random() - 0.5) * 40;
         }
 
         if (this.onGround && this.homeIsland) {
             if (this.x < this.homeIsland.x) this.vx = Math.abs(this.vx);
             if (this.x > this.homeIsland.x + this.homeIsland.w) this.vx = -Math.abs(this.vx);
         }
-        
+
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
@@ -452,16 +452,16 @@ export class Pig extends Entity {
                 if (this.x < island.x + island.w && this.x + this.w > island.x) {
                     const collisionThreshold = island.y + 30 + (this.vy * dt);
                     if (this.y + this.h >= island.y && this.y + this.h <= collisionThreshold) {
-                         this.y = island.y - this.h;
-                         this.vy = 0;
-                         this.onGround = true;
-                         this.homeIsland = island;
+                        this.y = island.y - this.h;
+                        this.vy = 0;
+                        this.onGround = true;
+                        this.homeIsland = island;
                     }
                 }
             }
         }
-        
-        if (this.y > worldHeight) this.y = -50; 
+
+        if (this.y > worldHeight) this.y = -50;
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
     }
@@ -477,40 +477,40 @@ export class Pig extends Entity {
 export class Player extends Entity {
     constructor(x, y, team) {
         super(x, y, 40, 40);
-        this.team = team; 
+        this.team = team;
         this.vx = 0;
         this.vy = 0;
-        this.hp = 100; 
+        this.hp = 100;
         this.maxHp = 100;
-        
-        this.speed = 450; 
-        this.acceleration = 3000; 
-        this.friction = 0.85; 
-        this.gravity = 800; 
-        this.maxFallSpeed = 1000; 
-        this.jumpForce = -600; 
-        this.flyForce = -500; 
-        
+
+        this.speed = 450;
+        this.acceleration = 3000;
+        this.friction = 0.85;
+        this.gravity = 800;
+        this.maxFallSpeed = 1000;
+        this.jumpForce = -600;
+        this.flyForce = -500;
+
         this.isGrounded = false;
         this.hpRegenTimer = 0;
-        this.fireCooldown = 0; 
+        this.fireCooldown = 0;
         this.visitedIslands = new Set();
-        
+
         this.aiTargetIsland = null;
         this.aiStateTimer = 0;
         this.aiJump = false;
 
         // AI Spell Stats
-        this.aiSpellCooldown = 5.0; 
+        this.aiSpellCooldown = 5.0;
     }
 
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy, walls) {
-        if (this.dead) return; 
+        if (this.dead) return;
         if (dt <= 0) return;
 
         if (this.hp < this.maxHp) {
             this.hpRegenTimer += dt;
-            if (this.hpRegenTimer > 2.0) { 
+            if (this.hpRegenTimer > 2.0) {
                 this.hp++;
                 this.hpRegenTimer = 0;
             }
@@ -521,9 +521,9 @@ export class Player extends Entity {
             this.fireCooldown -= dt;
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            if (dist < 600 && this.fireCooldown <= 0) { 
-                this.fireCooldown = 0.8; 
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 600 && this.fireCooldown <= 0) {
+                this.fireCooldown = 0.8;
                 const angle = Math.atan2(dy, dx);
                 this.shootRequest = { x: this.x, y: this.y, angle: angle };
             }
@@ -539,9 +539,9 @@ export class Player extends Entity {
                 if (input.keys.space) wantJump = true;
             }
         } else {
-            moving = true; 
+            moving = true;
             if (!this.aiTargetIsland || this.aiTargetIsland.team === 'blue' || this.aiStateTimer <= 0) {
-                this.aiStateTimer = 5.0 + Math.random() * 5.0; 
+                this.aiStateTimer = 5.0 + Math.random() * 5.0;
                 const targets = islands.filter(i => i.team !== 'blue');
                 if (targets.length > 0) {
                     this.aiTargetIsland = targets[Math.floor(Math.random() * targets.length)];
@@ -554,9 +554,9 @@ export class Player extends Entity {
             if (this.aiTargetIsland) {
                 const targetX = this.aiTargetIsland.x + (this.aiTargetIsland.w / 2);
                 if (this.x < targetX - 50) {
-                    this.vx += this.acceleration * dt; 
+                    this.vx += this.acceleration * dt;
                 } else if (this.x > targetX + 50) {
-                    this.vx -= this.acceleration * dt; 
+                    this.vx -= this.acceleration * dt;
                 } else {
                     if (Math.random() < 0.05) this.vx *= -1;
                 }
@@ -568,10 +568,10 @@ export class Player extends Entity {
                 }
             }
         }
-        
+
         if (!moving) {
             this.vx *= this.friction;
-            if (Math.abs(this.vx) < 10) this.vx = 0; 
+            if (Math.abs(this.vx) < 10) this.vx = 0;
         }
 
         if (this.vx > this.speed) this.vx = this.speed;
@@ -580,17 +580,17 @@ export class Player extends Entity {
         // --- WALL COLLISION (X-AXIS) ---
         if (walls) {
             for (let wall of walls) {
-                if (!wall.dead && 
-                    this.x + this.vx*dt < wall.x + wall.w && 
-                    this.x + this.w + this.vx*dt > wall.x &&
-                    this.y < wall.y + wall.h && 
+                if (!wall.dead &&
+                    this.x + this.vx * dt < wall.x + wall.w &&
+                    this.x + this.w + this.vx * dt > wall.x &&
+                    this.y < wall.y + wall.h &&
                     this.y + this.h > wall.y) {
                     this.vx = 0;
                 }
             }
         }
 
-        this.x += this.vx * dt; 
+        this.x += this.vx * dt;
         this.vy += this.gravity * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
@@ -598,68 +598,68 @@ export class Player extends Entity {
             if (this.isGrounded) {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
-                if(audio) audio.play('jump', 0.4, 0.1);
+                if (audio) audio.play('jump', 0.4, 0.1);
             } else if (this.team === 'green' && resources && resources.air > 0) {
                 // OLD AIR LOGIC: REMOVE AIR COST FOR FLYING since Air is now rare spell resource
                 // Just let them fly with a basic cooldown or small infinite resource?
                 // For now, let's say flying is free but weak to not break game loop
-                this.vy -= 1500 * dt; 
+                this.vy -= 1500 * dt;
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
                 // resources.air -= 80 * dt; // REMOVED COST
             } else if (this.team === 'blue') {
-                this.vy -= 100 * dt; 
+                this.vy -= 100 * dt;
             }
         }
         this.y += this.vy * dt;
 
         this.isGrounded = false;
-        
+
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x < island.x + island.w && this.x + this.w > island.x) {
                     const collisionThreshold = island.y + 30 + (this.vy * dt);
                     if (this.y + this.h >= island.y && this.y + this.h <= collisionThreshold) {
-                        this.y = island.y - this.h + 1; 
+                        this.y = island.y - this.h + 1;
                         this.vy = 0;
                         this.isGrounded = true;
-                        
+
                         // Sticky Island friction (moving platforms)
                         this.x += island.vx * dt;
 
                         if (this.team === 'green' && resources) {
-                           if (!this.visitedIslands.has(island)) {
-                               this.visitedIslands.add(island);
-                               // resources.addEarth(20); // REMOVED
-                           }
-                           if (Math.abs(this.vx) > 10) { 
-                               // resources.addPassiveEarth(10 * dt); // REMOVED
-                           }
+                            if (!this.visitedIslands.has(island)) {
+                                this.visitedIslands.add(island);
+                                // resources.addEarth(20); // REMOVED
+                            }
+                            if (Math.abs(this.vx) > 10) {
+                                // resources.addPassiveEarth(10 * dt); // REMOVED
+                            }
                         }
                     }
                 }
             }
         }
 
-        if (this.y > worldHeight + 100) this.y = -100; 
-        if (this.y < -200) this.y = worldHeight; 
-        if (this.x > worldWidth) this.x = 0; 
-        if (this.x < -this.w) this.x = worldWidth; 
+        if (this.y > worldHeight + 100) this.y = -100;
+        if (this.y < -200) this.y = worldHeight;
+        if (this.x > worldWidth) this.x = 0;
+        if (this.x < -this.w) this.x = worldWidth;
 
-        return (Math.abs(this.vx) > 0.1 || Math.abs(this.vy) > 0.1); 
+        return (Math.abs(this.vx) > 0.1 || Math.abs(this.vy) > 0.1);
     }
-    
+
     draw(ctx, camera) {
         if (this.dead) return;
 
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
-        
+
         if (this.team === 'green') {
             ctx.fillStyle = '#00ff00';
             ctx.beginPath();
-            ctx.moveTo(screenX + this.w/2, screenY - 25);
-            ctx.lineTo(screenX + this.w/2 - 10, screenY - 35);
-            ctx.lineTo(screenX + this.w/2 + 10, screenY - 35);
+            ctx.moveTo(screenX + this.w / 2, screenY - 25);
+            ctx.lineTo(screenX + this.w / 2 - 10, screenY - 35);
+            ctx.lineTo(screenX + this.w / 2 + 10, screenY - 35);
             ctx.fill();
         }
 
@@ -677,20 +677,20 @@ export class Island extends Entity {
     constructor(x, y, w, h, team) {
         super(x, y, w, h);
         this.team = team;
-        
+
         this.activeTileset = Assets.tilesetNormal;
         this.activeTree = Assets.treeNormal;
 
         this.hasTeepee = true;
-        this.hasFireplace = Math.random() > 0.4; 
-        this.conversionTimer = 0; 
-        
+        this.hasFireplace = Math.random() > 0.4;
+        this.conversionTimer = 0;
+
         this.trees = [];
-        const numTrees = 1 + Math.floor(Math.random() * (w / 70)); 
+        const numTrees = 1 + Math.floor(Math.random() * (w / 70));
         for (let i = 0; i < numTrees; i++) {
             this.trees.push({
-                x: Math.random() * (w - 100), 
-                scale: 0.8 + Math.random() * 1.7, 
+                x: Math.random() * (w - 100),
+                scale: 0.8 + Math.random() * 1.7,
                 hueRotate: Math.floor(Math.random() * 40) - 20,
                 burnt: false, // Visual state
                 burntTimer: 0 // New: Heal timer
@@ -698,19 +698,19 @@ export class Island extends Entity {
         }
 
         this.grass = [];
-        const numGrass = 2 + Math.floor(Math.random() * (w / 40)); 
+        const numGrass = 2 + Math.floor(Math.random() * (w / 40));
         for (let i = 0; i < numGrass; i++) {
             this.grass.push({
-                x: Math.random() * (w - 30), 
-                scale: 0.8 + Math.random() * 0.6, 
-                hueRotate: Math.floor(Math.random() * 60) - 30 
+                x: Math.random() * (w - 30),
+                scale: 0.8 + Math.random() * 0.6,
+                hueRotate: Math.floor(Math.random() * 60) - 30
             });
         }
 
         this.vx = 0;
         this.vy = 0;
-        this.friction = 0.90; 
-        
+        this.friction = 0.90;
+
         this.mass = w * h; // For collision Physics
     }
 
@@ -746,18 +746,18 @@ export class Island extends Entity {
         }
 
         if (this.hasTeepee) {
-            const range = 150; 
-            
+            const range = 150;
+
             if (player && !player.dead) {
-                const tentX = this.x + 20 + 48; 
-                const tentY = this.y - 20; 
-                const dx = (player.x + player.w/2) - tentX;
-                const dy = (player.y + player.h/2) - tentY;
-                if (Math.sqrt(dx*dx + dy*dy) < range) {
+                const tentX = this.x + 20 + 48;
+                const tentY = this.y - 20;
+                const dx = (player.x + player.w / 2) - tentX;
+                const dy = (player.y + player.h / 2) - tentY;
+                if (Math.sqrt(dx * dx + dy * dy) < range) {
                     if (this.team !== 'green') {
                         this.team = 'green';
-                        this.conversionTimer = 2.0; 
-                        if (audio) audio.play('teepee', 0.6, 0.1); 
+                        this.conversionTimer = 2.0;
+                        if (audio) audio.play('teepee', 0.6, 0.1);
                     }
                 }
             }
@@ -765,9 +765,9 @@ export class Island extends Entity {
             if (enemyChief && !enemyChief.dead) {
                 const tentX = this.x + 20 + 48;
                 const tentY = this.y - 20;
-                const dx = (enemyChief.x + enemyChief.w/2) - tentX;
-                const dy = (enemyChief.y + enemyChief.h/2) - tentY;
-                if (Math.sqrt(dx*dx + dy*dy) < range) {
+                const dx = (enemyChief.x + enemyChief.w / 2) - tentX;
+                const dy = (enemyChief.y + enemyChief.h / 2) - tentY;
+                if (Math.sqrt(dx * dx + dy * dy) < range) {
                     if (this.team !== 'blue') {
                         this.team = 'blue';
                         this.conversionTimer = 2.0;
@@ -807,7 +807,7 @@ export class Island extends Entity {
                 ctx.filter = `hue-rotate(${g.hueRotate}deg)`;
                 const grassW = 32 * g.scale;
                 const grassH = 32 * g.scale;
-                const grassY = screenY - (25 * g.scale); 
+                const grassY = screenY - (25 * g.scale);
                 ctx.drawImage(Assets.grass, screenX + g.x, grassY, grassW, grassH);
                 ctx.restore();
             });
@@ -817,17 +817,17 @@ export class Island extends Entity {
         if (this.activeTree.complete) {
             this.trees.forEach(tree => {
                 ctx.save();
-                
+
                 // Burnt Effect
                 if (tree.burnt) {
                     ctx.filter = `sepia(100%) brightness(50%)`;
                 } else {
                     ctx.filter = `hue-rotate(${tree.hueRotate}deg)`;
                 }
-                
+
                 const treeW = 120 * tree.scale;
                 const treeH = 150 * tree.scale;
-                const treeY = screenY - (110 * tree.scale); 
+                const treeY = screenY - (110 * tree.scale);
                 ctx.drawImage(this.activeTree, screenX + tree.x, treeY, treeW, treeH);
                 ctx.restore();
             });
@@ -836,66 +836,70 @@ export class Island extends Entity {
         // 4. Teepee (FRONT)
         const teepeeImg = (this.team === 'green') ? Assets.teepeeGreen : Assets.teepeeBlue;
         this.drawSprite(ctx, teepeeImg, screenX + 20, screenY - 66, 96, 96);
-        
+
         // 5. Fire
         if (this.hasFireplace) {
-            this.drawSprite(ctx, Assets.fire, screenX + (this.w/2) - 40, screenY - 54, 80, 80);
+            this.drawSprite(ctx, Assets.fire, screenX + (this.w / 2) - 40, screenY - 54, 80, 80);
         }
     }
 }
 
 export class Villager extends Entity {
     constructor(x, y, team) {
-        super(x, y, 24, 24); 
+        super(x, y, 24, 24);
         this.team = team;
-        this.hp = 10; 
+        this.hp = 10;
         this.homeIsland = null;
         this.vx = 0;
-        this.vy = 0; 
+        this.vy = 0;
         this.stateTimer = 0;
         this.onGround = false;
-        this.maxFallSpeed = 800; 
-        
-        this.variantIndex = Math.floor(Math.random() * 4); 
+        this.maxFallSpeed = 800;
+
+        this.variantIndex = Math.floor(Math.random() * 4);
         this.attractorX = null; // New: Milling about target
     }
 
-    update(dt, islands, worldWidth, worldHeight, pigs, walls) {
-        this.vy += 500 * dt; 
-        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed; 
-        
+    update(dt, islands, worldWidth, worldHeight, pigs, walls, warState = 'BUILD') {
+        this.vy += 500 * dt;
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
+
         // --- NEW MILLING BEHAVIOR ---
         this.stateTimer -= dt;
         if (this.stateTimer <= 0) {
-            this.stateTimer = Math.random() * 3 + 2; 
-            
+            this.stateTimer = Math.random() * 3 + 2;
+
             let interestX = null;
-            
+
             if (this.homeIsland) {
-                 if (Math.random() < 0.5 && pigs) {
-                     const localPigs = pigs.filter(p => p.homeIsland === this.homeIsland);
-                     if (localPigs.length > 0) {
-                         const targetPig = localPigs[Math.floor(Math.random() * localPigs.length)];
-                         interestX = targetPig.x;
-                     }
-                 }
-                 
-                 if (interestX === null && this.homeIsland.hasTeepee && this.homeIsland.team === this.team) {
-                     interestX = this.homeIsland.x + 80;
-                 }
-                 
-                 if (interestX === null) {
-                     interestX = this.homeIsland.x + Math.random() * this.homeIsland.w;
-                 }
+                // REPAIR MODE during ATTACK
+                if (warState === 'ATTACK' && this.homeIsland.hasTeepee && Math.random() < 0.7) {
+                    interestX = this.homeIsland.x + 80; // Stand by tent
+                }
+                else if (Math.random() < 0.5 && pigs) {
+                    const localPigs = pigs.filter(p => p.homeIsland === this.homeIsland);
+                    if (localPigs.length > 0) {
+                        const targetPig = localPigs[Math.floor(Math.random() * localPigs.length)];
+                        interestX = targetPig.x;
+                    }
+                }
+
+                if (interestX === null && this.homeIsland.hasTeepee && this.homeIsland.team === this.team) {
+                    interestX = this.homeIsland.x + 80;
+                }
+
+                if (interestX === null) {
+                    interestX = this.homeIsland.x + Math.random() * this.homeIsland.w;
+                }
             }
-            
+
             this.attractorX = interestX;
-            
+
             if (this.attractorX !== null) {
                 if (Math.abs(this.x - this.attractorX) > 40) {
                     this.vx = (this.attractorX > this.x) ? 60 : -60;
                 } else {
-                    this.vx = (Math.random() - 0.5) * 40; 
+                    this.vx = (Math.random() - 0.5) * 40;
                 }
             } else {
                 this.vx = (Math.random() - 0.5) * 60;
@@ -905,10 +909,10 @@ export class Villager extends Entity {
         // --- WALL COLLISION (X-AXIS) ---
         if (walls) {
             for (let wall of walls) {
-                if (!wall.dead && 
-                    this.x + this.vx*dt < wall.x + wall.w && 
-                    this.x + this.w + this.vx*dt > wall.x &&
-                    this.y < wall.y + wall.h && 
+                if (!wall.dead &&
+                    this.x + this.vx * dt < wall.x + wall.w &&
+                    this.x + this.w + this.vx * dt > wall.x &&
+                    this.y < wall.y + wall.h &&
                     this.y + this.h > wall.y) {
                     this.vx *= -1; // Bounce
                 }
@@ -916,23 +920,23 @@ export class Villager extends Entity {
         }
 
         if (Math.abs(this.vx) > 10 && this.onGround && this.stateTimer < 1.0) {
-             if (Math.random() < 0.01) {
-                 this.vy = -300; 
-                 this.onGround = false;
-             }
+            if (Math.random() < 0.01) {
+                this.vy = -300;
+                this.onGround = false;
+            }
         }
 
         if (this.onGround && this.homeIsland) {
             // Apply Island Velocity (Sticky)
             this.x += this.homeIsland.vx * dt;
-            
+
             const lookAhead = this.vx > 0 ? 10 : -10;
-            const nextX = this.x + this.w/2 + lookAhead;
+            const nextX = this.x + this.w / 2 + lookAhead;
             if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                this.vx *= -1; 
+                this.vx *= -1;
             }
         }
-        
+
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
@@ -940,19 +944,19 @@ export class Villager extends Entity {
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                     const threshold = 10 + (this.vy * dt * 2);
-                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
-                         this.y = island.y - this.h;
-                         this.vy = 0;
-                         this.onGround = true;
-                         this.homeIsland = island; 
-                     }
+                    const threshold = 10 + (this.vy * dt * 2);
+                    if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                        this.y = island.y - this.h;
+                        this.vy = 0;
+                        this.onGround = true;
+                        this.homeIsland = island;
+                    }
                 }
             }
         }
-        
+
         // DEATH BOUNDARY (Prevents infinite falling loops)
-        if (this.y > worldHeight) this.dead = true; 
+        if (this.y > worldHeight) this.dead = true;
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
     }
@@ -961,7 +965,7 @@ export class Villager extends Entity {
         if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
-        
+
         const variants = (this.team === 'green') ? Assets.villagerGreen : Assets.villagerBlue;
         const img = variants[this.variantIndex];
         this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
@@ -971,8 +975,8 @@ export class Villager extends Entity {
 export class Warrior extends Villager {
     constructor(x, y, team) {
         super(x, y, team);
-        this.w = 32; this.h = 32; 
-        this.hp = 10; 
+        this.w = 32; this.h = 32;
+        this.hp = 10;
         this.attackCooldown = 0;
         this.role = Math.random() < 0.5 ? 'bodyguard' : 'raider';
         this.maxFallSpeed = 1000;
@@ -985,167 +989,171 @@ export class Warrior extends Villager {
         if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
         const screenX = Math.floor(this.x - camera.x);
         const screenY = Math.floor(this.y - camera.y);
-        
+
         const img = (this.team === 'green') ? Assets.warriorGreen : Assets.warriorBlue;
         this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
     }
 
-    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls) {
+    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls, warState = 'BUILD') {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
         this.attackCooldown -= dt;
 
-        this.roleTimer -= dt;
-        if (this.roleTimer <= 0) {
-            this.roleTimer = 10 + Math.random() * 10; 
-            
-            if (this.role === 'bodyguard' && Math.random() < 0.2) {
-                this.role = 'raider';
-            }
-        }
-
-        if (enemies.length < 5 && enemies.length > 0) {
-            this.role = 'raider';
-        }
-
+        // --- SEPARATION (Keep apart) ---
         if (allVillagers) {
             allVillagers.forEach(v => {
                 if (v !== this && !v.dead) {
                     const dx = this.x - v.x;
                     const dy = this.y - v.y;
-                    const distSq = dx*dx + dy*dy;
-                    if (distSq < 400) { 
+                    const distSq = dx * dx + dy * dy;
+                    if (distSq < 400) {
                         const dist = Math.sqrt(distSq);
-                        if (dist < 1) return; 
-                        
-                        const pushForce = (20 - dist) * 10; 
+                        if (dist < 1) return;
+                        const pushForce = (20 - dist) * 10;
                         const nx = dx / dist;
-                        
-                        this.vx += nx * pushForce * 5; 
-                        this.x += nx * 2; 
+                        this.vx += nx * pushForce * 5;
+                        this.x += nx * 2;
                     }
                 }
             });
         }
 
-        let target = null;
-        let bestScore = -Infinity;
+        // --- WAR STATE LOGIC ---
+        let moveTargetX = null;
+        let moveTargetY = null;
+        let targetEnemy = null;
+        let forcedAggro = false;
 
-        const detectionRange = (enemies.length < 5) ? 10000 : 600;
+        // 1. GATHER: Rally to Chief
+        if (warState === 'GATHER') {
+            if (friendlyLeader && !friendlyLeader.dead) {
+                moveTargetX = friendlyLeader.x + (Math.random() * 200 - 100);
+                moveTargetY = friendlyLeader.y;
+            }
+        }
+        // 2. ATTACK: Charge Enemy Chief
+        else if (warState === 'ATTACK') {
+            const enemyChief = enemies.find(e => e instanceof Player && e.team !== this.team);
+            if (enemyChief && !enemyChief.dead) {
+                moveTargetX = enemyChief.x;
+                moveTargetY = enemyChief.y;
+                forcedAggro = true;
+            }
+        }
+
+        // --- TARGETING ---
+        let bestScore = -Infinity;
+        const detectionRange = forcedAggro ? 800 : ((enemies.length < 5) ? 10000 : 600);
 
         enemies.forEach(e => {
             const dx = e.x - this.x;
             const dy = e.y - this.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            
-            if (dist < detectionRange) { 
-                let score = 10000 - dist; 
-                if (e instanceof Warrior) score += 500; 
-                else if (e instanceof Player) score += 300; 
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < detectionRange) {
+                let score = 10000 - dist;
+                if (e instanceof Warrior) score += 500;
+                else if (e instanceof Player) score += 1000;
                 if (score > bestScore) {
                     bestScore = score;
-                    target = e;
+                    targetEnemy = e;
                 }
             }
         });
 
-        if (target && (enemies.length < 5 || Math.sqrt((target.x-this.x)**2 + (target.y-this.y)**2) < 600)) {
-            this.vx *= 0.8; 
-            if (this.attackCooldown <= 0) {
-                this.attackCooldown = 1.5; 
-                const dx = target.x - this.x;
-                const dy = (target.y - 20) - this.y; 
-                let angle = Math.atan2(dy, dx);
-                const variance = (Math.random() - 0.5) * 0.25; 
-                angle += variance;
+        // ATTACK LOGIC
+        if (targetEnemy && (forcedAggro || enemies.length < 5 || Math.abs(targetEnemy.x - this.x) < 600)) {
+            if (Math.abs(targetEnemy.x - this.x) < 400) {
+                this.vx *= 0.8;
+            }
 
+            if (this.attackCooldown <= 0) {
+                this.attackCooldown = 1.5 + Math.random();
+                const dx = targetEnemy.x - this.x;
+                const dy = (targetEnemy.y - 20) - this.y;
+                let angle = Math.atan2(dy, dx);
+                const variance = (Math.random() - 0.5) * 0.25;
+                angle += variance;
                 spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
             }
-            
-            if (enemies.length < 5) {
-                 const dir = Math.sign(target.x - this.x);
-                 this.vx += dir * 50;
+
+            if (warState !== 'BUILD') {
+                // Keep moving towards global objective (moveTargetX)
+            } else {
+                const dir = Math.sign(targetEnemy.x - this.x);
+                this.vx += dir * 50;
             }
 
-        } else {
-            let moveTargetX = null;
-            let moveTargetY = null;
+        }
+
+        // MOVEMENT LOGIC (If not attacking/gathering heavily)
+        if (warState === 'BUILD' && moveTargetX === null) {
+            this.roleTimer -= dt;
+            if (this.roleTimer <= 0) {
+                this.roleTimer = 10 + Math.random() * 10;
+                if (this.role === 'bodyguard' && Math.random() < 0.2) this.role = 'raider';
+            }
 
             if (this.role === 'bodyguard' && friendlyLeader && !friendlyLeader.dead) {
-                moveTargetX = friendlyLeader.x;
+                moveTargetX = friendlyLeader.x + (Math.random() - 0.5) * 150;
                 moveTargetY = friendlyLeader.y;
-                if (Math.abs(this.x - moveTargetX) < 100) {
-                    moveTargetX = friendlyLeader.x + (Math.random() - 0.5) * 150;
-                }
             } else {
                 this.patrolTimer -= dt;
-                
-                if (enemies.length < 5 && enemies.length > 0) {
-                    let nearest = enemies[0];
-                    let minD = Infinity;
-                    enemies.forEach(e => {
-                        const d = Math.abs(e.x - this.x);
-                        if (d < minD) { minD = d; nearest = e; }
-                    });
-                    this.patrolTargetX = nearest.x;
-                    this.patrolTargetY = nearest.y;
-                } else if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
-                     this.patrolTimer = 8 + Math.random() * 12; 
-                     
-                     if (islands.length > 0) {
-                         const randomIsland = islands[Math.floor(Math.random() * islands.length)];
-                         this.patrolTargetX = randomIsland.x + (randomIsland.w / 2);
-                         this.patrolTargetY = randomIsland.y - 50; 
-                     } else {
-                         this.patrolTargetX = Math.random() * worldWidth;
-                         this.patrolTargetY = this.y;
-                     }
+                if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
+                    this.patrolTimer = 8 + Math.random() * 12;
+                    if (islands.length > 0) {
+                        const randomIsland = islands[Math.floor(Math.random() * islands.length)];
+                        this.patrolTargetX = randomIsland.x + (randomIsland.w / 2);
+                        this.patrolTargetY = randomIsland.y - 50;
+                    } else {
+                        this.patrolTargetX = Math.random() * worldWidth;
+                        this.patrolTargetY = this.y;
+                    }
                 }
-                
                 moveTargetX = this.patrolTargetX;
                 moveTargetY = this.patrolTargetY;
             }
+        }
 
-            if (moveTargetX !== null) {
-                let dx = moveTargetX - this.x;
-                
-                if (Math.abs(dx) > worldWidth / 2) {
-                    if (dx > 0) dx -= worldWidth; 
-                    else dx += worldWidth;        
-                }
-                
-                if (Math.abs(dx) > 20) {
-                     const dir = Math.sign(dx);
-                     this.vx = dir * 160; 
-                } else {
-                    this.vx = 0;
-                }
+        // EXECUTE MOVEMENT
+        if (moveTargetX !== null) {
+            let dx = moveTargetX - this.x;
 
-                if (this.onGround) {
-                    let wantJump = false;
-                    
-                    if (moveTargetY < this.y - 100 && Math.abs(this.x - moveTargetX) < 400) {
+            if (Math.abs(dx) > worldWidth / 2) {
+                if (dx > 0) dx -= worldWidth;
+                else dx += worldWidth;
+            }
+
+            if (Math.abs(dx) > 40) {
+                const dir = Math.sign(dx);
+                this.vx = dir * 160;
+            } else {
+                this.vx *= 0.9;
+            }
+
+            if (this.onGround) {
+                let wantJump = false;
+
+                if (this.homeIsland) {
+                    const lookAhead = this.vx > 0 ? 50 : -50;
+                    const nextX = this.x + lookAhead;
+                    if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
                         wantJump = true;
                     }
+                }
 
-                    if (!wantJump && this.homeIsland) {
-                        const lookAhead = this.vx > 0 ? 50 : -50;
-                        const nextX = this.x + lookAhead;
-                        if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                             wantJump = true;
-                        }
-                    }
+                if (moveTargetY < this.y - 100 && Math.abs(dx) < 400) wantJump = true;
+                if (warState === 'ATTACK' && Math.abs(dx) > 100) wantJump = true;
 
-                    if (wantJump) {
-                         this.vy = -700; 
-                         this.onGround = false;
-                    }
-                } else {
-                    if (Math.abs(this.x - moveTargetX) > 100 && this.vy > -100) {
-                         this.vy -= 1500 * dt;
-                         if (this.vy < -500) this.vy = -500; 
-                    }
+                if (wantJump) {
+                    this.vy = -700;
+                    this.onGround = false;
+                }
+            } else {
+                if (Math.abs(dx) > 100 && this.vy > -100) {
+                    this.vy -= 1500 * dt;
+                    if (this.vy < -500) this.vy = -500;
                 }
             }
         }
@@ -1153,12 +1161,12 @@ export class Warrior extends Villager {
         // --- WALL COLLISION (X-AXIS) ---
         if (walls) {
             for (let wall of walls) {
-                if (!wall.dead && 
-                    this.x + this.vx*dt < wall.x + wall.w && 
-                    this.x + this.w + this.vx*dt > wall.x &&
-                    this.y < wall.y + wall.h && 
+                if (!wall.dead &&
+                    this.x + this.vx * dt < wall.x + wall.w &&
+                    this.x + this.w + this.vx * dt > wall.x &&
+                    this.y < wall.y + wall.h &&
                     this.y + this.h > wall.y) {
-                    this.vx *= -1; // Bounce
+                    this.vx *= -1;
                 }
             }
         }
@@ -1170,14 +1178,14 @@ export class Warrior extends Villager {
         if (this.vy >= 0) {
             for (let island of islands) {
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                     const threshold = 10 + (this.vy * dt * 2);
-                     if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
-                         this.y = island.y - this.h;
-                         this.vy = 0;
-                         this.onGround = true;
-                         this.homeIsland = island;
-                         this.x += island.vx * dt; // Stick
-                     }
+                    const threshold = 10 + (this.vy * dt * 2);
+                    if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                        this.y = island.y - this.h;
+                        this.vy = 0;
+                        this.onGround = true;
+                        this.homeIsland = island;
+                        this.x += island.vx * dt;
+                    }
                 }
             }
         }
@@ -1190,14 +1198,14 @@ export class Warrior extends Villager {
 }
 
 export class Projectile extends Entity {
-    constructor(x, y, angle, team, damage) { 
-        super(x, y, 32, 10); 
+    constructor(x, y, angle, team, damage) {
+        super(x, y, 32, 10);
         this.team = team;
-        this.damage = damage; 
-        const speed = 600; 
+        this.damage = damage;
+        const speed = 600;
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
-        this.angle = angle; 
+        this.angle = angle;
         this.life = 3.0;
         this.trailTimer = 0;
     }
@@ -1207,14 +1215,14 @@ export class Projectile extends Entity {
         this.y += this.vy * dt;
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
-        
+
         // Wall Collision
         if (walls) {
             for (let wall of walls) {
-                if (!wall.dead && 
-                    this.x < wall.x + wall.w && 
+                if (!wall.dead &&
+                    this.x < wall.x + wall.w &&
                     this.x + this.w > wall.x &&
-                    this.y < wall.y + wall.h && 
+                    this.y < wall.y + wall.h &&
                     this.y + this.h > wall.y) {
                     this.dead = true;
                     wall.hp -= 20; // Projectiles hurt walls
@@ -1225,7 +1233,7 @@ export class Projectile extends Entity {
 
         this.trailTimer -= dt;
         if (this.trailTimer <= 0 && spawnParticleCallback) {
-            this.trailTimer = 0.05; 
+            this.trailTimer = 0.05;
             spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
         }
     }
