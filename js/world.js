@@ -5,14 +5,33 @@
 */
 
 export class Camera {
-    constructor(viewportWidth, viewportHeight, worldWidth, worldHeight) {
-        this.x = 0;
-        this.y = 0;
-        this.w = viewportWidth;
-        this.h = viewportHeight;
+    constructor(viewportWidth, viewportHeight, worldWidth, worldHeight, zoom = 1.0) {
+        this.zoom = zoom;
+        this.w = viewportWidth / zoom;
+        this.h = viewportHeight / zoom;
         this.worldW = worldWidth;
         this.worldH = worldHeight;
+        this.x = 0;
+        this.y = 0;
         this.shake = 0;
+    }
+
+    // Helper to get screen coordinates handling wrapping
+    getScreenRect(x, y, w, h) {
+        // 1. Center logic relative to camera center
+        const camCenterX = this.x + this.w / 2;
+        let dx = x - camCenterX;
+
+        // 2. Wrap via Shortest Path
+        const halfWorld = this.worldW / 2;
+        if (dx > halfWorld) dx -= this.worldW;
+        else if (dx < -halfWorld) dx += this.worldW;
+
+        // 3. Screen Position
+        const screenX = (this.w / 2) + dx;
+        const screenY = y - this.y;
+
+        return { x: screenX, y: screenY, onScreen: (screenX + w > 0 && screenX < this.w) };
     }
 
     follow(target, dt) {
@@ -21,18 +40,37 @@ export class Camera {
             if (this.shake < 0) this.shake = 0;
         }
 
-        // Smooth locking
+        // Target center
         let tx = target.x - this.w / 2;
         let ty = target.y - this.h / 2;
 
-        if (tx < 0) tx = 0;
-        if (tx + this.w > this.worldW) tx = this.worldW - this.w;
-        if (ty < 0) ty = 0;
+        // Unclamped Y (or clamped? User said "wrapping around play area", implying X. Y usually blocked by ground/sky).
+        // Let's keep Y clamped for now as it's a platformer with ground.
+        if (ty < -500) ty = -500; // Allow looking up high
         if (ty + this.h > this.worldH) ty = this.worldH - this.h;
 
-        // Lerp
-        this.x += (tx - this.x) * 5 * dt;
+        // X is INFINITE. We just follow. 
+        // Note: We need to handle the case where target wraps from 5000 to 0.
+        // But the target entity itself should probably manage its x to stay 0..5000.
+        // If camera is at 4900 and target goes to 100, target.x is 100.
+        // tx would be 100 - w/2. 
+        // We need smooth interpolation even across the wrap boundary.
+
+        // Complex Lerp Wrapping:
+        // Calculate shortest distance to target X
+        let dx = (target.x - this.w / 2) - this.x;
+        // Wrap dx
+        if (dx > this.worldW / 2) dx -= this.worldW;
+        if (dx < -this.worldW / 2) dx += this.worldW;
+
+        this.x += dx * 5 * dt;
         this.y += (ty - this.y) * 5 * dt;
+
+        // Normalize Camera X to keep it within bounds (optional, but good for math)
+        // Actually, for "infinite" feel without entity glitches, maybe safer to keep camera Unbounded?
+        // But Background parallax depends on camera.x. Let's modulus it.
+        while (this.x < 0) this.x += this.worldW;
+        while (this.x >= this.worldW) this.x -= this.worldW;
 
         if (this.shake > 0) {
             this.x += (Math.random() - 0.5) * this.shake * 10;
@@ -75,7 +113,7 @@ export class World {
     constructor(width, height) {
         this.width = width;
         this.height = height;
-        this.camera = new Camera(800, 600, width, height);
+        this.camera = new Camera(800, 600, width, height, 0.8);
 
         this.layers = [
             // Back: Sky Layer 1

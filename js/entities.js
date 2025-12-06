@@ -110,9 +110,10 @@ export class StoneWall extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
-        const screenX = this.x - camera.x;
-        const screenY = this.y - camera.y;
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
 
         ctx.fillStyle = '#696969';
         ctx.fillRect(screenX, screenY, this.w, this.h);
@@ -178,17 +179,23 @@ export class Fireball extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.x + 100 < camera.x || this.x > camera.x + camera.w + 100) return;
-        const screenX = this.x - camera.x;
-        const screenY = this.y - camera.y;
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen && !this.particles.length) return; // Keep drawing if particles exist? 
+        // Actually for fireball, main body is most important.
 
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
+
+        // Calculate shift for particles
+        const shiftX = rect.x - this.x;
+        const shiftY = rect.y - this.y;
+
         this.particles.forEach(p => {
             ctx.fillStyle = p.color;
             ctx.globalAlpha = p.life;
             ctx.beginPath();
-            ctx.arc(p.x - camera.x, p.y - camera.y, p.size, 0, Math.PI * 2);
+            // Wrap particles relative to fireball's wrapped position
+            ctx.arc(p.x + shiftX, p.y + shiftY, p.size, 0, Math.PI * 2);
             ctx.fill();
         });
         ctx.restore();
@@ -225,8 +232,10 @@ export class RainCloud extends Entity {
     }
 
     draw(ctx, camera) {
-        const screenX = this.x - camera.x;
-        const screenY = this.y - camera.y;
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = rect.x;
+        const screenY = rect.y;
 
         ctx.fillStyle = this.team === 'green' ? 'rgba(200, 200, 255, 0.4)' : 'rgba(100, 0, 100, 0.4)';
         ctx.beginPath();
@@ -238,9 +247,13 @@ export class RainCloud extends Entity {
         ctx.strokeStyle = '#87CEEB';
         ctx.lineWidth = 2;
         ctx.beginPath();
+
+        const shiftX = screenX - this.x;
+        const shiftY = screenY - this.y;
+
         this.drops.forEach(d => {
-            const dx = d.x - camera.x;
-            const dy = d.y - camera.y;
+            const dx = d.x + shiftX;
+            const dy = d.y + shiftY;
             ctx.moveTo(dx, dy);
             ctx.lineTo(dx, dy + 10);
         });
@@ -263,7 +276,10 @@ export class VisualEffect extends Entity {
 
     draw(ctx, camera) {
         if (this.type === 'lightning') {
-            const startX = this.x - camera.x;
+            const rect = camera.getScreenRect(this.x, this.y, 0, 0);
+            if (!rect.onScreen) return;
+
+            const startX = rect.x;
             const startY = 0;
             const endY = camera.h;
 
@@ -313,11 +329,11 @@ export class Leaf extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
-            this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
+        const rect = camera.getScreenRect(this.x, this.y, 32, 32);
+        if (!rect.onScreen) return;
 
-        const screenX = this.x - camera.x;
-        const screenY = this.y - camera.y;
+        const screenX = rect.x;
+        const screenY = rect.y;
 
         ctx.save();
         ctx.translate(screenX, screenY);
@@ -349,11 +365,11 @@ export class Snowflake {
     }
 
     draw(ctx, camera) {
-        if (this.x < camera.x - 50 || this.x > camera.x + camera.w + 50 ||
-            this.y < camera.y - 50 || this.y > camera.y + camera.h + 50) return;
+        const rect = camera.getScreenRect(this.x, this.y, this.size, this.size);
+        if (!rect.onScreen) return;
 
-        const screenX = this.x - camera.x;
-        const screenY = this.y - camera.y;
+        const screenX = rect.x;
+        const screenY = rect.y;
 
         ctx.fillStyle = 'white';
         ctx.globalAlpha = 0.8;
@@ -467,9 +483,11 @@ export class Pig extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
-        const screenX = Math.floor(this.x - camera.x);
-        const screenY = Math.floor(this.y - camera.y);
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
         this.drawSprite(ctx, Assets.pig, screenX, screenY, this.w, this.h);
     }
 }
@@ -651,8 +669,11 @@ export class Player extends Entity {
     draw(ctx, camera) {
         if (this.dead) return;
 
-        const screenX = Math.floor(this.x - camera.x);
-        const screenY = Math.floor(this.y - camera.y);
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
 
         if (this.team === 'green') {
             ctx.fillStyle = '#00ff00';
@@ -779,10 +800,11 @@ export class Island extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
 
-        const screenX = Math.floor(this.x - camera.x);
-        const screenY = Math.floor(this.y - camera.y);
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
 
         // 1. Tileset (Bottom)
         if (this.activeTileset.complete && this.activeTileset.naturalWidth > 0) {
@@ -962,9 +984,10 @@ export class Villager extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
-        const screenX = Math.floor(this.x - camera.x);
-        const screenY = Math.floor(this.y - camera.y);
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
 
         const variants = (this.team === 'green') ? Assets.villagerGreen : Assets.villagerBlue;
         const img = variants[this.variantIndex];
@@ -986,9 +1009,10 @@ export class Warrior extends Villager {
     }
 
     draw(ctx, camera) {
-        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
-        const screenX = Math.floor(this.x - camera.x);
-        const screenY = Math.floor(this.y - camera.y);
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
 
         const img = (this.team === 'green') ? Assets.warriorGreen : Assets.warriorBlue;
         this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
@@ -1239,9 +1263,11 @@ export class Projectile extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.x + this.w < camera.x || this.x > camera.x + camera.w) return;
-        const screenX = this.x - camera.x;
-        const screenY = this.y - camera.y;
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = rect.x;
+        const screenY = rect.y;
+
         ctx.save();
         ctx.translate(screenX, screenY);
         ctx.rotate(this.angle);

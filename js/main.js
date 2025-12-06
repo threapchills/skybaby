@@ -878,17 +878,19 @@ class Game {
         // --- SPECIAL UI DRAWING ---
         if (this.uiState === 'TITLE') {
             this.uiLayer.style.display = 'none';
-            if (this.titleImg.complete) {
+            if (this.titleImg && this.titleImg.complete) {
                 this.ctx.drawImage(this.titleImg, 0, 0, this.canvas.width, this.canvas.height);
             } else {
                 this.ctx.fillStyle = 'black'; this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.fillStyle = 'white'; this.ctx.font = '40px Arial'; this.ctx.textAlign = 'center';
+                this.ctx.fillText("SKYBABY: EPIC WAR", this.canvas.width / 2, this.canvas.height / 2);
             }
             return;
         }
 
         if (this.uiState === 'TOOLTIP') {
             this.uiLayer.style.display = 'none';
-            if (this.tooltipImg.complete) {
+            if (this.tooltipImg && this.tooltipImg.complete) {
                 this.ctx.drawImage(this.tooltipImg, 0, 0, this.canvas.width, this.canvas.height);
             }
             return;
@@ -900,7 +902,6 @@ class Game {
 
         const sunHeight = Math.sin(this.dayTime);
         let darkness = 0;
-
         if (sunHeight < 0.2) {
             darkness = Math.abs(sunHeight - 0.2) * 0.8;
             if (darkness > 0.8) darkness = 0.8;
@@ -908,10 +909,18 @@ class Game {
 
         this.ctx.save();
 
+        // IMPACT FRAME (Global Filter)
         const isImpactFrame = (this.impactFrameTimer > 0);
         this.canvas.style.filter = isImpactFrame ? 'invert(1) contrast(1.5)' : 'none';
+
+        // ZOOM SCALE
+        const z = this.world.camera.zoom;
+        this.ctx.scale(z, z);
+
+        // BACKGROUNDS
         this.world.draw(this.ctx, this.season);
 
+        // ENTITIES
         this.leaves.forEach(l => l.draw(this.ctx, this.world.camera));
         this.snowflakes.forEach(s => s.draw(this.ctx, this.world.camera));
         this.rainClouds.forEach(r => r.draw(this.ctx, this.world.camera));
@@ -936,29 +945,52 @@ class Game {
             this.ctx.lineWidth = 2;
             this.ctx.setLineDash([5, 5]);
             this.ctx.beginPath();
-            this.ctx.moveTo(this.player.x - this.world.camera.x + 20, this.player.y - this.world.camera.y + 20);
-            this.ctx.lineTo(this.hookTarget.x - this.world.camera.x, this.hookTarget.y - this.world.camera.y);
+            // Adjust hook draw for camera logic? 
+            // Player and target X are moving. 
+            // Simple approach: Use player screen pos and target screen pos.
+            // But Entity.draw handles wrapping internally now (or will).
+            // For hook, we might see lag if entities wrap. 
+            // Let's rely on standard coordinate space for the hook line (might look weird if wrapped).
+            const pRect = this.world.camera.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
+            const tRect = this.world.camera.getScreenRect(this.hookTarget.x, this.hookTarget.y, 0, 0);
+            this.ctx.moveTo(pRect.x, pRect.y);
+            this.ctx.lineTo(tRect.x, tRect.y);
             this.ctx.stroke();
             this.ctx.setLineDash([]);
         }
 
+        // FOREGROUND PARALLAX (Blurred Leaves)
+        this.ctx.save();
+        this.ctx.filter = 'blur(4px)';
+        // Draw leaves again, larger, or just same? Use same for now as "duplicate subtly"
+        this.leaves.forEach(l => {
+            // Draw slightly offset or just same position to create depth feel?
+            // Actually drawing the EXACT same leaf blurred on top looks like bloom.
+            // We want them "in front".
+            // Let's assume the loop above drew them at Z=0.
+            // To fake Z-depth, maybe move them slightly faster? No, they are entities.
+            // Just Re-drawing them blurred is what was asked ("duplicated subtly IN FRONT").
+            l.draw(this.ctx, this.world.camera);
+        });
         this.ctx.restore();
 
+        this.ctx.restore(); // END ZOOM
+
+        // DARKNESS OVERLAY (Unscaled)
         if (darkness > 0.05) {
             this.ctx.fillStyle = `rgba(0, 0, 30, ${darkness})`;
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
-        // Update DOM UI
-        this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp);
+        // IMPACT FLASH (Canvas fill fallback)
+        if (isImpactFrame && this.canvas.style.filter === 'none') {
+            // Fallback if CSS filter not supported/working
+            this.ctx.fillStyle = 'white';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        }
 
-        const mx = this.input.mouse.x;
-        const my = this.input.mouse.y;
-        this.ctx.strokeStyle = 'white';
-        this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
-        this.ctx.arc(mx, my, 10, 0, Math.PI * 2);
-        this.ctx.stroke();
+        // UI Updates
+        this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp);
 
         if (this.player.dead) {
             this.ctx.fillStyle = 'red';
@@ -966,6 +998,7 @@ class Game {
             this.ctx.fillText(`RESPAWNING IN ${Math.ceil(this.player.respawnTimer)}...`, this.canvas.width / 2 - 100, this.canvas.height / 2);
         }
     }
+
 }
 
 window.onload = () => { new Game(); };
