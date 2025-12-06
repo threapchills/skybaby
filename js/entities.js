@@ -328,6 +328,12 @@ export class Leaf extends Entity {
         }
 
         this.angle = Math.random() * Math.PI * 2;
+
+        // Random Hue for variety (Greenish/Yellowish/Reddish)
+        // Base is red? If base is red, hue-rotate can shift to orange/yellow.
+        // Assuming base asset is Red/Autumn:
+        // - Rotate -30 to +30 for Red-Orange-Yellowish
+        this.hueRotate = (Math.random() - 0.5) * 60;
     }
 
     update(dt) {
@@ -350,6 +356,7 @@ export class Leaf extends Entity {
         ctx.translate(screenX, screenY);
         ctx.rotate(this.angle);
         ctx.scale(this.scale, this.scale);
+        ctx.filter = `hue-rotate(${this.hueRotate}deg)`; // Apply Hue Shift
         this.drawSprite(ctx, Assets.leaf, -16, -16, 32, 32);
         ctx.restore();
     }
