@@ -230,6 +230,9 @@ class Game {
         this.pulseTime += dt * 5;
         this._updateWeather(dt);
 
+        // ISLAND DYNAMICS (Drift, Sticking, Separation)
+        this._updateIslandDynamics(dt);
+
         if (this.audio.initialized) {
             const heightRatio = 1.0 + (Math.max(0, 2000 - this.player.y) / 4000);
             this.audio.setLoopPitch('music', heightRatio);
@@ -242,6 +245,18 @@ class Game {
 
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
         this.world.update(this.player, dt);
+
+        this._handleSpellCasting(dt);
+        this._handleCombat(dt);
+        this._handleShooting(dt);
+
+        // Spawn/Respawn Logic
+        this.spawnTimer += dt;
+        if (this.spawnTimer > 10.0) {
+            this._spawnVillagers();
+            this._spawnPigs();
+            this.spawnTimer = 0;
+        }
 
         if (!this.enemyChief.dead) {
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls);
@@ -265,6 +280,8 @@ class Game {
             }
         }
 
+        const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
+
         if (this.enemyChief.dead) {
             if (blueCount > 0) {
                 this.enemyChief.respawnTimer -= dt;
@@ -279,6 +296,152 @@ class Game {
                 this.resources.showFloatingMessage("VICTORY! You have conquered the skies!", "#FFD700");
                 setTimeout(() => location.reload(), 4000);
             }
+        }
+    }
+
+    _checkSeasonChange() {
+        if (Math.random() < 0.3) {
+            this.season = (this.season === 'summer') ? 'winter' : 'summer';
+            const isWinter = (this.season === 'winter');
+            this.islands.forEach(island => island.setSeason(isWinter));
+            this.resources.showFloatingMessage(`SEASON CHANGED TO ${this.season.toUpperCase()}!`, "#FFFFFF");
+        }
+    }
+
+    _updateWeather(dt) {
+        this.weatherTimer -= dt;
+        if (this.weatherTimer <= 0) {
+            this.weatherTimer = 0.1; // Spawn rate
+            const cam = this.world.camera;
+            const x = cam.x + Math.random() * cam.w;
+            const y = cam.y - 100;
+
+            if (this.season === 'winter') {
+                this.snowflakes.push(new Snowflake(x, y, Math.random() > 0.5 ? 'fg' : 'bg'));
+            } else {
+                // Autumn Leaves
+                this.leaves.push(new Leaf(x, y, Math.random() > 0.5 ? 'fg' : 'bg'));
+            }
+        }
+
+        // Update Particles
+        this.particles.forEach(p => p.update(dt));
+        this.particles = this.particles.filter(p => p.life > 0);
+
+        this.visualEffects.forEach(e => e.update(dt));
+        this.visualEffects = this.visualEffects.filter(e => !e.dead);
+
+        this.leaves.forEach(l => l.update(dt, this.world.camera.y + this.world.camera.h));
+        this.leaves = this.leaves.filter(l => l.y < this.world.camera.y + this.world.camera.h + 100);
+
+        this.snowflakes.forEach(s => s.update(dt, this.world.camera.y + this.world.camera.h));
+        this.snowflakes = this.snowflakes.filter(s => s.y < this.world.camera.y + this.world.camera.h + 100);
+
+        this.rainClouds.forEach(r => r.update(dt));
+        this.rainClouds = this.rainClouds.filter(r => r.life > 0);
+    }
+
+    _updateIslandDynamics(dt) {
+        this.islands.forEach(island => {
+            // 1. DRIFT INIT & UPDATE
+            if (!island.driftTarget) {
+                island.driftTimer = 0;
+            }
+            island.driftTimer -= dt;
+            if (island.driftTimer <= 0) {
+                island.driftTarget = {
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 5
+                };
+                island.driftTimer = 5 + Math.random() * 10;
+            }
+
+            // Apply Drift Force (if not joined heavily)
+            if (!island.joinedWith) {
+                island.vx += (island.driftTarget.vx - island.vx) * 0.5 * dt;
+                island.vy += (island.driftTarget.vy - island.vy) * 0.5 * dt;
+            }
+
+            // Decrement join timer
+            if (island.joinedWith) {
+                island.joinTimer -= dt;
+                if (island.joinTimer <= 0) {
+                    island.joinedWith.joinedWith = null; // Unstick other
+                    island.joinedWith = null; // Unstick self
+                }
+            }
+
+            // 2. VERTICAL SEPARATION (Repulsion)
+            this.islands.forEach(other => {
+                if (island !== other) {
+                    this._resolveIslandCollisions(island, other, dt);
+                }
+            });
+
+            // Integrate
+            island.update(dt);
+        });
+    }
+
+    _resolveIslandCollisions(islandA, islandB, dt) {
+        // Simple AABB overlap check + separating force
+        if (islandA.x < islandB.x + islandB.w &&
+            islandA.x + islandA.w > islandB.x &&
+            islandA.y < islandB.y + islandB.h &&
+            islandA.y + islandA.h > islandB.y) {
+
+            const dy = (islandA.y + islandA.h / 2) - (islandB.y + islandB.h / 2);
+            const dist = Math.abs(dy);
+            const minced = (islandA.h + islandB.h) / 2;
+
+            // If stacking vertically
+            if (dist < minced * 0.9) {
+                const force = (minced - dist) * 10.0;
+                if (dy > 0) islandA.vy += force * dt;
+                else islandA.vy -= force * dt;
+            }
+
+            // Stick/Bounce Logic
+            const vRel = Math.sqrt((islandA.vx - islandB.vx) ** 2 + (islandA.vy - islandB.vy) ** 2);
+            if (vRel < 50 && !islandA.joinedWith && !islandB.joinedWith) {
+                // STICK
+                islandA.joinedWith = islandB;
+                islandB.joinedWith = islandA;
+                islandA.joinTimer = 10 + Math.random() * 10;
+                // Sync velocities
+                const avgVx = (islandA.vx + islandB.vx) / 2;
+                const avgVy = (islandA.vy + islandB.vy) / 2;
+                islandA.vx = avgVx; islandB.vx = avgVx;
+                islandA.vy = avgVy; islandB.vy = avgVy;
+            } else if (vRel > 100) {
+                // BOUNCE
+                islandA.vx *= -0.8;
+                islandB.vx *= -0.8;
+            }
+        }
+    }
+
+    _updateEnemyAI(dt) {
+        const dist = Math.sqrt((this.player.x - this.enemyChief.x) ** 2 + (this.player.y - this.enemyChief.y) ** 2);
+
+        // Mana Regen
+        this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 5 * dt);
+
+        if (dist < 800) {
+            // Shoot arrows if close
+            if (this.enemyChief.fireCooldown <= 0) {
+                this.enemyChief.fireCooldown = 1.5;
+                const angle = Math.atan2(this.player.y - this.enemyChief.y, this.player.x - this.enemyChief.x);
+                this.projectiles.push(new Projectile(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue', 15));
+            }
+        }
+
+        // Cast Spells
+        if (this.enemyChief.mana > 80 && Math.random() < 0.01) {
+            // Cast Fireball
+            this.enemyChief.mana -= 80;
+            const angle = Math.atan2(this.player.y - this.enemyChief.y, this.player.x - this.enemyChief.x);
+            this.fireballs.push(new Fireball(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue'));
         }
     }
 
