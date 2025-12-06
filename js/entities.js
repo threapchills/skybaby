@@ -640,13 +640,12 @@ export class Player extends Entity {
                 this.vy = this.jumpForce;
                 this.isGrounded = false;
                 if (audio) audio.play('jump', 0.4, 0.1);
-            } else if (this.team === 'green' && resources && resources.air > 0) {
-                // OLD AIR LOGIC: REMOVE AIR COST FOR FLYING since Air is now rare spell resource
-                // Just let them fly with a basic cooldown or small infinite resource?
-                // For now, let's say flying is free but weak to not break game loop
+            } else if (this.team === 'green') {
+                // RESTORED UNRESTRICTED FLIGHT
+                // Flying is now free and unrestricted as per user request
                 this.vy -= 1500 * dt;
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
-                // resources.air -= 80 * dt; // REMOVED COST
+                // Visual effect for flying? (Optional, maybe particles later)
             } else if (this.team === 'blue') {
                 this.vy -= 100 * dt;
             }

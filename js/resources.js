@@ -9,7 +9,7 @@ export class ResourceManager {
         // --- SPELL SYSTEM ---
         // 0: FIRE (Ball), 1: AIR (Hook), 2: EARTH (Quake), 3: WATER (Spawn)
         this.currentSpell = 0;
-        this.spellNames = ["FIREBALL", "AEROKINESIS", "EARTHQUAKE", "TIDE OF LIFE"];
+        this.spellNames = ["FIREBALL", "AEROKINESIS", "QUAKE", "TIDE OF LIFE"];
         this.spellColors = ["#FF4500", "#87CEEB", "#8B4513", "#00BFFF"];
 
         // RESOURCES - MANA OVERHAUL
