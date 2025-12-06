@@ -48,6 +48,8 @@ class Game {
 
         this.player = new Player(400, 200, 'green');
         this.enemyChief = new Player(5500, 200, 'blue');
+        this.enemyChief.mana = 100; // Enemy Mana Tracking
+        this.enemyChief.maxMana = 100;
 
         this.islands = [];
         this.villagers = [];
@@ -133,8 +135,8 @@ class Game {
     }
 
     _generateWorld() {
-        this.islands.push(new Island(200, 1000, 600, 100, 'green'));
-        this.islands.push(new Island(5200, 1000, 600, 100, 'blue'));
+        this.islands.push(new Island(200, 1000, 600, 60, 'green')); // Squashed
+        this.islands.push(new Island(5200, 1000, 600, 60, 'blue')); // Squashed
 
         const maxAttempts = 50;
 
@@ -144,7 +146,7 @@ class Game {
                 const rx = 800 + Math.random() * 4200;
                 const ry = 500 + Math.random() * 1500;
                 const rw = 300 + Math.random() * 500;
-                const rh = 100;
+                const rh = 60; // SQUASHED HEIGHT (was 100)
 
                 let overlaps = false;
                 for (let existing of this.islands) {
@@ -376,6 +378,12 @@ class Game {
     _updateEnemyAI(dt) {
         if (!this.enemyChief.dead) {
             this.enemyChief.aiSpellCooldown -= dt;
+
+            // Enemy Mana Regen (Cheating a bit? or fair?)
+            if (this.enemyChief.mana < this.enemyChief.maxMana) {
+                this.enemyChief.mana += 2 * dt; // Slow passive regen
+            }
+
             if (this.enemyChief.aiSpellCooldown <= 0) {
                 this.enemyChief.aiSpellCooldown = 6.0 + Math.random() * 8.0; // Cast every 6-14s
 
@@ -383,19 +391,25 @@ class Game {
                 const roll = Math.random();
 
                 // 1. Defensive Heal (Water) if HP < 40
-                if (this.enemyChief.hp < 40 && roll < 0.6) {
+                if (this.enemyChief.hp < 40 && roll < 0.6 && this.enemyChief.mana >= 80) {
+                    this.enemyChief.mana -= 80;
                     this.rainClouds.push(new RainCloud(this.enemyChief.x, this.enemyChief.y, 'blue'));
                     this._forceSpawnVillagers(this.enemyChief.x, this.enemyChief.y, 'blue');
                     this.audio.playSpell();
                 }
                 // 2. Aggressive Fireball if Player close
-                else if (distToPlayer < 700 && roll < 0.7) {
+                else if (distToPlayer < 700 && roll < 0.7 && this.enemyChief.mana >= 80) {
+                    this.enemyChief.mana -= 80;
                     const angle = Math.atan2(this.player.y - this.enemyChief.y, this.player.x - this.enemyChief.x);
                     this.fireballs.push(new Fireball(this.enemyChief.x, this.enemyChief.y, angle, 'blue'));
                     this.audio.playSpell();
                 }
-                // 3. Defensive Wall if being shot at
-                else if (this.enemyChief.hp > 80 && roll < 0.3) {
+                // 3. Defensive Wall (Earthquake?) -> Use Wall logic but maybe cost mana?
+                // Actually Earthquake is new spell 2. Let's give enemy access to Wall (simpler) or Quake?
+                // Plan said: "Add Mana tracking... ensure... does not spam".
+                // Let's stick to existing logic but gate with Mana.
+                else if (this.enemyChief.hp > 80 && roll < 0.3 && this.enemyChief.mana >= 40) {
+                    this.enemyChief.mana -= 40;
                     this.walls.push(new StoneWall(this.enemyChief.x + (Math.random() - 0.5) * 100, this.enemyChief.y));
                     this.audio.play('land', 0.8, 0.1);
                 }
@@ -476,6 +490,7 @@ class Game {
             const cy = this.world.camera.y;
             const px = cx + this.canvas.width + 50;
             const py = cy + Math.random() * this.canvas.height;
+            // Keeping wind particles as is, they are different from leaves/snow
             this.particles.push(new Particle(px, py, 'rgba(255,255,255,0.3)', -800 - Math.random() * 400, 2.0, 5, 'wind'));
         }
 
@@ -496,17 +511,27 @@ class Game {
             const ch = this.world.camera.h;
 
             if (this.season === 'summer') {
-                this.weatherTimer = 0.1;
+                this.weatherTimer = 0.08; // Slightly faster spawn for density
                 const buffer = 200;
+
+                // FG Leaf
                 const lx = cx - buffer + Math.random() * (cw + buffer * 2);
                 const ly = cy - 50 + Math.random() * (ch * 0.5);
-                this.leaves.push(new Leaf(lx, ly));
+                this.leaves.push(new Leaf(lx, ly, 'fg'));
+
+                // BG Leaf (More of them?)
+                this.leaves.push(new Leaf(lx, ly, 'bg'));
             } else {
                 this.weatherTimer = 0.05;
-                for (let i = 0; i < 3; i++) {
-                    const sx = cx - 100 + Math.random() * (cw + 200);
-                    const sy = cy - 50 + Math.random() * (ch * 0.5);
-                    this.snowflakes.push(new Snowflake(sx, sy));
+                const buffer = 200;
+                // FG Snow
+                const sx = cx - buffer + Math.random() * (cw + buffer * 2);
+                const sy = cy - 50 + Math.random() * (ch * 0.5);
+                this.snowflakes.push(new Snowflake(sx, sy, 'fg'));
+
+                // BG Snow (Extra density for BG)
+                for (let i = 0; i < 2; i++) {
+                    this.snowflakes.push(new Snowflake(sx + Math.random() * 200, sy, 'bg'));
                 }
             }
         }
@@ -556,27 +581,28 @@ class Game {
             const my = this.input.mouse.y + this.world.camera.y;
             const spell = this.resources.currentSpell;
 
-            // 1: AIR (Hookshot)
+            // 1: AIR (Hookshot) - Low Cost
             if (spell === 1) {
-                if (this.resources.spendAir(dt)) {
+                if (this.resources.spendMana(5)) { // Very Low Cost
                     this._doHookshotLogic(dt, mx, my);
                 }
             }
             // OTHER SPELLS
             else if (this.player.fireCooldown <= 0) {
-                // 0: FIREBALL
-                if (spell === 0 && this.resources.spendFire()) {
+                // 0: FIREBALL - High Cost
+                if (spell === 0 && this.resources.spendMana(80)) {
                     this.player.fireCooldown = 0.5;
                     const angle = Math.atan2(my - (this.player.y + 20), mx - (this.player.x + 20));
                     this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle, 'green'));
                     this.audio.playSpell();
                 }
-                // 2: EARTHQUAKE (REPLACED STONE WALL)
-                else if (spell === 2 && this.resources.spendEarth()) {
+                // 2: EARTHQUAKE - Medium Cost
+                else if (spell === 2 && this.resources.spendMana(40)) {
                     this.player.fireCooldown = 2.0;
                     this.world.camera.shake = 30;
                     this.audio.play('land', 0.8, 0.1);
 
+                    // ... (Code continues unchanged for earthquake logic)
                     this.villagers.forEach(v => {
                         if (v.team !== 'green' && !v.dead && v.onGround) {
                             v.vy = -1000;
@@ -601,8 +627,8 @@ class Game {
                         this.particles.push(new Particle(px, py, '#8B4513', 0, 1.0, 10 + Math.random() * 20));
                     }
                 }
-                // 3: WATER (SPAWN)
-                else if (spell === 3 && this.resources.spendWater()) {
+                // 3: WATER (SPAWN) - High Cost
+                else if (spell === 3 && this.resources.spendMana(80)) {
                     this.player.fireCooldown = 1.0;
                     this.rainClouds.push(new RainCloud(mx, my, 'green'));
                     this._forceSpawnVillagers(mx, my, 'green');
@@ -617,15 +643,30 @@ class Game {
     _doHookshotLogic(dt, mx, my) {
         let hit = false;
         for (let island of this.islands) {
-            if (mx >= island.x && mx <= island.x + island.w &&
-                my >= island.y && my <= island.y + island.h) {
+            // Expanded hit box for ease of use
+            if (mx >= island.x - 20 && mx <= island.x + island.w + 20 &&
+                my >= island.y - 20 && my <= island.y + island.h + 20) {
 
                 hit = true;
-                const dx = this.player.x - island.x;
-                const dy = this.player.y - island.y;
+                const dx = this.player.x - island.x; // Pull towards player X
+
+                // VERTICAL ALIGNMENT for Traversal
+                // Target Y: Player feet should match Island Top
+                const targetY = (this.player.y + this.player.h) - 10;
+                const dy = targetY - island.y;
+
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                island.vx += (dx / dist) * 1200 * dt;
-                island.vy += (dy / dist) * 1200 * dt;
+
+                // Stronger Pull
+                island.vx += (dx / (dist + 1)) * 1500 * dt;
+
+                // Vertical Snap Force (Stronger than horizontal to align)
+                if (Math.abs(dy) > 10) {
+                    island.vy += (dy * 5.0) * dt;
+                } else {
+                    island.vy *= 0.8; // Dampen if aligned
+                }
+
                 break;
             }
         }
@@ -700,7 +741,31 @@ class Game {
                     w.hp -= 200 * dt;
                     f.dead = true;
                     hit = true;
+                    this._spawnBlood(f.x, f.y, '#FF4500', 10); // Sparks
                     break;
+                }
+            }
+
+            // ISLAND COLLISION (New)
+            if (!hit) {
+                for (let island of this.islands) {
+                    if (f.x > island.x && f.x < island.x + island.w &&
+                        f.y > island.y && f.y < island.y + island.h) {
+
+                        f.dead = true;
+                        hit = true;
+                        this._spawnBlood(f.x, f.y, '#FF4500', 15); // Explosion
+                        this.audio.play('hit', 0.5, 0.1);
+
+                        // Scorch Tree if close
+                        island.trees.forEach(t => {
+                            if (Math.abs((island.x + t.x) - f.x) < 80) {
+                                t.burnt = true;
+                                t.burntTimer = 15.0;
+                            }
+                        });
+                        break;
+                    }
                 }
             }
 
@@ -920,11 +985,12 @@ class Game {
         // BACKGROUNDS
         this.world.draw(this.ctx, this.season);
 
-        // ENTITIES
-        this.leaves.forEach(l => l.draw(this.ctx, this.world.camera));
-        this.snowflakes.forEach(s => s.draw(this.ctx, this.world.camera));
-        this.rainClouds.forEach(r => r.draw(this.ctx, this.world.camera));
+        // WEATHER BEHIND (BG)
+        this.leaves.forEach(l => { if (l.layer === 'bg') l.draw(this.ctx, this.world.camera); });
+        this.snowflakes.forEach(s => { if (s.layer === 'bg') s.draw(this.ctx, this.world.camera); });
+        this.rainClouds.forEach(r => r.draw(this.ctx, this.world.camera)); // Clouds usually behind or mid? Let's keep them here.
 
+        // ENTITIES
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.walls.forEach(w => w.draw(this.ctx, this.world.camera));
 
@@ -959,20 +1025,9 @@ class Game {
             this.ctx.setLineDash([]);
         }
 
-        // FOREGROUND PARALLAX (Blurred Leaves)
-        this.ctx.save();
-        this.ctx.filter = 'blur(4px)';
-        // Draw leaves again, larger, or just same? Use same for now as "duplicate subtly"
-        this.leaves.forEach(l => {
-            // Draw slightly offset or just same position to create depth feel?
-            // Actually drawing the EXACT same leaf blurred on top looks like bloom.
-            // We want them "in front".
-            // Let's assume the loop above drew them at Z=0.
-            // To fake Z-depth, maybe move them slightly faster? No, they are entities.
-            // Just Re-drawing them blurred is what was asked ("duplicated subtly IN FRONT").
-            l.draw(this.ctx, this.world.camera);
-        });
-        this.ctx.restore();
+        // WEATHER FRONT (FG)
+        this.leaves.forEach(l => { if (l.layer !== 'bg') l.draw(this.ctx, this.world.camera); });
+        this.snowflakes.forEach(s => { if (s.layer !== 'bg') s.draw(this.ctx, this.world.camera); });
 
         this.ctx.restore(); // END ZOOM
 

@@ -310,14 +310,24 @@ export class VisualEffect extends Entity {
 // --- STANDARD ENTITIES ---
 
 export class Leaf extends Entity {
-    constructor(x, y) {
+    constructor(x, y, layer = 'fg') {
         super(x, y, 32, 32);
+        this.layer = layer; // 'fg' or 'bg'
         this.life = 5.0 + Math.random() * 5.0;
-        this.scale = 0.5 + Math.random() * 0.8;
+
+        if (this.layer === 'fg') {
+            this.scale = 1.0 + Math.random() * 0.5; // Larger
+            this.vx = 200 + Math.random() * 300; // Faster
+            this.vy = 50 + Math.random() * 100;
+            this.rotationSpeed = (Math.random() - 0.5) * 6.0;
+        } else {
+            this.scale = 0.4 + Math.random() * 0.4; // Smaller
+            this.vx = 50 + Math.random() * 100; // Slower
+            this.vy = 10 + Math.random() * 30;
+            this.rotationSpeed = (Math.random() - 0.5) * 2.0;
+        }
+
         this.angle = Math.random() * Math.PI * 2;
-        this.rotationSpeed = (Math.random() - 0.5) * 4.0;
-        this.vx = 100 + Math.random() * 200;
-        this.vy = 20 + Math.random() * 50;
     }
 
     update(dt) {
@@ -329,7 +339,8 @@ export class Leaf extends Entity {
     }
 
     draw(ctx, camera) {
-        const rect = camera.getScreenRect(this.x, this.y, 32, 32);
+        // Optimization: Don't draw if off-screen (already checked by some callers but good to have)
+        const rect = camera.getScreenRect(this.x, this.y, 32 * this.scale, 32 * this.scale);
         if (!rect.onScreen) return;
 
         const screenX = rect.x;
@@ -345,20 +356,30 @@ export class Leaf extends Entity {
 }
 
 export class Snowflake {
-    constructor(x, y) {
+    constructor(x, y, layer = 'fg') {
         this.x = x;
         this.y = y;
-        this.vx = -50 + Math.random() * 150;
-        this.vy = 150 + Math.random() * 150;
-        this.size = 2 + Math.random() * 3;
-        this.life = 4.0;
+        this.layer = layer;
+        this.life = 8.0;
         this.dead = false;
         this.sway = Math.random() * Math.PI;
+
+        if (this.layer === 'fg') {
+            this.size = 6 + Math.random() * 6; // Big blobs
+            this.vx = -100 + Math.random() * 200; // More wind variation
+            this.vy = 200 + Math.random() * 200; // Faster
+            this.swaySpeed = 3.0 + Math.random() * 4.0;
+        } else {
+            this.size = 2 + Math.random() * 3; // Small dots
+            this.vx = -20 + Math.random() * 40;
+            this.vy = 80 + Math.random() * 50; // Slower
+            this.swaySpeed = 1.0 + Math.random() * 2.0;
+        }
     }
 
     update(dt) {
-        this.sway += dt * 5;
-        this.x += (this.vx + Math.sin(this.sway) * 50) * dt;
+        this.sway += dt * this.swaySpeed;
+        this.x += (this.vx + Math.sin(this.sway) * (this.layer === 'fg' ? 80 : 20)) * dt;
         this.y += this.vy * dt;
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
@@ -372,9 +393,11 @@ export class Snowflake {
         const screenY = rect.y;
 
         ctx.fillStyle = 'white';
-        ctx.globalAlpha = 0.8;
-        ctx.fillRect(screenX, screenY, this.size, this.size);
-        ctx.globalAlpha = 1.0;
+        // Removed globalAlpha 0.8 to remove "blur" perception, distinct blobs requested
+        // But maybe slight transparency is okay? User said "white blob".
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, this.size / 2, 0, Math.PI * 2);
+        ctx.fill();
     }
 }
 
@@ -810,13 +833,17 @@ export class Island extends Entity {
         if (this.activeTileset.complete && this.activeTileset.naturalWidth > 0) {
             const sliceW = Math.floor(this.activeTileset.width / 3);
             const sliceH = this.activeTileset.height;
-            ctx.drawImage(this.activeTileset, 0, 0, sliceW, sliceH, screenX, screenY, sliceW, sliceH);
+
+            // SCALE HEIGHT to this.h
+            const drawH = this.h;
+
+            ctx.drawImage(this.activeTileset, 0, 0, sliceW, sliceH, screenX, screenY, sliceW, drawH);
             const rightX = screenX + this.w - sliceW;
             const middleWidth = rightX - (screenX + sliceW);
             if (middleWidth > 0) {
-                ctx.drawImage(this.activeTileset, sliceW, 0, sliceW, sliceH, screenX + sliceW, screenY, middleWidth + 2, sliceH);
+                ctx.drawImage(this.activeTileset, sliceW, 0, sliceW, sliceH, screenX + sliceW, screenY, middleWidth + 2, drawH);
             }
-            ctx.drawImage(this.activeTileset, sliceW * 2, 0, sliceW, sliceH, rightX, screenY, sliceW, sliceH);
+            ctx.drawImage(this.activeTileset, sliceW * 2, 0, sliceW, sliceH, rightX, screenY, sliceW, drawH);
         } else {
             ctx.fillStyle = this.team === 'green' ? '#2E8B57' : '#4682B4';
             ctx.fillRect(screenX, screenY, this.w, this.h);

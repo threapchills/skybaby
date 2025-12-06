@@ -229,39 +229,9 @@ canvas {
     transition: width 0.2s linear;
 }
 
-.air {
-    background: linear-gradient(90deg, #fff, #87CEEB);
-    box-shadow: 0 0 5px #87CEEB;
-}
-
-.water {
-    background: linear-gradient(90deg, #00BFFF, #1E90FF);
-    box-shadow: 0 0 5px #1E90FF;
-}
-
-.earth {
-    background: linear-gradient(90deg, #DEB887, #8B4513);
-    box-shadow: 0 0 5px #8B4513;
-}
-
-.fire-pips {
-    display: flex;
-    gap: 4px;
-}
-
-.pip {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #333;
-    border: 1px solid #555;
-}
-
-.pip.active {
-    background: #FF4500;
-    box-shadow: 0 0 8px #FF4500;
-    border-color: #FFD700;
-    transform: scale(1.1);
+.mana {
+    background: linear-gradient(90deg, #1E90FF, #00BFFF);
+    box-shadow: 0 0 10px #00BFFF;
 }
 
 /* SPELLS CONTAINER */

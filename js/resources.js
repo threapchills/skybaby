@@ -12,23 +12,11 @@ export class ResourceManager {
         this.spellNames = ["FIREBALL", "AEROKINESIS", "EARTHQUAKE", "TIDE OF LIFE"];
         this.spellColors = ["#FF4500", "#87CEEB", "#8B4513", "#00BFFF"];
 
-        // RESOURCES
-        this.earth = 50;
-        this.maxEarth = 200;
-        this.earthCost = 90; // TRIPLED
+        // RESOURCES - MANA OVERHAUL
+        this.mana = 100;
+        this.maxMana = 100;
 
-        this.air = 100;
-        this.maxAir = 100;
-        this.airCostPerSecond = 60; // INCREASED
-
-        this.water = 25;
-        this.maxWater = 100;
-        this.waterCost = 100; // DOUBLED
-
-        this.fire = 5;
-        this.maxFire = 10;
-        this.fireRegenTimer = 0;
-        this.universalRegenTimer = 0;
+        this.manaRegenTimer = 0;
 
         // UI ELEMENTS CACHE
         this.ui = {
@@ -38,10 +26,8 @@ export class ResourceManager {
             ePop: document.getElementById('e-pop'),
             eTents: document.getElementById('e-tents'),
             eHealth: document.getElementById('e-health'),
-            barAir: document.getElementById('bar-air'),
-            barWater: document.getElementById('bar-water'),
-            barEarth: document.getElementById('bar-earth'),
-            pipsFire: document.getElementById('pips-fire'),
+            barMana: document.getElementById('bar-mana'), // SINGLE BAR
+            msgArea: document.getElementById('message-area'),
             spells: [
                 document.getElementById('spell-0'),
                 document.getElementById('spell-1'),
@@ -49,19 +35,6 @@ export class ResourceManager {
                 document.getElementById('spell-3')
             ]
         };
-
-        // Init Fire Pips
-        if (this.ui.pipsFire) {
-            this.ui.pipsFire.innerHTML = '';
-            for (let i = 0; i < this.maxFire; i++) {
-                let p = document.createElement('div');
-                p.className = 'pip';
-                this.ui.pipsFire.appendChild(p);
-            }
-            this.domPips = Array.from(this.ui.pipsFire.children);
-        } else {
-            this.domPips = [];
-        }
     }
 
     cycleSpell(direction) {
@@ -90,89 +63,46 @@ export class ResourceManager {
 
     // --- REPLENISHMENT ---
     replenishAll() {
-        this.earth = this.maxEarth;
-        this.air = this.maxAir;
-        this.water = this.maxWater;
-        this.fire = this.maxFire;
+        this.mana = this.maxMana;
         console.log("🌟 MANA RUSH! Resources Replenished!");
-        this.showFloatingMessage("MANA RUSH!", "#FFD700");
+        this.showFloatingMessage("MANA SURGE!", "#FFD700");
     }
 
-    // New: Water from Blood (Kills) - DISABLED as per overhaul
+    // New: Water from Blood (Kills) - DISABLED
     addWater(amount) {
-        // this.water += amount;
-        // if (this.water > this.maxWater) this.water = this.maxWater;
+        // No-op
     }
 
     // --- SPENDING ---
 
-    spendEarth() {
-        if (this.earth >= this.earthCost) {
-            this.earth -= this.earthCost;
+    spendMana(amount) {
+        if (this.mana >= amount) {
+            this.mana -= amount;
             return true;
         }
+        this.showFloatingMessage("NOT ENOUGH MANA!", "#FF4500");
         return false;
     }
 
-    spendWater() {
-        if (this.water >= this.waterCost) {
-            this.water -= this.waterCost;
-            return true;
-        }
-        return false;
-    }
+    spendEarth() { return this.spendMana(90); } // Legacy wrapper if needed, but better to call spendMana directly
+    spendWater() { return this.spendMana(80); }
+    spendAir(dt) { return this.spendMana(5 * dt); } // Low cost per second? 
+    spendFire() { return this.spendMana(80); }
 
-    spendAir(dt) {
-        const cost = this.airCostPerSecond * dt;
-        if (this.air >= cost) {
-            this.air -= cost;
-            return true;
-        }
-        return false;
-    }
-
-    spendFire() {
-        if (this.fire > 0) {
-            this.fire--;
-            return true;
-        }
-        return false;
-    }
-
-    // UPDATED REGEN LOGIC: ONLY FIRE REGENS EVERYTHING, BUT SLOWLY
     update(dt, isGrounded, isMoving, isNearFire) {
+        // RECHARGE SLOWLY WHEN WAITING BY ANY CAMPFIRE
         if (isNearFire) {
-            this.universalRegenTimer += dt;
-
-            // SLOW REGEN: e.g. every 0.2s check
-            if (this.universalRegenTimer > 0.2) {
-                this.universalRegenTimer = 0;
-
-                // Increment small amounts
-                this.earth = Math.min(this.earth + 2, this.maxEarth);  // ~10 per second
-                this.air = Math.min(this.air + 2, this.maxAir);        // ~10 per second
-                this.water = Math.min(this.water + 1, this.maxWater);  // ~5 per second
-
-                // Fire is discrete, so use a separate timer or threshold?
-                // Let's just use a decimal accumulator or simple chance?
-                // Or just use a separate timer for Fire pips.
-            }
-
-            // Fire specific slow regen
-            this.fireRegenTimer += dt;
-            if (this.fireRegenTimer > 1.0) { // 1 pip per second
-                if (this.fire < this.maxFire) {
-                    this.fire++;
-                    this.fireRegenTimer = 0;
+            this.manaRegenTimer += dt;
+            if (this.manaRegenTimer > 0.1) {
+                this.manaRegenTimer = 0;
+                // Regen rate: ~10 per second
+                if (this.mana < this.maxMana) {
+                    this.mana = Math.min(this.mana + 1, this.maxMana);
                 }
             }
-
         } else {
-            this.universalRegenTimer = 0;
-            this.fireRegenTimer = 0;
+            this.manaRegenTimer = 0;
         }
-
-        // No other passive regen!
     }
 
     updateStats(gTents, gPop, bTents, bPop) {
@@ -199,17 +129,9 @@ export class ResourceManager {
         const ePct = Math.max(0, (enemyHp / enemyMaxHp) * 100);
         this.ui.eHealth.style.width = `${ePct}%`;
 
-        // Resource Bars
-        this.ui.barAir.style.width = `${(this.air / this.maxAir) * 100}%`;
-        this.ui.barWater.style.width = `${(this.water / this.maxWater) * 100}%`;
-        this.ui.barEarth.style.width = `${(this.earth / this.maxEarth) * 100}%`;
-
-        // Fire Pips
-        if (this.domPips) {
-            this.domPips.forEach((pip, i) => {
-                if (i < this.fire) pip.classList.add('active');
-                else pip.classList.remove('active');
-            });
+        // Resource Bars - SINGLE MANA BAR
+        if (this.ui.barMana) {
+            this.ui.barMana.style.width = `${(this.mana / this.maxMana) * 100}%`;
         }
     }
 
