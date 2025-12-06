@@ -1,6 +1,8 @@
 /* THE HEART OF THE GAME
-   Definitive V38.0: THE "TREE HEALING" UPDATE 🌳✨
-   - ADDED: Logic to set tree burn timer when hit by fireball.
+   Definitive V39.0: THE "EARTHQUAKE" UPDATE 🌍
+   - Restored full spell logic.
+   - Implemented Earthquake (Spell 2).
+   - Fixed file corruption.
 */
 
 import { InputHandler } from './input.js';
@@ -60,7 +62,7 @@ class Game {
         this.rainClouds = [];
 
         this.season = Math.random() > 0.5 ? 'summer' : 'winter';
-        console.log(`軸 Starting Season: ${this.season.toUpperCase()}`);
+        console.log(`SEASON START: ${this.season.toUpperCase()}`);
 
         this._generateWorld();
 
@@ -321,7 +323,6 @@ class Game {
         this.resources.updateStats(greenTents, greenPop, blueTents, bluePop);
 
         if (!this.player.dead) {
-            // FIX: DECREMENT COOLDOWN EVERY FRAME
             if (this.player.fireCooldown === undefined) this.player.fireCooldown = 0;
             if (this.player.fireCooldown > 0) this.player.fireCooldown -= dt;
 
@@ -385,7 +386,7 @@ class Game {
                     this.fireballs.push(new Fireball(this.enemyChief.x, this.enemyChief.y, angle, 'blue'));
                     this.audio.playSpell();
                 }
-                // 3. Defensive Wall if being shot at (Simplified: Random chance when high HP)
+                // 3. Defensive Wall if being shot at
                 else if (this.enemyChief.hp > 80 && roll < 0.3) {
                     this.walls.push(new StoneWall(this.enemyChief.x + (Math.random() - 0.5) * 100, this.enemyChief.y));
                     this.audio.play('land', 0.8, 0.1);
@@ -400,7 +401,7 @@ class Game {
 
         if (newSeason !== this.season) {
             this.season = newSeason;
-            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}! 笶ｸ条沚Ａ`);
+            console.log(`SEASON CHANGE: Now entering ${this.season.toUpperCase()}!`);
 
             const isWinter = (this.season === 'winter');
             this.islands.forEach(island => island.setSeason(isWinter));
@@ -517,21 +518,18 @@ class Game {
     }
 
     _handleSpellCasting(dt) {
-        // RIGHT CLICK = CAST SPELL
         if (this.input.mouse.rightDown) {
             const mx = this.input.mouse.x + this.world.camera.x;
             const my = this.input.mouse.y + this.world.camera.y;
             const spell = this.resources.currentSpell;
 
-            // 1: AIR (Hookshot) - Special case, needs continuous drain logic if held? 
-            // Previous implementations treated it as hold-to-drag. 
-            // We'll run it every frame if mouse is down.
+            // 1: AIR (Hookshot)
             if (spell === 1) {
                 if (this.resources.spendAir(dt)) {
                     this._doHookshotLogic(dt, mx, my);
                 }
             }
-            // OTHER SPELLS (Instant Cast)
+            // OTHER SPELLS
             else if (this.player.fireCooldown <= 0) {
                 // 0: FIREBALL
                 if (spell === 0 && this.resources.spendFire()) {
@@ -540,12 +538,35 @@ class Game {
                     this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle, 'green'));
                     this.audio.playSpell();
                 }
-                // 2: EARTH WALL
+                // 2: EARTHQUAKE (REPLACED STONE WALL)
                 else if (spell === 2 && this.resources.spendEarth()) {
-                    this.player.fireCooldown = 1.0;
-                    this.walls.push(new StoneWall(mx, my));
+                    this.player.fireCooldown = 2.0;
+                    this.world.camera.shake = 30;
                     this.audio.play('land', 0.8, 0.1);
-                    this.world.camera.shake = 5;
+
+                    this.villagers.forEach(v => {
+                        if (v.team !== 'green' && !v.dead && v.onGround) {
+                            v.vy = -1000;
+                            v.hp -= 50;
+                            this._spawnBlood(v.x, v.y, '#8B4513', 10);
+                            if (v.hp <= 0) {
+                                v.dead = true;
+                                this._spawnBlood(v.x, v.y);
+                            }
+                        }
+                    });
+
+                    if (!this.enemyChief.dead && this.enemyChief.isGrounded) {
+                        this.enemyChief.vy = -1000;
+                        this.enemyChief.hp -= 20;
+                        this._spawnBlood(this.enemyChief.x, this.enemyChief.y, '#cc0000', 20);
+                    }
+
+                    for (let k = 0; k < 20; k++) {
+                        const px = this.world.camera.x + Math.random() * this.world.camera.w;
+                        const py = this.world.camera.y + this.world.camera.h;
+                        this.particles.push(new Particle(px, py, '#8B4513', 0, 1.0, 10 + Math.random() * 20));
+                    }
                 }
                 // 3: WATER (SPAWN)
                 else if (spell === 3 && this.resources.spendWater()) {
@@ -622,9 +643,8 @@ class Game {
                         v.dead = true;
                         this._spawnBlood(v.x, v.y);
 
-                        // REFUEL WATER ON KILL (Only if green projectile kills enemy)
                         if (p.team === 'green') {
-                            this.resources.addWater(5); // 5 points per kill
+                            this.resources.addWater(5);
                         }
                     }
                 }
@@ -666,9 +686,8 @@ class Game {
                     v.dead = true;
                     this._spawnBlood(v.x, v.y, '#FF4500', 20);
 
-                    // REFUEL WATER ON KILL
                     if (f.team === 'green') {
-                        this.resources.addWater(5); // 5 points per kill
+                        this.resources.addWater(5);
                     }
                 }
             });
@@ -855,9 +874,6 @@ class Game {
         }
 
         this.ctx.save();
-        if (this.world.camera.shake > 0) {
-            // Camera shake handled in world.draw/camera.follow
-        }
 
         const isImpactFrame = (this.impactFrameTimer > 0);
         this.canvas.style.filter = isImpactFrame ? 'invert(1) contrast(1.5)' : 'none';

@@ -1,8 +1,3 @@
-/* THE SPIRIT LEDGER (Resource Manager)
-   Definitive V25: THE "SLOW BURN" UPDATE 🔥
-   - Fireball regen slowed down to 1 charge every 3 seconds.
-   - Water refuel confirmed at 5 per kill (20 kills to full).
-*/
 
 export class ResourceManager {
     constructor() {
@@ -12,27 +7,28 @@ export class ResourceManager {
         this.bluePop = 0;
 
         // --- SPELL SYSTEM ---
-        // 0: FIRE (Ball), 1: AIR (Hook), 2: EARTH (Wall), 3: WATER (Spawn)
+        // 0: FIRE (Ball), 1: AIR (Hook), 2: EARTH (Quake), 3: WATER (Spawn)
         this.currentSpell = 0;
-        this.spellNames = ["FIREBALL", "AEROKINESIS", "STONE WALL", "TIDE OF LIFE"];
+        this.spellNames = ["FIREBALL", "AEROKINESIS", "EARTHQUAKE", "TIDE OF LIFE"];
         this.spellColors = ["#FF4500", "#87CEEB", "#8B4513", "#00BFFF"];
 
         // RESOURCES
         this.earth = 50;
         this.maxEarth = 200;
-        this.earthCost = 30;
+        this.earthCost = 90; // TRIPLED
 
         this.air = 100;
         this.maxAir = 100;
-        this.airCostPerSecond = 40;
+        this.airCostPerSecond = 60; // INCREASED
 
         this.water = 25;
         this.maxWater = 100;
-        this.waterCost = 50;
+        this.waterCost = 100; // DOUBLED
 
         this.fire = 5;
         this.maxFire = 10;
         this.fireRegenTimer = 0;
+        this.universalRegenTimer = 0;
 
         // UI ELEMENTS CACHE
         this.ui = {
@@ -55,13 +51,17 @@ export class ResourceManager {
         };
 
         // Init Fire Pips
-        this.ui.pipsFire.innerHTML = '';
-        for (let i = 0; i < this.maxFire; i++) {
-            let p = document.createElement('div');
-            p.className = 'pip';
-            this.ui.pipsFire.appendChild(p);
+        if (this.ui.pipsFire) {
+            this.ui.pipsFire.innerHTML = '';
+            for (let i = 0; i < this.maxFire; i++) {
+                let p = document.createElement('div');
+                p.className = 'pip';
+                this.ui.pipsFire.appendChild(p);
+            }
+            this.domPips = Array.from(this.ui.pipsFire.children);
+        } else {
+            this.domPips = [];
         }
-        this.domPips = Array.from(this.ui.pipsFire.children);
     }
 
     cycleSpell(direction) {
@@ -79,9 +79,12 @@ export class ResourceManager {
     }
 
     updateSpellUI() {
+        if (!this.ui.spells) return;
         this.ui.spells.forEach((el, i) => {
-            if (i === this.currentSpell) el.classList.add('active');
-            else el.classList.remove('active');
+            if (el) {
+                if (i === this.currentSpell) el.classList.add('active');
+                else el.classList.remove('active');
+            }
         });
     }
 
@@ -95,10 +98,10 @@ export class ResourceManager {
         this.showFloatingMessage("MANA RUSH!", "#FFD700");
     }
 
-    // New: Water from Blood (Kills)
+    // New: Water from Blood (Kills) - DISABLED as per overhaul
     addWater(amount) {
-        this.water += amount;
-        if (this.water > this.maxWater) this.water = this.maxWater;
+        // this.water += amount;
+        // if (this.water > this.maxWater) this.water = this.maxWater;
     }
 
     // --- SPENDING ---
@@ -136,33 +139,40 @@ export class ResourceManager {
         return false;
     }
 
-    // UPDATED REGEN LOGIC
+    // UPDATED REGEN LOGIC: ONLY FIRE REGENS EVERYTHING, BUT SLOWLY
     update(dt, isGrounded, isMoving, isNearFire) {
-        // 2) Fire: Stand near fire to refuel
-        // Slowed down to 4.0s per charge!
-        if (isNearFire && this.fire < this.maxFire) {
-            this.fireRegenTimer += dt;
-            if (this.fireRegenTimer > 4.0) {
-                this.fire++;
-                this.fireRegenTimer = 0;
+        if (isNearFire) {
+            this.universalRegenTimer += dt;
+
+            // SLOW REGEN: e.g. every 0.2s check
+            if (this.universalRegenTimer > 0.2) {
+                this.universalRegenTimer = 0;
+
+                // Increment small amounts
+                this.earth = Math.min(this.earth + 2, this.maxEarth);  // ~10 per second
+                this.air = Math.min(this.air + 2, this.maxAir);        // ~10 per second
+                this.water = Math.min(this.water + 1, this.maxWater);  // ~5 per second
+
+                // Fire is discrete, so use a separate timer or threshold?
+                // Let's just use a decimal accumulator or simple chance?
+                // Or just use a separate timer for Fire pips.
             }
+
+            // Fire specific slow regen
+            this.fireRegenTimer += dt;
+            if (this.fireRegenTimer > 1.0) { // 1 pip per second
+                if (this.fire < this.maxFire) {
+                    this.fire++;
+                    this.fireRegenTimer = 0;
+                }
+            }
+
         } else {
+            this.universalRegenTimer = 0;
             this.fireRegenTimer = 0;
         }
 
-        // 3) Earth: Walk on ground to refuel
-        if (isGrounded && isMoving && this.earth < this.maxEarth) {
-            this.earth += 40 * dt;
-        }
-
-        // 4) Air: Fly/Fall to refuel
-        if (!isGrounded && this.air < this.maxAir) {
-            this.air += 30 * dt;
-        }
-
-        // Cap values just in case
-        if (this.earth > this.maxEarth) this.earth = this.maxEarth;
-        if (this.air > this.maxAir) this.air = this.maxAir;
+        // No other passive regen!
     }
 
     updateStats(gTents, gPop, bTents, bPop) {
@@ -174,6 +184,8 @@ export class ResourceManager {
 
     // NEW DOM-BASED UI UPDATE
     updateUI(playerHp, playerMaxHp, enemyHp, enemyMaxHp) {
+        if (!this.ui.pPop) return; // Safety check if UI not found
+
         // Update Stats
         this.ui.pPop.textContent = this.greenPop;
         this.ui.pTents.textContent = `Tents: ${this.greenTents}`;
@@ -193,21 +205,25 @@ export class ResourceManager {
         this.ui.barEarth.style.width = `${(this.earth / this.maxEarth) * 100}%`;
 
         // Fire Pips
-        this.domPips.forEach((pip, i) => {
-            if (i < this.fire) pip.classList.add('active');
-            else pip.classList.remove('active');
-        });
+        if (this.domPips) {
+            this.domPips.forEach((pip, i) => {
+                if (i < this.fire) pip.classList.add('active');
+                else pip.classList.remove('active');
+            });
+        }
     }
 
     showFloatingMessage(text, color) {
         const msg = document.getElementById('message-area');
-        msg.textContent = text;
-        msg.style.color = color;
-        msg.style.opacity = 1;
-        msg.style.transform = "scale(1.2)";
-        setTimeout(() => {
-            msg.style.opacity = 0;
-            msg.style.transform = "scale(1)";
-        }, 2000);
+        if (msg) {
+            msg.textContent = text;
+            msg.style.color = color;
+            msg.style.opacity = 1;
+            msg.style.transform = "scale(1.2)";
+            setTimeout(() => {
+                msg.style.opacity = 0;
+                msg.style.transform = "scale(1)";
+            }, 2000);
+        }
     }
 }
