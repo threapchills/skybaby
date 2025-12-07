@@ -194,23 +194,25 @@ class Game {
             let countW = 0;
             const validIslands = this.islands.filter(i => i.team === team || i.team === 'neutral');
 
-            while (countV < 3 || countW < 2) {
-                const island = validIslands[Math.floor(Math.random() * validIslands.length)];
-                if (!island) continue;
+            // Pick ONE Capital Island to guarantee density
+            const capital = validIslands[Math.floor(Math.random() * validIslands.length)];
 
-                const x = island.x + 50 + Math.random() * 100;
-                const y = island.y - 50;
+            if (capital) {
+                while (countV < 3 || countW < 2) {
+                    const x = capital.x + 50 + Math.random() * (capital.w - 100);
+                    const y = capital.y - 50;
 
-                if (countV < 3) {
-                    const v = new Villager(x, y, team);
-                    v.homeIsland = island;
-                    this.villagers.push(v);
-                    countV++;
-                } else if (countW < 2) {
-                    const w = new Warrior(x, y, team);
-                    w.homeIsland = island;
-                    this.villagers.push(w);
-                    countW++;
+                    if (countV < 3) {
+                        const v = new Villager(x, y, team);
+                        v.homeIsland = capital;
+                        this.villagers.push(v);
+                        countV++;
+                    } else if (countW < 2) {
+                        const w = new Warrior(x, y, team);
+                        w.homeIsland = capital;
+                        this.villagers.push(w);
+                        countW++;
+                    }
                 }
             }
         });
@@ -366,7 +368,7 @@ class Game {
             if (!v.dead) {
                 const island = this.islands.find(i =>
                     v.x >= i.x && v.x <= i.x + i.w &&
-                    v.y >= i.y - 100 && v.y <= i.y + i.h
+                    v.y >= i.y - 200 && v.y <= i.y + i.h
                 );
                 if (island) {
                     if (v.team === 'green') island.greenCount++;
@@ -379,7 +381,7 @@ class Game {
         this.islands.forEach(island => {
             ['green', 'blue'].forEach(team => {
                 const count = (team === 'green') ? island.greenCount : island.blueCount;
-                if (count > 7) {
+                if (count > 4) {
                     // Spawn totem if not present on this island for this team
                     const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 80)) < 200);
 
