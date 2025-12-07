@@ -366,7 +366,7 @@ class Game {
             if (!v.dead) {
                 const island = this.islands.find(i =>
                     v.x >= i.x && v.x <= i.x + i.w &&
-                    v.y >= i.y - 200 && v.y <= i.y + i.h
+                    v.y >= i.y - 1000 && v.y <= i.y + i.h
                 );
                 if (island) {
                     if (v.team === 'green') island.greenCount++;
