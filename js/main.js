@@ -314,8 +314,8 @@ class Game {
         // --- STATS & UI ---
         const greenCount = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
         const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
-        const greenTents = this.totems.filter(t => t.active && t.team === 'green').length;
-        const blueTents = this.totems.filter(t => t.active && t.team === 'blue').length;
+        const greenTents = this.islands.filter(i => i.hasTeepee && i.team === 'green').length;
+        const blueTents = this.islands.filter(i => i.hasTeepee && i.team === 'blue').length;
 
         this.resources.updateStats(greenTents, greenCount, blueTents, blueCount);
         this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp);
