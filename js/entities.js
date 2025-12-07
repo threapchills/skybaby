@@ -1221,183 +1221,183 @@ export class Projectile extends Entity {
     draw(ctx, camera) {
         const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
         if (!rect.onScreen) return;
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
+
+        const img = (this.team === 'green') ? Assets.warriorGreen : Assets.warriorBlue;
+        this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
+    }
+}
+
+export class Projectile extends Entity {
+    constructor(x, y, angle, team, damage) {
+        super(x, y, 32, 10);
+        this.team = team;
+        this.damage = damage;
+        const speed = 600;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.angle = angle;
+        this.life = 3.0;
+        this.trailTimer = 0;
+    }
+
+    update(dt, spawnParticleCallback, walls) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
+
+        // Wall Collision
+        if (walls) {
+            for (let wall of walls) {
+                if (!wall.dead &&
+                    this.x < wall.x + wall.w &&
+                    this.x + this.w > wall.x &&
+                    this.y < wall.y + wall.h &&
+                    this.y + this.h > wall.y) {
+                    this.dead = true;
+                    wall.hp -= 20; // Projectiles hurt walls
+                    spawnParticleCallback(this.x, this.y, 'gray');
+                }
+            }
+        }
+
+        this.trailTimer -= dt;
+        if (this.trailTimer <= 0 && spawnParticleCallback) {
+            this.trailTimer = 0.05;
+            spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
+        }
+    }
+
+    draw(ctx, camera) {
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
         const screenX = rect.x;
         const screenY = rect.y;
 
-        const distSq = dx * dx + dy * dy;
-        if (distSq < 400) {
-            const dist = Math.sqrt(distSq);
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        ctx.rotate(this.angle);
+        this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
+        ctx.restore();
+    }
+}
 
 
-            export class Projectile extends Entity {
-                constructor(x, y, angle, team, damage) {
-                    super(x, y, 32, 10);
-                    this.team = team;
-                    this.damage = damage;
-                    const speed = 600;
-                    this.vx = Math.cos(angle) * speed;
-                    this.vy = Math.sin(angle) * speed;
-                    this.angle = angle;
-                    this.life = 3.0;
-                    this.trailTimer = 0;
-                }
+export class Projectile extends Entity {
+    constructor(x, y, angle, team, damage) {
+        super(x, y, 32, 10);
+        this.team = team;
+        this.damage = damage;
+        const speed = 600;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.angle = angle;
+        this.life = 3.0;
+        this.trailTimer = 0;
+    }
 
-                update(dt, spawnParticleCallback, walls) {
-                    this.x += this.vx * dt;
-                    this.y += this.vy * dt;
-                    this.life -= dt;
-                    if (this.life <= 0) this.dead = true;
+    update(dt, spawnParticleCallback, walls) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
 
-                    // Wall Collision
-                    if (walls) {
-                        for (let wall of walls) {
-                            if (!wall.dead &&
-                                this.x < wall.x + wall.w &&
-                                this.x + this.w > wall.x &&
-                                this.y < wall.y + wall.h &&
-                                this.y + this.h > wall.y) {
-                                this.dead = true;
-                                wall.hp -= 20; // Projectiles hurt walls
-                                spawnParticleCallback(this.x, this.y, 'gray');
-                            }
-                        }
-                    }
-
-                    this.trailTimer -= dt;
-                    if (this.trailTimer <= 0 && spawnParticleCallback) {
-                        this.trailTimer = 0.05;
-                        spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
-                    }
-                }
-
-                draw(ctx, camera) {
-                    const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
-                    if (!rect.onScreen) return;
-                    const screenX = rect.x;
-                    const screenY = rect.y;
-
-                    ctx.save();
-                    ctx.translate(screenX, screenY);
-                    ctx.rotate(this.angle);
-                    this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
-                    ctx.restore();
+        // Wall Collision
+        if (walls) {
+            for (let wall of walls) {
+                if (!wall.dead &&
+                    this.x < wall.x + wall.w &&
+                    this.x + this.w > wall.x &&
+                    this.y < wall.y + wall.h &&
+                    this.y + this.h > wall.y) {
+                    this.dead = true;
+                    wall.hp -= 20; // Projectiles hurt walls
+                    spawnParticleCallback(this.x, this.y, 'gray');
                 }
             }
+        }
 
+        this.trailTimer -= dt;
+        if (this.trailTimer <= 0 && spawnParticleCallback) {
+            this.trailTimer = 0.05;
+            spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
+        }
+    }
 
-            export class Projectile extends Entity {
-                constructor(x, y, angle, team, damage) {
-                    super(x, y, 32, 10);
-                    this.team = team;
-                    this.damage = damage;
-                    const speed = 600;
-                    this.vx = Math.cos(angle) * speed;
-                    this.vy = Math.sin(angle) * speed;
-                    this.angle = angle;
-                    this.life = 3.0;
-                    this.trailTimer = 0;
-                }
+    draw(ctx, camera) {
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = rect.x;
+        const screenY = rect.y;
 
-                update(dt, spawnParticleCallback, walls) {
-                    this.x += this.vx * dt;
-                    this.y += this.vy * dt;
-                    this.life -= dt;
-                    if (this.life <= 0) this.dead = true;
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        ctx.rotate(this.angle);
+        this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
+        ctx.restore();
+    }
+}
 
-                    // Wall Collision
-                    if (walls) {
-                        for (let wall of walls) {
-                            if (!wall.dead &&
-                                this.x < wall.x + wall.w &&
-                                this.x + this.w > wall.x &&
-                                this.y < wall.y + wall.h &&
-                                this.y + this.h > wall.y) {
-                                this.dead = true;
-                                wall.hp -= 20; // Projectiles hurt walls
-                                spawnParticleCallback(this.x, this.y, 'gray');
-                            }
-                        }
+export class Totem {
+    constructor(x, y, team) {
+        this.x = x;
+        this.y = y;
+        this.team = team;
+        this.w = 40;
+        this.h = 80;
+        this.range = 300;
+        this.conversionRate = 5.0; // Seconds to convert
+        this.active = true;
+        this.hue = (team === 'green') ? 45 : 225; // Yellowish / Bluish
+    }
+
+    update(dt, villagers) {
+        if (!this.active) return;
+
+        // Find enemy units in range
+        villagers.forEach(v => {
+            if (v.team !== this.team && !v.dead) {
+                const dist = Math.sqrt((v.x - this.x) ** 2 + (v.y - this.y) ** 2);
+                if (dist < this.range) {
+                    // CONVERSION LOGIC
+                    if (!v.conversionTimer) v.conversionTimer = 0;
+                    v.conversionTimer += dt;
+
+                    // Visual feedback for conversion
+                    if (Math.random() < 0.1) {
+                        v.isBeingConverted = true;
                     }
 
-                    this.trailTimer -= dt;
-                    if (this.trailTimer <= 0 && spawnParticleCallback) {
-                        this.trailTimer = 0.05;
-                        spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
+                    if (v.conversionTimer > this.conversionRate) {
+                        v.team = this.team;
+                        v.conversionTimer = 0;
+                        v.isBeingConverted = false;
+                        // Todo: trigger conversion effect
                     }
-                }
-
-                draw(ctx, camera) {
-                    const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
-                    if (!rect.onScreen) return;
-                    const screenX = rect.x;
-                    const screenY = rect.y;
-
-                    ctx.save();
-                    ctx.translate(screenX, screenY);
-                    ctx.rotate(this.angle);
-                    this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
-                    ctx.restore();
+                } else {
+                    v.conversionTimer = 0;
+                    v.isBeingConverted = false;
                 }
             }
+        });
+    }
 
-            export class Totem {
-                constructor(x, y, team) {
-                    this.x = x;
-                    this.y = y;
-                    this.team = team;
-                    this.w = 40;
-                    this.h = 80;
-                    this.range = 300;
-                    this.conversionRate = 5.0; // Seconds to convert
-                    this.active = true;
-                    this.hue = (team === 'green') ? 45 : 225; // Yellowish / Bluish
-                }
+    draw(ctx) {
+        if (!this.active) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.filter = `hue-rotate(${this.hue}deg)`;
 
-                update(dt, villagers) {
-                    if (!this.active) return;
+        if (Assets.totem) {
+            ctx.drawImage(Assets.totem, -20, -80, 40, 80);
+        } else {
+            // Fallback
+            ctx.fillStyle = (this.team === 'green') ? '#AAFF00' : '#00AAFF';
+            ctx.fillRect(-10, -80, 20, 80);
+        }
 
-                    // Find enemy units in range
-                    villagers.forEach(v => {
-                        if (v.team !== this.team && !v.dead) {
-                            const dist = Math.sqrt((v.x - this.x) ** 2 + (v.y - this.y) ** 2);
-                            if (dist < this.range) {
-                                // CONVERSION LOGIC
-                                if (!v.conversionTimer) v.conversionTimer = 0;
-                                v.conversionTimer += dt;
-
-                                // Visual feedback for conversion
-                                if (Math.random() < 0.1) {
-                                    v.isBeingConverted = true;
-                                }
-
-                                if (v.conversionTimer > this.conversionRate) {
-                                    v.team = this.team;
-                                    v.conversionTimer = 0;
-                                    v.isBeingConverted = false;
-                                    // Todo: trigger conversion effect
-                                }
-                            } else {
-                                v.conversionTimer = 0;
-                                v.isBeingConverted = false;
-                            }
-                        }
-                    });
-                }
-
-                draw(ctx) {
-                    if (!this.active) return;
-                    ctx.save();
-                    ctx.translate(this.x, this.y);
-                    ctx.filter = `hue-rotate(${this.hue}deg)`;
-
-                    if (Assets.totem) {
-                        ctx.drawImage(Assets.totem, -20, -80, 40, 80);
-                    } else {
-                        // Fallback
-                        ctx.fillStyle = (this.team === 'green') ? '#AAFF00' : '#00AAFF';
-                        ctx.fillRect(-10, -80, 20, 80);
-                    }
-
-                    ctx.restore();
-                }
-            }
+        ctx.restore();
+    }
+}
