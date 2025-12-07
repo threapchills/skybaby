@@ -533,15 +533,24 @@ class Game {
 
 
     _checkCollisions(dt) {
-        // 1. MANA RECHARGE (Campfire/Teepee)
+        // 1. MANA RECHARGE (Campfire/Teepee) - ALL FIRES WORK FOR EVERYONE
         this.islands.forEach(island => {
-            if (island.hasTeepee && island.team === 'green') {
+            if (island.hasTeepee) {
                 const tx = island.x + island.w / 2;
                 const ty = island.y - 80;
-                const dist = Math.sqrt((this.player.x - tx) ** 2 + (this.player.y - ty) ** 2);
 
-                if (dist < 150) {
-                    this.resources.addMana(30 * dt); // Recharge rate
+                // Player Recharge
+                const pDist = Math.sqrt((this.player.x - tx) ** 2 + (this.player.y - ty) ** 2);
+                if (pDist < 150) {
+                    this.resources.addMana(30 * dt);
+                }
+
+                // Enemy Chief Recharge
+                if (!this.enemyChief.dead) {
+                    const eDist = Math.sqrt((this.enemyChief.x - tx) ** 2 + (this.enemyChief.y - ty) ** 2);
+                    if (eDist < 150) {
+                        this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 30 * dt);
+                    }
                 }
             }
         });

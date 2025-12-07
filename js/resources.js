@@ -68,6 +68,10 @@ export class ResourceManager {
         this.showFloatingMessage("MANA SURGE!", "#FFD700");
     }
 
+    addMana(amount) {
+        this.mana = Math.min(this.mana + amount, this.maxMana);
+    }
+
     // New: Water from Blood (Kills) - DISABLED
     addWater(amount) {
         // No-op
