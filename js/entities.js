@@ -1191,10 +1191,22 @@ export class Warrior extends Villager {
             this.vx *= 0.9; // Friction
         }
 
+        // FLYING LOGIC provided by user ("yes they can fly")
+        if (moveTargetY !== null) {
+            const dy = moveTargetY - this.y;
+            if (Math.abs(dy) > 50) {
+                const dirY = Math.sign(dy);
+                // Apply force to overcome gravity (gravity is ~500-800)
+                this.vy += dirY * 1500 * dt;
+            }
+        }
+
         // Limit Speed
         const maxSpeed = 350;
         if (this.vx > maxSpeed) this.vx = maxSpeed;
         if (this.vx < -maxSpeed) this.vx = -maxSpeed;
+        if (this.vy > maxSpeed) this.vy = maxSpeed;
+        if (this.vy < -maxSpeed) this.vy = -maxSpeed;
 
         // 2. Integration
         this.x += this.vx * dt;
