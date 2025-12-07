@@ -1048,6 +1048,7 @@ class Game {
         // ENTITIES
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.walls.forEach(w => w.draw(this.ctx, this.world.camera));
+        this.totems.forEach(t => t.draw(this.ctx, this.world.camera));
 
         this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
 
