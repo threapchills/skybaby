@@ -265,7 +265,7 @@ class Game {
 
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
         this.world.update(this.player, dt);
-        this._handleShooting(dt);
+        this._updateTotemLogic(dt);
 
         this._updateWeather(dt);
 
@@ -379,7 +379,7 @@ class Game {
         this.islands.forEach(island => {
             ['green', 'blue'].forEach(team => {
                 const count = (team === 'green') ? island.greenCount : island.blueCount;
-                if (count > 12) {
+                if (count > 7) {
                     // Spawn totem if not present on this island for this team
                     const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 80)) < 200);
 
