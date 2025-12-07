@@ -1352,13 +1352,22 @@ export class Totem {
         });
     }
 
-    draw(ctx) {
+    draw(ctx, cam) {
         if (!this.active) return;
         ctx.save();
-        ctx.translate(this.x, this.y);
+        let drawX = this.x;
+        let drawY = this.y;
+
+        // Apply Camera Offset (if provided)
+        if (cam) {
+            drawX -= cam.x;
+            drawY -= cam.y;
+        }
+
+        ctx.translate(drawX, drawY);
         ctx.filter = `hue-rotate(${this.hue}deg)`;
 
-        if (Assets.totem) {
+        if (Assets.totem && Assets.totem.complete && Assets.totem.naturalWidth !== 0) {
             ctx.drawImage(Assets.totem, -20, -80, 40, 80);
         } else {
             // Fallback
