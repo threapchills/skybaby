@@ -1,8 +1,7 @@
 /* THE CAST OF CHARACTERS (Entities)
-   Definitive V35.0: THE "GRAVITY KILLS" UPDATE 💀
-   - FIXED: Villagers/Warriors now die if they fall off the world (preventing sky-loops).
-   - UPDATED: Trees now heal from burns after 10 seconds.
-   - UPDATED: Island class handles tree regeneration.
+   Definitive V36.0: THE "TOTEM POLES" UPDATE 🪵
+   - Fixed duplicate Projectile class definition.
+   - Added Totem class for island conversion.
 */
 
 // --- GLOBAL ASSET LOADER ---
