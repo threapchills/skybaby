@@ -565,9 +565,11 @@ export class Player extends Entity {
             }
         }
 
+        // Global Cooldowns
+        this.fireCooldown -= dt;
+
         if (this.team === 'blue' && enemy) {
             // Standard Arrow Shooting (Legacy)
-            this.fireCooldown -= dt;
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
             const dist = Math.sqrt(dx * dx + dy * dy);

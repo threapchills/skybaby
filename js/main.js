@@ -266,6 +266,24 @@ class Game {
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
         this.world.update(this.player, dt);
 
+        this._updateWeather(dt);
+
+        // Update Villagers (and Warriors)
+        this.villagers.forEach(v => {
+            if (!v.dead) {
+                // Pass all necessary context for AI
+                v.update(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
+                    (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
+                    this.worldWidth, this.worldHeight, this.audio,
+                    (v.team === 'green' ? this.player : this.enemyChief),
+                    this.villagers
+                );
+            }
+        });
+
+        // Update Pigs
+        this.pigs.forEach(p => p.update(dt, this.islands, this.worldWidth, this.worldHeight));
+
         this._handleSpellCasting(dt);
         this._handleCombat(dt);
         this._handleShooting(dt);
@@ -464,7 +482,7 @@ class Game {
             });
 
             // Integrate
-            island.update(dt);
+            island.update(dt, this.player, this.enemyChief, this.audio);
         });
     }
 
