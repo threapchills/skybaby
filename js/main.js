@@ -291,6 +291,7 @@ class Game {
         this.pigs.forEach(p => p.update(dt, this.islands, this.worldWidth, this.worldHeight));
 
         this._handleSpellCasting(dt);
+        this._checkCollisions(dt);
         this._handleCombat(dt);
         this._handleShooting(dt);
 
@@ -528,6 +529,35 @@ class Game {
                 islandB.vx *= -0.8;
             }
         }
+    }
+
+
+    _checkCollisions(dt) {
+        // 1. MANA RECHARGE (Campfire/Teepee)
+        this.islands.forEach(island => {
+            if (island.hasTeepee && island.team === 'green') {
+                const tx = island.x + island.w / 2;
+                const ty = island.y - 80;
+                const dist = Math.sqrt((this.player.x - tx) ** 2 + (this.player.y - ty) ** 2);
+
+                if (dist < 150) {
+                    this.resources.addMana(30 * dt); // Recharge rate
+                }
+            }
+        });
+
+        // 2. EAT PIGS (Health)
+        this.pigs.forEach(p => {
+            if (!p.dead) {
+                const dist = Math.sqrt((this.player.x - p.x) ** 2 + (this.player.y - p.y) ** 2);
+                if (dist < 50) {
+                    p.dead = true;
+                    this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
+                    this.audio.play('hit', 1.0, 1.5); // High pitch hit as 'eat' sound
+                    this._spawnBlood(p.x, p.y, '#FFC0CB', 10); // Pink particles
+                }
+            }
+        });
     }
 
     _updateEnemyAI(dt) {
