@@ -638,11 +638,11 @@ class Game {
             const my = this.input.mouse.y + this.world.camera.y;
             const spell = this.resources.currentSpell;
 
-            // 1: AIR (Hookshot) - Low Cost
+            // 1: AIR (Hookshot) - Continuous Cost
             if (spell === 1) {
-                if (this.resources.spendMana(5)) { // Very Low Cost
+                if (this.resources.spendAir(dt)) {
                     this._doHookshotLogic(dt, mx, my);
-                    if (Math.random() < 0.1) this.audio.play('air', 0.5); // Loop-like effect
+                    if (Math.random() < 0.1) this.audio.play('air', 0.5);
                 }
             }
             // OTHER SPELLS
