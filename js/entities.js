@@ -1175,6 +1175,66 @@ export class Warrior extends Villager {
                 moveTargetY = this.patrolTargetY;
             }
         }
+
+        // --- PHYSICS & MOVEMENT APPLICATION ---
+
+        // 1. Move towards Target
+        if (moveTargetX !== null) {
+            const dx = moveTargetX - this.x;
+            if (Math.abs(dx) > 10) {
+                const dir = Math.sign(dx);
+                this.vx += dir * 1500 * dt; // Acceleration
+            } else {
+                this.vx *= 0.9;
+            }
+        } else {
+            this.vx *= 0.9; // Friction
+        }
+
+        // Limit Speed
+        const maxSpeed = 350;
+        if (this.vx > maxSpeed) this.vx = maxSpeed;
+        if (this.vx < -maxSpeed) this.vx = -maxSpeed;
+
+        // 2. Integration
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        // 3. Collision / Landing
+        this.onGround = false;
+        if (this.vy >= 0) {
+            for (let island of islands) {
+                if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                    const threshold = 10 + (this.vy * dt * 2);
+                    if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                        this.y = island.y - this.h;
+                        this.vy = 0;
+                        this.onGround = true;
+                        this.homeIsland = island;
+                        this.x += island.vx * dt; // Stick
+                    }
+                }
+            }
+        }
+
+        // 4. AI Jumps
+        if (this.onGround) {
+            // Random jump to traverse or play
+            if (Math.random() < 0.005) {
+                this.vy = -500;
+                this.onGround = false;
+            }
+            // Jump Gap if chasing
+            if (moveTargetX !== null && Math.abs(moveTargetX - this.x) > 100 && Math.random() < 0.02) {
+                this.vy = -500;
+                this.onGround = false;
+            }
+        }
+
+        // 5. World Wrap
+        if (this.y > worldHeight) this.dead = true;
+        if (this.x > worldWidth) this.x = 0;
+        if (this.x < 0) this.x = worldWidth;
     }
 }
 
