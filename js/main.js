@@ -361,16 +361,25 @@ class Game {
         // Reset island counts
         this.islands.forEach(i => { i.greenCount = 0; i.blueCount = 0; });
 
-        // Count villagers per island (Spatial check)
+        // Count villagers per island (Robust Census)
         this.villagers.forEach(v => {
             if (!v.dead) {
-                const island = this.islands.find(i =>
-                    v.x >= i.x && v.x <= i.x + i.w &&
-                    v.y >= i.y - 1000 && v.y <= i.y + i.h
-                );
-                if (island) {
-                    if (v.team === 'green') island.greenCount++;
-                    if (v.team === 'blue') island.blueCount++;
+                // 1. Primary: Check Home Island (Persists during flight/jumps)
+                if (v.homeIsland && this.islands.includes(v.homeIsland)) {
+                    if (v.team === 'green') v.homeIsland.greenCount++;
+                    if (v.team === 'blue') v.homeIsland.blueCount++;
+                }
+                // 2. Fallback: Spatial Check (If homeless)
+                else {
+                    const island = this.islands.find(i =>
+                        v.x >= i.x && v.x <= i.x + i.w &&
+                        v.y >= i.y - 1000 && v.y <= i.y + i.h
+                    );
+                    if (island) {
+                        if (v.team === 'green') island.greenCount++;
+                        if (v.team === 'blue') island.blueCount++;
+                        v.homeIsland = island; // Adopt island
+                    }
                 }
             }
         });
@@ -379,7 +388,7 @@ class Game {
         this.islands.forEach(island => {
             ['green', 'blue'].forEach(team => {
                 const count = (team === 'green') ? island.greenCount : island.blueCount;
-                if (count > 7) {
+                if (count >= 7) {
                     // Spawn totem if not present on this island for this team
                     const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 80)) < 200);
 
