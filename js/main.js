@@ -654,7 +654,7 @@ class Game {
             if (spell === 1) {
                 if (this.resources.spendAir(dt)) {
                     this._doHookshotLogic(dt, mx, my);
-                    if (Math.random() < 0.1) this.audio.play('air', 0.5);
+                    if (Math.random() < 0.1) this.audio.play('air', 0.12);
                 }
             }
             // OTHER SPELLS
@@ -664,13 +664,13 @@ class Game {
                     this.player.fireCooldown = 0.5;
                     const angle = Math.atan2(my - (this.player.y + 20), mx - (this.player.x + 20));
                     this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle, 'green'));
-                    this.audio.play('fire');
+                    this.audio.play('fire', 0.25);
                 }
                 // 2: EARTHQUAKE - Medium Cost
                 else if (spell === 2 && this.resources.spendMana(40)) {
                     this.player.fireCooldown = 2.0;
                     this.world.camera.shake = 30;
-                    this.audio.play('earth', 0.8);
+                    this.audio.play('earth', 0.2);
 
                     // ... (Code continues unchanged for earthquake logic)
                     this.villagers.forEach(v => {
@@ -702,7 +702,7 @@ class Game {
                     this.player.fireCooldown = 1.0;
                     this.rainClouds.push(new RainCloud(mx, my, 'green'));
                     this._forceSpawnVillagers(mx, my, 'green');
-                    this.audio.play('water');
+                    this.audio.play('water', 0.25);
                 }
             }
         } else {
@@ -1048,6 +1048,7 @@ class Game {
         // ENTITIES
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.walls.forEach(w => w.draw(this.ctx, this.world.camera));
+        this.totems.forEach(t => t.draw(this.ctx, this.world.camera));
         this.totems.forEach(t => t.draw(this.ctx, this.world.camera));
 
         this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
