@@ -265,6 +265,7 @@ class Game {
 
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
         this.world.update(this.player, dt);
+        this._handleShooting(dt);
 
         this._updateWeather(dt);
 
@@ -784,21 +785,6 @@ class Game {
             if (f.dead) this.fireballs.splice(i, 1);
         }
 
-        this.villagers.forEach(v => {
-            if (v instanceof Warrior) {
-                const enemies = this.villagers.filter(e => e.team !== v.team && !e.dead);
-                if (v.team === 'green' && !this.enemyChief.dead) enemies.push(this.enemyChief);
-                if (v.team === 'blue' && !this.player.dead) enemies.push(this.player);
-
-                const friendlyLeader = (v.team === 'green') ? this.player : this.enemyChief;
-
-                v.update(dt, this.islands, enemies, (x, y, angle, team, damage) => {
-                    this.projectiles.push(new Projectile(x, y, angle, team, damage));
-                }, this.worldWidth, this.worldHeight, this.audio, friendlyLeader, this.villagers, this.walls, this.warState);
-            } else {
-                v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls, this.warState);
-            }
-        });
         this.villagers = this.villagers.filter(v => !v.dead);
     }
 
