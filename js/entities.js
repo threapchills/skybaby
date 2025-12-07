@@ -1489,4 +1489,3 @@ export class Totem {
         ctx.restore();
     }
 }
-```
