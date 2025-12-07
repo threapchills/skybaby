@@ -388,7 +388,7 @@ class Game {
         this.islands.forEach(island => {
             ['green', 'blue'].forEach(team => {
                 const count = (team === 'green') ? island.greenCount : island.blueCount;
-                if (count >= 7) {
+                if (count > 10) {
                     // Spawn totem if not present on this island for this team
                     const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 80)) < 200);
 
