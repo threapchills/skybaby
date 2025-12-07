@@ -273,7 +273,7 @@ class Game {
             if (!v.dead) {
                 if (v instanceof Warrior) {
                     // Warrior needs combat context
-                    v.update(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
+                    v.updateLogic(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
                         (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
                         this.worldWidth, this.worldHeight, this.audio,
                         (v.team === 'green' ? this.player : this.enemyChief),

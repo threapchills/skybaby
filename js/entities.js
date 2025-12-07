@@ -1054,7 +1054,7 @@ export class Warrior extends Villager {
         this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
     }
 
-    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls, warState = 'BUILD') {
+    updateLogic(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls, warState = 'BUILD') {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
 
