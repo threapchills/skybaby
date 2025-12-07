@@ -361,28 +361,28 @@ class Game {
         // Reset island counts
         this.islands.forEach(i => { i.greenCount = 0; i.blueCount = 0; });
 
-        // Count villagers per island (Robust Census)
+        // Count villagers per island (Dynamic Migration Census)
         this.villagers.forEach(v => {
             if (!v.dead) {
-                // 1. Primary: Check Home Island (Persists during flight/jumps)
+                // 1. Check where they actually ARE (Migration Check)
+                const currentIsland = this.islands.find(i =>
+                    v.x >= i.x && v.x <= i.x + i.w &&
+                    v.y >= i.y - 120 && v.y <= i.y + i.h // Tight bounds for landing
+                );
+
+                if (currentIsland) {
+                    v.homeIsland = currentIsland; // Welcome to your new home
+                }
+
+                // 2. Count them for their Home (whether there or flying above)
                 if (v.homeIsland && this.islands.includes(v.homeIsland)) {
                     if (v.team === 'green') v.homeIsland.greenCount++;
                     if (v.team === 'blue') v.homeIsland.blueCount++;
                 }
-                // 2. Fallback: Spatial Check (If homeless)
-                else {
-                    const island = this.islands.find(i =>
-                        v.x >= i.x && v.x <= i.x + i.w &&
-                        v.y >= i.y - 1000 && v.y <= i.y + i.h
-                    );
-                    if (island) {
-                        if (v.team === 'green') island.greenCount++;
-                        if (v.team === 'blue') island.blueCount++;
-                        v.homeIsland = island; // Adopt island
-                    }
-                }
             }
         });
+
+
 
         // 1. Spawn Logic
         this.islands.forEach(island => {
