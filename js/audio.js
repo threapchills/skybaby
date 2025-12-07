@@ -17,9 +17,13 @@ export class AudioManager {
             'music': 'assets/sounds/music.ogg',
             'teepee': 'assets/sounds/teepee.ogg',
             'death': 'assets/sounds/death.ogg',
-            'munch': 'assets/sounds/munch.ogg'
+            'munch': 'assets/sounds/munch.ogg',
+            'fire': 'assets/sounds/spell1.wav',
+            'water': 'assets/sounds/spell2.wav',
+            'earth': 'assets/sounds/spell3.wav',
+            'air': 'assets/sounds/spell4.wav'
         };
-        
+
         this.loops = {};
         this.isMuted = false;
         this.initialized = false;
@@ -59,7 +63,7 @@ export class AudioManager {
         try {
             const source = this.ctx.createBufferSource();
             source.buffer = this.sounds[name];
-            
+
             if (pitchVar > 0) {
                 const variance = (Math.random() * pitchVar * 2) - pitchVar;
                 source.playbackRate.value = 1.0 + variance;
@@ -82,7 +86,7 @@ export class AudioManager {
         try {
             const source = this.ctx.createBufferSource();
             source.buffer = this.sounds['teepee'];
-            
+
             // Pitch down by one octave (0.5 rate)
             source.playbackRate.value = 0.5;
 
@@ -99,7 +103,7 @@ export class AudioManager {
 
     startLoop(name, vol = 1.0) {
         if (!this.sounds[name]) return;
-        if (this.loops[name]) return; 
+        if (this.loops[name]) return;
 
         try {
             const source = this.ctx.createBufferSource();
@@ -123,7 +127,7 @@ export class AudioManager {
         if (this.loops[name]) {
             try {
                 this.loops[name].gain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.1);
-            } catch (e) {}
+            } catch (e) { }
         }
     }
 
@@ -131,7 +135,7 @@ export class AudioManager {
         if (this.loops[name]) {
             try {
                 this.loops[name].source.playbackRate.setTargetAtTime(rate, this.ctx.currentTime, 0.1);
-            } catch (e) {}
+            } catch (e) { }
         }
     }
 }

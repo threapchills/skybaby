@@ -26,7 +26,8 @@ export const Assets = {
     villagerBlue: [],
     warriorGreen: new Image(),
     warriorBlue: new Image(),
-    projectile: new Image()
+    projectile: new Image(),
+    totem: new Image()
 };
 
 // --- SOURCE ASSIGNMENT ---
@@ -39,6 +40,7 @@ Assets.teepeeGreen.src = 'assets/environment/teepee_green.png';
 Assets.teepeeBlue.src = 'assets/environment/teepee_blue.png';
 Assets.fire.src = 'assets/environment/fireplace_lit.png';
 Assets.leaf.src = 'assets/environment/leaf.png';
+Assets.totem.src = 'assets/environment/totem.png';
 
 Assets.playerGreen.src = 'assets/sprites/player_green.png';
 Assets.playerBlue.src = 'assets/sprites/player_blue.png';
@@ -1172,85 +1174,202 @@ export class Warrior extends Villager {
                 moveTargetY = this.patrolTargetY;
             }
         }
+    }
+}
 
-        // EXECUTE MOVEMENT
-        if (moveTargetX !== null) {
-            let dx = moveTargetX - this.x;
+export class Projectile extends Entity {
+    constructor(x, y, angle, team, damage) {
+        super(x, y, 32, 10);
+        this.team = team;
+        this.damage = damage;
+        const speed = 600;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.angle = angle;
+        this.life = 3.0;
+        this.trailTimer = 0;
+    }
 
-            if (Math.abs(dx) > worldWidth / 2) {
-                if (dx > 0) dx -= worldWidth;
-                else dx += worldWidth;
-            }
+    update(dt, spawnParticleCallback, walls) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.life -= dt;
+        if (this.life <= 0) this.dead = true;
 
-            if (Math.abs(dx) > 40) {
-                const dir = Math.sign(dx);
-                this.vx = dir * 160;
-            } else {
-                this.vx *= 0.9;
-            }
-
-            if (this.onGround) {
-                let wantJump = false;
-
-                if (this.homeIsland) {
-                    const lookAhead = this.vx > 0 ? 50 : -50;
-                    const nextX = this.x + lookAhead;
-                    if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) {
-                        wantJump = true;
-                    }
-                }
-
-                if (moveTargetY < this.y - 100 && Math.abs(dx) < 400) wantJump = true;
-                if (warState === 'ATTACK' && Math.abs(dx) > 100) wantJump = true;
-
-                if (wantJump) {
-                    this.vy = -700;
-                    this.onGround = false;
-                }
-            } else {
-                if (Math.abs(dx) > 100 && this.vy > -100) {
-                    this.vy -= 1500 * dt;
-                    if (this.vy < -500) this.vy = -500;
-                }
-            }
-        }
-
-        // --- WALL COLLISION (X-AXIS) ---
+        // Wall Collision
         if (walls) {
             for (let wall of walls) {
                 if (!wall.dead &&
-                    this.x + this.vx * dt < wall.x + wall.w &&
-                    this.x + this.w + this.vx * dt > wall.x &&
+                    this.x < wall.x + wall.w &&
+                    this.x + this.w > wall.x &&
                     this.y < wall.y + wall.h &&
                     this.y + this.h > wall.y) {
-                    this.vx *= -1;
+                    this.dead = true;
+                    wall.hp -= 20; // Projectiles hurt walls
+                    spawnParticleCallback(this.x, this.y, 'gray');
                 }
             }
         }
 
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
+        this.trailTimer -= dt;
+        if (this.trailTimer <= 0 && spawnParticleCallback) {
+            this.trailTimer = 0.05;
+            spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
+        }
+    }
 
-        this.onGround = false;
-        if (this.vy >= 0) {
-            for (let island of islands) {
-                if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                    const threshold = 10 + (this.vy * dt * 2);
-                    if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
-                        this.y = island.y - this.h;
-                        this.vy = 0;
-                        this.onGround = true;
-                        this.homeIsland = island;
-                        this.x += island.vx * dt;
+    draw(ctx, camera) {
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = rect.x;
+        const screenY = rect.y;
+
+        ctx.save();
+        ctx.translate(screenX, screenY);
+        ctx.rotate(this.angle);
+        this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
+        ```javascript
+        this.w = 32; this.h = 32;
+        this.hp = 10;
+        this.attackCooldown = 0;
+        this.role = Math.random() < 0.5 ? 'bodyguard' : 'raider';
+        this.maxFallSpeed = 1000;
+        this.patrolTargetX = null;
+        this.patrolTimer = 0;
+        this.roleTimer = 0;
+    }
+
+    draw(ctx, camera) {
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const screenX = Math.floor(rect.x);
+        const screenY = Math.floor(rect.y);
+
+        const img = (this.team === 'green') ? Assets.warriorGreen : Assets.warriorBlue;
+        this.drawSprite(ctx, img, screenX, screenY, this.w, this.h);
+    }
+
+    update(dt, islands, enemies, spawnProjectileCallback, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls, warState = 'BUILD') {
+        this.vy += 500 * dt;
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
+
+        this.attackCooldown -= dt;
+
+        // --- SEPARATION (Keep apart) ---
+        if (allVillagers) {
+            allVillagers.forEach(v => {
+                if (v !== this && !v.dead) {
+                    const dx = this.x - v.x;
+                    const dy = this.y - v.y;
+                    const distSq = dx * dx + dy * dy;
+                    if (distSq < 400) {
+                        const dist = Math.sqrt(distSq);
+                        if (dist < 1) return;
+                        const pushForce = (20 - dist) * 10;
+                        const nx = dx / dist;
+                        this.vx += nx * pushForce * 5;
+                        this.x += nx * 2;
                     }
                 }
+            });
+        }
+
+        // --- WAR STATE LOGIC ---
+        let moveTargetX = null;
+        let moveTargetY = null;
+        let targetEnemy = null;
+        let forcedAggro = false;
+
+        // 1. GATHER: Rally to Chief
+        if (warState === 'GATHER') {
+            if (friendlyLeader && !friendlyLeader.dead) {
+                moveTargetX = friendlyLeader.x + (Math.random() * 200 - 100);
+                moveTargetY = friendlyLeader.y;
+            }
+        }
+        // 2. ATTACK: Charge Enemy Chief
+        else if (warState === 'ATTACK') {
+            const enemyChief = enemies.find(e => e instanceof Player && e.team !== this.team);
+            if (enemyChief && !enemyChief.dead) {
+                moveTargetX = enemyChief.x;
+                moveTargetY = enemyChief.y;
+                forcedAggro = true;
             }
         }
 
-        // DEATH BOUNDARY (Prevents infinite falling loops)
-        if (this.y > worldHeight) this.dead = true;
-        if (this.x > worldWidth) this.x = 0;
-        if (this.x < 0) this.x = worldWidth;
+        // --- TARGETING ---
+        let bestScore = -Infinity;
+        const detectionRange = forcedAggro ? 800 : ((enemies.length < 5) ? 10000 : 600);
+
+        enemies.forEach(e => {
+            const dx = e.x - this.x;
+            const dy = e.y - this.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < detectionRange) {
+                let score = 10000 - dist;
+                if (e instanceof Warrior) score += 500;
+                else if (e instanceof Player) score += 1000;
+                if (score > bestScore) {
+                    bestScore = score;
+                    targetEnemy = e;
+                }
+            }
+        });
+
+        // ATTACK LOGIC
+        if (targetEnemy && (forcedAggro || enemies.length < 5 || Math.abs(targetEnemy.x - this.x) < 600)) {
+            if (Math.abs(targetEnemy.x - this.x) < 400) {
+                this.vx *= 0.8;
+            }
+
+            if (this.attackCooldown <= 0) {
+                this.attackCooldown = 1.5 + Math.random();
+                const dx = targetEnemy.x - this.x;
+                const dy = (targetEnemy.y - 20) - this.y;
+                let angle = Math.atan2(dy, dx);
+                const variance = (Math.random() - 0.5) * 0.25;
+                angle += variance;
+                spawnProjectileCallback(this.x, this.y, angle, this.team, 10);
+            }
+
+            if (warState !== 'BUILD') {
+                // Keep moving towards global objective (moveTargetX)
+            } else {
+                const dir = Math.sign(targetEnemy.x - this.x);
+                this.vx += dir * 50;
+            }
+
+        }
+
+        // MOVEMENT LOGIC (If not attacking/gathering heavily)
+        if (warState === 'BUILD' && moveTargetX === null) {
+            this.roleTimer -= dt;
+            if (this.roleTimer <= 0) {
+                this.roleTimer = 10 + Math.random() * 10;
+                if (this.role === 'bodyguard' && Math.random() < 0.2) this.role = 'raider';
+            }
+
+            if (this.role === 'bodyguard' && friendlyLeader && !friendlyLeader.dead) {
+                moveTargetX = friendlyLeader.x + (Math.random() - 0.5) * 150;
+                moveTargetY = friendlyLeader.y;
+            } else {
+                this.patrolTimer -= dt;
+                if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
+                    this.patrolTimer = 8 + Math.random() * 12;
+                    if (islands.length > 0) {
+                        const randomIsland = islands[Math.floor(Math.random() * islands.length)];
+                        this.patrolTargetX = randomIsland.x + (randomIsland.w / 2);
+                        this.patrolTargetY = randomIsland.y - 50;
+                    } else {
+                        this.patrolTargetX = Math.random() * worldWidth;
+                        this.patrolTargetY = this.y;
+                    }
+                }
+                moveTargetX = this.patrolTargetX;
+                moveTargetY = this.patrolTargetY;
+            }
+        }
     }
 }
 
@@ -1308,3 +1427,66 @@ export class Projectile extends Entity {
         ctx.restore();
     }
 }
+
+export class Totem {
+    constructor(x, y, team) {
+        this.x = x;
+        this.y = y;
+        this.team = team;
+        this.w = 40;
+        this.h = 80;
+        this.range = 300;
+        this.conversionRate = 5.0; // Seconds to convert
+        this.active = true;
+        this.hue = (team === 'green') ? 45 : 225; // Yellowish / Bluish
+    }
+
+    update(dt, villagers) {
+        if (!this.active) return;
+
+        // Find enemy units in range
+        villagers.forEach(v => {
+            if (v.team !== this.team && !v.dead) {
+                const dist = Math.sqrt((v.x - this.x) ** 2 + (v.y - this.y) ** 2);
+                if (dist < this.range) {
+                    // CONVERSION LOGIC
+                    if (!v.conversionTimer) v.conversionTimer = 0;
+                    v.conversionTimer += dt;
+
+                    // Visual feedback for conversion
+                    if (Math.random() < 0.1) {
+                         v.isBeingConverted = true;
+                    }
+
+                    if (v.conversionTimer > this.conversionRate) {
+                        v.team = this.team;
+                        v.conversionTimer = 0;
+                        v.isBeingConverted = false;
+                        // Todo: trigger conversion effect
+                    }
+                } else {
+                    v.conversionTimer = 0;
+                    v.isBeingConverted = false;
+                }
+            }
+        });
+    }
+
+    draw(ctx) {
+        if (!this.active) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.filter = `hue - rotate(${ this.hue }deg)`;
+
+        if (Assets.totem) {
+            ctx.drawImage(Assets.totem, -20, -80, 40, 80);
+        } else {
+            // Fallback
+            ctx.fillStyle = (this.team === 'green') ? '#AAFF00' : '#00AAFF';
+            ctx.fillRect(-10, -80, 20, 80);
+        }
+
+        ctx.restore();
+    }
+}
+```

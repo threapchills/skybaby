@@ -11,7 +11,7 @@ import { World } from './world.js';
 import {
     Player, Island, Villager, Warrior, Projectile,
     Particle, Pig, Leaf, Snowflake, Assets,
-    Fireball, StoneWall, RainCloud, VisualEffect
+    Fireball, StoneWall, RainCloud, VisualEffect, Totem
 } from './entities.js';
 import { AudioManager } from './audio.js';
 
@@ -62,6 +62,7 @@ class Game {
         this.leaves = [];
         this.snowflakes = [];
         this.rainClouds = [];
+        this.totems = [];
 
         this.season = Math.random() > 0.5 ? 'summer' : 'winter';
         console.log(`SEASON START: ${this.season.toUpperCase()}`);
@@ -182,6 +183,38 @@ class Game {
         }
 
         this.player.visitedIslands.add(this.islands[0]);
+        this._spawnInitialUnits();
+    }
+
+    _spawnInitialUnits() {
+        // Spawn 3 Villagers + 2 Warriors per team
+        const teams = ['green', 'blue'];
+        teams.forEach(team => {
+            let countV = 0;
+            let countW = 0;
+            const validIslands = this.islands.filter(i => i.team === team || i.team === 'neutral');
+
+            while (countV < 3 || countW < 2) {
+                const island = validIslands[Math.floor(Math.random() * validIslands.length)];
+                if (!island) continue;
+
+                const x = island.x + 50 + Math.random() * 100;
+                const y = island.y - 50;
+
+                if (countV < 3) {
+                    const v = new Villager(x, y, team);
+                    v.homeIsland = island;
+                    this.villagers.push(v);
+                    countV++;
+                } else if (countW < 2) {
+                    const w = new Warrior(x, y, team);
+                    w.homeIsland = island;
+                    this.villagers.push(w);
+                    countW++;
+                }
+            }
+        });
+        console.log("INITIAL UNITS SPAWNED: 5 Green, 5 Blue");
     }
 
     loop(timestamp) {
@@ -209,6 +242,9 @@ class Game {
         if (this.input.keys.digit3) this.resources.setSpell(2);
         if (this.input.keys.digit4) this.resources.setSpell(3);
 
+        this._updateTotemLogic(dt);
+        this._updateIslandDynamics(dt);
+
         if (this.impactFrameTimer > 0) {
             this.impactFrameTimer -= dt;
             if (this.impactFrameTimer > 0.1) return;
@@ -225,22 +261,6 @@ class Game {
             this.dayTime = 0;
             this.dayCount++;
             this._checkSeasonChange();
-        }
-
-        this.pulseTime += dt * 5;
-        this._updateWeather(dt);
-
-        // ISLAND DYNAMICS (Drift, Sticking, Separation)
-        this._updateIslandDynamics(dt);
-
-        if (this.audio.initialized) {
-            const heightRatio = 1.0 + (Math.max(0, 2000 - this.player.y) / 4000);
-            this.audio.setLoopPitch('music', heightRatio);
-            if (this.player.vy > 300 && !this.player.isGrounded) {
-                this.audio.setLoopVolume('fall', 0.6);
-            } else {
-                this.audio.setLoopVolume('fall', 0.0);
-            }
         }
 
         const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
@@ -260,11 +280,16 @@ class Game {
 
         if (!this.enemyChief.dead) {
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls);
-
-            // AI SPELL CASTING
             this._updateEnemyAI(dt);
+        }
 
-            if (this.enemyChief.shootRequest) {
+        // --- VICTORY / DEFEAT CONDITIONS ---
+        const greenCount = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
+        const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
+
+        // PLAYER DEATH & RESPAWN CHECK
+        if (this.player.dead) {
+            if (greenCount > 0) {
                 this.player.respawnTimer -= dt;
                 if (this.player.respawnTimer <= 0) {
                     this.player.dead = false;
@@ -276,12 +301,11 @@ class Game {
             } else {
                 this.gameOver = true;
                 this.resources.showFloatingMessage("DEFEAT! Your tribe has fallen.", "#FF0000");
-                setTimeout(() => location.reload(), 4000); // Reload after 4s
+                setTimeout(() => location.reload(), 4000);
             }
         }
 
-        const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
-
+        // ENEMY DEATH & RESPAWN CHECK
         if (this.enemyChief.dead) {
             if (blueCount > 0) {
                 this.enemyChief.respawnTimer -= dt;
@@ -297,6 +321,67 @@ class Game {
                 setTimeout(() => location.reload(), 4000);
             }
         }
+    }
+
+    _updateTotemLogic(dt) {
+        // Reset island counts
+        this.islands.forEach(i => { i.greenCount = 0; i.blueCount = 0; });
+
+        // Count villagers per island (Spatial check)
+        this.villagers.forEach(v => {
+            if (!v.dead) {
+                const island = this.islands.find(i =>
+                    v.x >= i.x && v.x <= i.x + i.w &&
+                    v.y >= i.y - 100 && v.y <= i.y + i.h
+                );
+                if (island) {
+                    if (v.team === 'green') island.greenCount++;
+                    if (v.team === 'blue') island.blueCount++;
+                }
+            }
+        });
+
+        // 1. Spawn Logic
+        this.islands.forEach(island => {
+            ['green', 'blue'].forEach(team => {
+                const count = (team === 'green') ? island.greenCount : island.blueCount;
+                if (count > 12) {
+                    // Spawn totem if not present on this island for this team
+                    const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 80)) < 200);
+
+                    if (!hasTotem) {
+                        const tx = island.x + island.w / 2;
+                        const ty = island.y - 80;
+                        this.totems.push(new Totem(tx, ty, team));
+                        this.audio.play('teepee');
+                    }
+                }
+            });
+        });
+
+        // 2. Collapse Logic
+        for (let i = this.totems.length - 1; i >= 0; i--) {
+            const t = this.totems[i];
+            const island = this.islands.find(isl =>
+                t.x >= isl.x - 50 && t.x <= isl.x + isl.w + 50 &&
+                t.y >= isl.y - 150 && t.y <= isl.y + isl.h + 50
+            );
+
+            if (island) {
+                const count = (t.team === 'green') ? island.greenCount : island.blueCount;
+                if (count < 5) {
+                    t.active = false;
+                    this.totems.splice(i, 1);
+                    // Optional: Play collapse sound (reuse stone break?)
+                    // this.audio.play('hit', 0.2); 
+                }
+            } else {
+                this.totems.splice(i, 1);
+            }
+        }
+
+        // Update Totems
+        this.totems.forEach(t => t.update(dt, this.villagers));
     }
 
     _checkSeasonChange() {
@@ -455,6 +540,7 @@ class Game {
             if (spell === 1) {
                 if (this.resources.spendMana(5)) { // Very Low Cost
                     this._doHookshotLogic(dt, mx, my);
+                    if (Math.random() < 0.1) this.audio.play('air', 0.5); // Loop-like effect
                 }
             }
             // OTHER SPELLS
@@ -464,13 +550,13 @@ class Game {
                     this.player.fireCooldown = 0.5;
                     const angle = Math.atan2(my - (this.player.y + 20), mx - (this.player.x + 20));
                     this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle, 'green'));
-                    this.audio.playSpell();
+                    this.audio.play('fire');
                 }
                 // 2: EARTHQUAKE - Medium Cost
                 else if (spell === 2 && this.resources.spendMana(40)) {
                     this.player.fireCooldown = 2.0;
                     this.world.camera.shake = 30;
-                    this.audio.play('land', 0.8, 0.1);
+                    this.audio.play('earth', 0.8);
 
                     // ... (Code continues unchanged for earthquake logic)
                     this.villagers.forEach(v => {
@@ -502,7 +588,7 @@ class Game {
                     this.player.fireCooldown = 1.0;
                     this.rainClouds.push(new RainCloud(mx, my, 'green'));
                     this._forceSpawnVillagers(mx, my, 'green');
-                    this.audio.playSpell();
+                    this.audio.play('water');
                 }
             }
         } else {
