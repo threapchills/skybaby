@@ -1286,9 +1286,11 @@ export class Projectile extends Entity {
         const screenY = rect.y;
 
         ctx.save();
-        ctx.translate(screenX, screenY);
+        const cx = screenX + this.w / 2;
+        const cy = screenY + this.h / 2;
+        ctx.translate(cx, cy);
         ctx.rotate(this.angle);
-        this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
+        this.drawSprite(ctx, Assets.projectile, -this.w / 2, -this.h / 2, this.w, this.h);
         ctx.restore();
     }
 }
