@@ -72,9 +72,10 @@ export class ResourceManager {
         this.mana = Math.min(this.mana + amount, this.maxMana);
     }
 
-    // New: Water from Blood (Kills) - DISABLED
+    // New: Water from Blood (Kills) - Economy of Souls
     addWater(amount) {
-        // No-op
+        this.addMana(amount); // Soul = Mana (Efficiency)
+        this.showFloatingMessage("SOUL CAPTURED!", "#00BFFF");
     }
 
     // --- SPENDING ---

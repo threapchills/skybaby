@@ -308,11 +308,20 @@ class Game {
             this._updateEnemyAI(dt);
         }
 
-        // --- VICTORY / DEFEAT CONDITIONS ---
+        // --- WAR DIRECTOR ---
+        this._updateWarDirector(dt);
+
+        // --- STATS & UI ---
         const greenCount = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
         const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
+        const greenTents = this.totems.filter(t => t.active && t.team === 'green').length;
+        const blueTents = this.totems.filter(t => t.active && t.team === 'blue').length;
 
-        // PLAYER DEATH & RESPAWN CHECK
+        this.resources.updateStats(greenTents, greenCount, blueTents, blueCount);
+        this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp);
+
+        // --- VICTORY / DEFEAT CONDITIONS ---
+        // (Existing logic follows)
         if (this.player.dead) {
             if (greenCount > 0) {
                 this.player.respawnTimer -= dt;
@@ -531,6 +540,36 @@ class Game {
         }
     }
 
+
+    _updateWarDirector(dt) {
+        this.warTimer += dt;
+
+        if (this.warState === 'BUILD') {
+            if (this.warTimer > 60.0) { // 60s Peace
+                this.warState = 'GATHER';
+                this.warTimer = 0;
+                this.resources.showFloatingMessage("WAR DRUMS SOUND!", "#FF4500");
+                this.audio.play('drum_loop', 0.5, true);
+            }
+        } else if (this.warState === 'GATHER') {
+            if (this.warTimer > 15.0) { // 15s Gather
+                this.warState = 'ATTACK';
+                this.warTimer = 0;
+                this.resources.showFloatingMessage("CHARGE!", "#FF0000");
+                this.audio.play('horn');
+            }
+        } else if (this.warState === 'ATTACK') {
+            const greenCount = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
+            const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
+
+            // End war if one side is decimated or time up
+            if (this.warTimer > 60.0 || greenCount < 3 || blueCount < 3) {
+                this.warState = 'BUILD';
+                this.warTimer = 0;
+                this.resources.showFloatingMessage("RETREAT & REBUILD", "#00FF00");
+            }
+        }
+    }
 
     _checkCollisions(dt) {
         // 1. MANA RECHARGE (Campfire/Teepee) - ALL FIRES WORK FOR EVERYONE
