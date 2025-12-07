@@ -271,13 +271,18 @@ class Game {
         // Update Villagers (and Warriors)
         this.villagers.forEach(v => {
             if (!v.dead) {
-                // Pass all necessary context for AI
-                v.update(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
-                    (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
-                    this.worldWidth, this.worldHeight, this.audio,
-                    (v.team === 'green' ? this.player : this.enemyChief),
-                    this.villagers
-                );
+                if (v instanceof Warrior) {
+                    // Warrior needs combat context
+                    v.update(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
+                        (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
+                        this.worldWidth, this.worldHeight, this.audio,
+                        (v.team === 'green' ? this.player : this.enemyChief),
+                        this.villagers, this.walls, this.warState
+                    );
+                } else {
+                    // Villager needs simpler context (passing pigs for milling behavior)
+                    v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls, this.warState);
+                }
             }
         });
 
