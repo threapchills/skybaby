@@ -1285,60 +1285,7 @@ export class Projectile extends Entity {
 }
 
 
-export class Projectile extends Entity {
-    constructor(x, y, angle, team, damage) {
-        super(x, y, 32, 10);
-        this.team = team;
-        this.damage = damage;
-        const speed = 600;
-        this.vx = Math.cos(angle) * speed;
-        this.vy = Math.sin(angle) * speed;
-        this.angle = angle;
-        this.life = 3.0;
-        this.trailTimer = 0;
-    }
 
-    update(dt, spawnParticleCallback, walls) {
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
-        this.life -= dt;
-        if (this.life <= 0) this.dead = true;
-
-        // Wall Collision
-        if (walls) {
-            for (let wall of walls) {
-                if (!wall.dead &&
-                    this.x < wall.x + wall.w &&
-                    this.x + this.w > wall.x &&
-                    this.y < wall.y + wall.h &&
-                    this.y + this.h > wall.y) {
-                    this.dead = true;
-                    wall.hp -= 20; // Projectiles hurt walls
-                    spawnParticleCallback(this.x, this.y, 'gray');
-                }
-            }
-        }
-
-        this.trailTimer -= dt;
-        if (this.trailTimer <= 0 && spawnParticleCallback) {
-            this.trailTimer = 0.05;
-            spawnParticleCallback(this.x, this.y, this.team === 'green' ? 'lightgreen' : 'lightblue');
-        }
-    }
-
-    draw(ctx, camera) {
-        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
-        if (!rect.onScreen) return;
-        const screenX = rect.x;
-        const screenY = rect.y;
-
-        ctx.save();
-        ctx.translate(screenX, screenY);
-        ctx.rotate(this.angle);
-        this.drawSprite(ctx, Assets.projectile, 0, 0, this.w, this.h);
-        ctx.restore();
-    }
-}
 
 export class Totem {
     constructor(x, y, team) {
