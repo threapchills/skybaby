@@ -1313,8 +1313,8 @@ export class Totem {
         this.x = x;
         this.y = y;
         this.team = team;
-        this.w = 40;
-        this.h = 80;
+        this.w = 60; // Bigger (was 40)
+        this.h = 120; // Bigger (was 80)
         this.range = 300;
         this.conversionRate = 5.0; // Seconds to convert
         this.active = true;
@@ -1368,11 +1368,12 @@ export class Totem {
         ctx.filter = `hue-rotate(${this.hue}deg)`;
 
         if (Assets.totem && Assets.totem.complete && Assets.totem.naturalWidth !== 0) {
-            ctx.drawImage(Assets.totem, -20, -80, 40, 80);
+            // Draw anchored at bottom center (-Width/2, -Height)
+            ctx.drawImage(Assets.totem, -30, -120, 60, 120);
         } else {
             // Fallback
             ctx.fillStyle = (this.team === 'green') ? '#AAFF00' : '#00AAFF';
-            ctx.fillRect(-10, -80, 20, 80);
+            ctx.fillRect(-15, -120, 30, 120);
         }
 
         ctx.restore();
