@@ -123,9 +123,9 @@ export class ResourceManager {
 
         // Update Stats
         this.ui.pPop.textContent = this.greenPop;
-        this.ui.pTents.textContent = `Tents: ${this.greenTents}`;
+        this.ui.pTents.textContent = `Totems: ${this.greenTents}`;
         this.ui.ePop.textContent = this.bluePop;
-        this.ui.eTents.textContent = `Tents: ${this.blueTents}`;
+        this.ui.eTents.textContent = `Totems: ${this.blueTents}`;
 
         // Health Bars
         const pPct = Math.max(0, (playerHp / playerMaxHp) * 100);
