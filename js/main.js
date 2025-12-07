@@ -390,11 +390,11 @@ class Game {
                 const count = (team === 'green') ? island.greenCount : island.blueCount;
                 if (count > 10) {
                     // Spawn totem if not present on this island for this team
-                    const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 80)) < 200);
+                    const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 10)) < 200);
 
                     if (!hasTotem) {
                         const tx = island.x + island.w / 2;
-                        const ty = island.y - 80;
+                        const ty = island.y - 10;
                         this.totems.push(new Totem(tx, ty, team));
                         this.audio.play('teepee');
                     }
