@@ -910,16 +910,24 @@ class Game {
     }
 
     _handleShooting(dt) {
-        // LEFT CLICK = ALWAYS ARROWS
+        // LEFT CLICK = RAPID ARROWS - FEEL THE POWER!
         if (this.input.mouse.leftDown) {
             if (this.player.fireCooldown <= 0) {
-                this.player.fireCooldown = 0.2; // Fast fire for arrows
+                this.player.fireCooldown = 0.1; // ULTRA FAST FIRE!
                 const mx = this.input.mouse.x + this.world.camera.x;
                 const my = this.input.mouse.y + this.world.camera.y;
                 const angle = Math.atan2(my - (this.player.y + 20), mx - (this.player.x + 20));
 
-                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle, 'green', 25));
-                this.audio.play('shoot', 0.4, 0.0);
+                // Slight spread for satisfying burst feel
+                const spread = (Math.random() - 0.5) * 0.1;
+                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle + spread, 'green', 20));
+
+                // RECOIL - pushes player back slightly for impact feel
+                this.player.vx -= Math.cos(angle) * 80;
+                this.player.vy -= Math.sin(angle) * 40;
+
+                // Variable pitch for satisfying pew-pew sound
+                this.audio.play('shoot', 0.5, 0.3);
             }
         }
     }
@@ -1049,7 +1057,6 @@ class Game {
         this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
         this.walls.forEach(w => w.draw(this.ctx, this.world.camera));
         this.totems.forEach(t => t.draw(this.ctx, this.world.camera));
-        this.totems.forEach(t => t.draw(this.ctx, this.world.camera));
 
         this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
 
@@ -1059,6 +1066,44 @@ class Game {
 
         if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
         if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
+
+        // SLICK AIM INDICATOR - Laser sight to cursor
+        if (!this.player.dead) {
+            const pRect = this.world.camera.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
+            const mx = this.input.mouse.x;
+            const my = this.input.mouse.y;
+
+            // Pulsing glow effect
+            const pulse = 0.5 + Math.sin(Date.now() / 100) * 0.3;
+            const canFire = this.player.fireCooldown <= 0;
+
+            // Draw aim line
+            this.ctx.save();
+            this.ctx.strokeStyle = canFire ? `rgba(0, 255, 100, ${pulse})` : `rgba(255, 100, 100, 0.3)`;
+            this.ctx.lineWidth = canFire ? 2 : 1;
+            this.ctx.setLineDash(canFire ? [] : [4, 4]);
+            this.ctx.beginPath();
+            this.ctx.moveTo(pRect.x, pRect.y);
+            this.ctx.lineTo(mx, my);
+            this.ctx.stroke();
+
+            // Draw crosshair at cursor
+            if (canFire) {
+                this.ctx.strokeStyle = `rgba(0, 255, 100, ${pulse})`;
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.arc(mx, my, 8, 0, Math.PI * 2);
+                this.ctx.stroke();
+                this.ctx.beginPath();
+                this.ctx.moveTo(mx - 12, my);
+                this.ctx.lineTo(mx + 12, my);
+                this.ctx.moveTo(mx, my - 12);
+                this.ctx.lineTo(mx, my + 12);
+                this.ctx.stroke();
+            }
+            this.ctx.setLineDash([]);
+            this.ctx.restore();
+        }
 
         this.particles.forEach(p => p.draw(this.ctx, this.world.camera));
         this.visualEffects.forEach(e => e.draw(this.ctx, this.world.camera));

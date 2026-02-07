@@ -51,6 +51,21 @@ canvas {
     /* Sci-fi glow */
     pointer-events: none;
     z-index: 10;
+    animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+
+    0%,
+    100% {
+        text-shadow: 0 0 10px #00ffff, 0 0 20px #00ffff;
+        opacity: 1;
+    }
+
+    50% {
+        text-shadow: 0 0 30px #00ffff, 0 0 60px #0088ff;
+        opacity: 0.8;
+    }
 }
 
 /* --- HUD LAYER --- */
@@ -262,6 +277,19 @@ canvas {
     color: white;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.8);
     background: rgba(50, 50, 50, 0.8);
+    animation: spell-pulse 1s ease-in-out infinite;
+}
+
+@keyframes spell-pulse {
+
+    0%,
+    100% {
+        transform: translateY(-5px) scale(1.1);
+    }
+
+    50% {
+        transform: translateY(-7px) scale(1.15);
+    }
 }
 
 #spell-0.active {

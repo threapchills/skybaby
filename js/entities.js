@@ -587,7 +587,9 @@ export class Player extends Entity {
             if (input && input.keys) {
                 if (input.keys.a) { this.vx -= this.acceleration * dt; moving = true; }
                 if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
-                if (input.keys.space) wantJump = true;
+                if (input.keys.space || input.keys.w) wantJump = true;
+                // S key for fast dive - feels responsive
+                if (input.keys.s) { this.vy += 2000 * dt; }
             }
         } else {
             moving = true;
@@ -1354,17 +1356,16 @@ export class Totem {
 
     draw(ctx, cam) {
         if (!this.active) return;
+
+        // Use camera's getScreenRect for proper world wrapping (like other entities)
+        const rect = cam.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+
+        const screenX = rect.x;
+        const screenY = rect.y;
+
         ctx.save();
-        let drawX = this.x;
-        let drawY = this.y;
-
-        // Apply Camera Offset (if provided)
-        if (cam) {
-            drawX -= cam.x;
-            drawY -= cam.y;
-        }
-
-        ctx.translate(drawX, drawY);
+        ctx.translate(screenX, screenY);
         ctx.filter = `hue-rotate(${this.hue}deg)`;
 
         if (Assets.totem && Assets.totem.complete && Assets.totem.naturalWidth !== 0) {

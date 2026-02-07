@@ -21,7 +21,9 @@ export class AudioManager {
             'fire': 'assets/sounds/spell1.wav',
             'water': 'assets/sounds/spell2.wav',
             'earth': 'assets/sounds/spell3.wav',
-            'air': 'assets/sounds/spell4.wav'
+            'air': 'assets/sounds/spell4.wav',
+            'horn': 'assets/sounds/teepee.ogg',      // Fallback: reuse teepee
+            'drum_loop': 'assets/sounds/ambience.ogg' // Fallback: reuse ambience
         };
 
         this.loops = {};
