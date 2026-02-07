@@ -128,23 +128,23 @@ class Game {
     }
 
     _generateWorld() {
-        // Home islands (BIG - dwarfs the tiny people)
-        this.islands.push(new Island(200, 1000, 800, 80, 'green'));
-        this.islands.push(new Island(5200, 1000, 800, 80, 'blue'));
+        // Home islands (MASSIVE - people are tiny specks on these)
+        this.islands.push(new Island(200, 1000, 1000, 90, 'green'));
+        this.islands.push(new Island(5200, 1000, 1000, 90, 'blue'));
 
-        // Generate world islands (larger, chunkier)
-        for (let i = 0; i < 35; i++) {
+        // Generate world islands (big, dramatic floating rocks)
+        for (let i = 0; i < 30; i++) {
             for (let attempt = 0; attempt < 80; attempt++) {
                 const rx = 800 + Math.random() * 4200;
                 const ry = 500 + Math.random() * 1500;
-                const rw = 500 + Math.random() * 500;
-                const rh = 80;
+                const rw = 600 + Math.random() * 600;
+                const rh = 90;
 
                 let ok = true;
                 for (let j = 0; j < this.islands.length; j++) {
                     const e = this.islands[j];
-                    if (rx < e.x + e.w + 350 && rx + rw + 350 > e.x &&
-                        ry < e.y + e.h + 350 && ry + rh + 350 > e.y) {
+                    if (rx < e.x + e.w + 400 && rx + rw + 400 > e.x &&
+                        ry < e.y + e.h + 400 && ry + rh + 400 > e.y) {
                         ok = false; break;
                     }
                 }

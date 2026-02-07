@@ -186,32 +186,35 @@ export class Island extends Entity {
         this.hasFireplace = Math.random() > 0.4;
         this.conversionTimer = 0;
 
-        // 2.5D depth (visible underside) - CHUNKY floating rocks
-        this.depth = 80 + Math.random() * 70;
+        // 2.5D depth (visible underside) - MASSIVE floating rocks
+        this.depth = 120 + Math.random() * 100;
 
         // Procedural rocky bottom edge
         this.rockPoints = [];
-        const segments = Math.max(4, Math.floor(w / 40));
+        const segments = Math.max(5, Math.floor(w / 35));
         for (let i = 0; i <= segments; i++) {
             const t = i / segments;
             const baseDepth = this.depth * (1 - Math.pow(2 * t - 1, 4));
             this.rockPoints.push({
                 x: t * w,
-                y: baseDepth * (0.6 + Math.random() * 0.4) + (Math.random() - 0.5) * 10
+                y: baseDepth * (0.6 + Math.random() * 0.4) + (Math.random() - 0.5) * 12
             });
         }
 
         // Trees - split into background and foreground layers
+        // BG trees: normal game-layer trees behind entities
+        // FG trees: bigger, slightly darker, rendered OVER entities (Silksong-style)
         this.trees = [];
-        const numTrees = 2 + Math.floor(Math.random() * (w / 70));
+        const numTrees = 3 + Math.floor(Math.random() * (w / 60));
         for (let i = 0; i < numTrees; i++) {
-            const xPos = 30 + Math.random() * (w - 100);
-            const edgeDist = Math.min(xPos, w - xPos) / w; // 0=edge, 0.5=center
-            // Trees near edges (outer 30%) are more likely to be foreground
-            const isFg = edgeDist < 0.3 ? Math.random() < 0.5 : Math.random() < 0.2;
+            const xPos = 20 + Math.random() * (w - 80);
+            const edgeDist = Math.min(xPos, w - xPos) / w;
+            // Edge trees very likely foreground; center trees rarely
+            const isFg = edgeDist < 0.25 ? Math.random() < 0.7 : Math.random() < 0.15;
             this.trees.push({
                 x: xPos,
-                scale: 1.0 + Math.random() * 1.0,
+                // FG trees are 30% bigger (perspective: closer = larger)
+                scale: isFg ? (1.5 + Math.random() * 1.2) : (1.0 + Math.random() * 1.2),
                 burnt: false, burntTimer: 0,
                 layer: isFg ? 'fg' : 'bg'
             });
@@ -219,21 +222,21 @@ export class Island extends Entity {
 
         // Background grass patches (drawn with island)
         this.grassPatches = [];
-        const numGrass = 2 + Math.floor(Math.random() * (w / 45));
+        const numGrass = 3 + Math.floor(Math.random() * (w / 40));
         for (let i = 0; i < numGrass; i++) {
             this.grassPatches.push({
                 x: Math.random() * (w - 40),
-                scale: 1.0 + Math.random() * 0.8
+                scale: 1.0 + Math.random() * 1.0
             });
         }
 
-        // Foreground grass tufts (drawn over entities)
+        // Foreground grass tufts (drawn over entities - big, lush)
         this.fgGrass = [];
-        const numFgGrass = 1 + Math.floor(Math.random() * (w / 120));
+        const numFgGrass = 2 + Math.floor(Math.random() * (w / 80));
         for (let i = 0; i < numFgGrass; i++) {
             this.fgGrass.push({
-                x: Math.random() * (w - 40),
-                scale: 1.2 + Math.random() * 1.0,
+                x: Math.random() * (w - 50),
+                scale: 1.5 + Math.random() * 1.5,
                 flip: Math.random() > 0.5
             });
         }
@@ -311,10 +314,10 @@ export class Island extends Entity {
 
         // === 2.5D FLOATING ISLAND RENDERING ===
 
-        // 1. Drop shadow (projected below island - bigger for chunky rocks)
+        // 1. Drop shadow (projected below island - massive for big floating rocks)
         ctx.fillStyle = 'rgba(0,0,0,0.10)';
         ctx.beginPath();
-        ctx.ellipse(sx + w * 0.5, sy + h + dep + 35, w * 0.45, 14, 0, 0, Math.PI * 2);
+        ctx.ellipse(sx + w * 0.5, sy + h + dep + 45, w * 0.48, 18, 0, 0, Math.PI * 2);
         ctx.fill();
 
         // 2. Rocky underside with gradient
@@ -342,7 +345,7 @@ export class Island extends Entity {
 
         // 3. Top surface with earth layers
         // Earth side stripe (visible front face)
-        const sideH = Math.min(h, 16);
+        const sideH = Math.min(h, 20);
         const sideGrad = ctx.createLinearGradient(0, sy, 0, sy + sideH);
         sideGrad.addColorStop(0, '#5a8c3a');
         sideGrad.addColorStop(0.3, '#7a5c3a');
@@ -380,13 +383,13 @@ export class Island extends Entity {
             ctx.globalAlpha = 1;
         }
 
-        // 4. Grass sprites on top edge
+        // 4. Grass sprites on top edge (lush, big)
         if (imgReady(Assets.grass)) {
             for (let i = 0; i < this.grassPatches.length; i++) {
                 const g = this.grassPatches[i];
-                const gw = 50 * g.scale;
-                const gh = 50 * g.scale;
-                ctx.drawImage(Assets.grass, sx + g.x, sy - (35 * g.scale), gw, gh);
+                const gw = 56 * g.scale;
+                const gh = 56 * g.scale;
+                ctx.drawImage(Assets.grass, sx + g.x, sy - (40 * g.scale), gw, gh);
             }
         }
 
@@ -394,20 +397,20 @@ export class Island extends Entity {
         if (imgReady(this.activeTree)) {
             for (let i = 0; i < this.trees.length; i++) {
                 const tree = this.trees[i];
-                if (tree.layer === 'fg') continue; // Skip foreground trees
+                if (tree.layer === 'fg') continue;
 
-                const tw = 180 * tree.scale;
-                const th = 220 * tree.scale;
-                const treeY = sy - (180 * tree.scale);
+                const tw = 200 * tree.scale;
+                const th = 260 * tree.scale;
+                const treeY = sy - (210 * tree.scale);
 
                 if (tree.burnt) {
                     ctx.globalAlpha = 0.4;
                 }
 
                 // Tree shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                ctx.fillStyle = 'rgba(0,0,0,0.12)';
                 ctx.beginPath();
-                ctx.ellipse(sx + tree.x + tw * 0.4, sy - 2, tw * 0.3, 6, 0, 0, Math.PI * 2);
+                ctx.ellipse(sx + tree.x + tw * 0.4, sy - 2, tw * 0.3, 8, 0, 0, Math.PI * 2);
                 ctx.fill();
 
                 ctx.drawImage(this.activeTree, sx + tree.x, treeY, tw, th);
@@ -415,33 +418,33 @@ export class Island extends Entity {
             }
         }
 
-        // 6. Teepee (big structure - dwarfs the people)
+        // 6. Teepee (massive structure - people look tiny next to it)
         const teepeeImg = (this.team === 'green') ? Assets.teepeeGreen : Assets.teepeeBlue;
         if (imgReady(teepeeImg)) {
-            const tpW = 160;
-            const tpH = 160;
+            const tpW = 200;
+            const tpH = 200;
             const tpX = sx + w * 0.3 - tpW * 0.5;
-            const tpY = sy - tpH + 16;
+            const tpY = sy - tpH + 20;
             // Teepee shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.14)';
+            ctx.fillStyle = 'rgba(0,0,0,0.15)';
             ctx.beginPath();
-            ctx.ellipse(tpX + tpW * 0.5, sy - 2, tpW * 0.35, 7, 0, 0, Math.PI * 2);
+            ctx.ellipse(tpX + tpW * 0.5, sy - 2, tpW * 0.38, 9, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.drawImage(teepeeImg, tpX, tpY, tpW, tpH);
         }
 
-        // 7. Fire with glow (bigger)
+        // 7. Fire with glow (large campfire)
         if (this.hasFireplace && imgReady(Assets.fire)) {
-            const fireW = 120;
-            const fireH = 120;
+            const fireW = 150;
+            const fireH = 150;
             const fx = sx + w * 0.55 - fireW * 0.5;
-            const fy = sy - fireH + 30;
+            const fy = sy - fireH + 36;
 
             // Fire glow
             ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = 'rgba(255,120,20,0.08)';
+            ctx.fillStyle = 'rgba(255,120,20,0.10)';
             ctx.beginPath();
-            ctx.arc(fx + fireW * 0.5, fy + fireH * 0.5, 80, 0, Math.PI * 2);
+            ctx.arc(fx + fireW * 0.5, fy + fireH * 0.4, 100, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalCompositeOperation = 'source-over';
 
@@ -457,68 +460,77 @@ export class Island extends Entity {
     }
 
     // Silksong-style foreground layer: trees & grass rendered OVER entities
-    // with smart transparency so the player is always visible
+    // FG trees are bigger (closer to camera = larger), with a dark tint
+    // to create that silhouette depth effect. Smart transparency near player.
     drawForeground(ctx, camera, playerSX, playerSY) {
         const rect = camera.getScreenRect(this.x, this.y, this.w, this.h + this.depth);
         if (!rect.onScreen) return;
 
         const sx = rect.x;
         const sy = rect.y;
-        const w = this.w;
 
         // Helper: compute alpha based on distance to player
-        const fadeRadius = 120; // px from player center where fg fades
-        const minAlpha = 0.12;  // never fully invisible
-        const maxAlpha = 0.7;  // max opacity for fg elements
+        const fadeRadius = 160; // px from player center where fg fades
+        const minAlpha = 0.08;  // nearly invisible right on player
+        const maxAlpha = 0.85;  // very visible when away from player
 
         function getFgAlpha(elScreenX, elScreenY) {
             const dx = elScreenX - playerSX;
             const dy = elScreenY - playerSY;
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < fadeRadius) {
-                const t = dist / fadeRadius; // 0=on player, 1=at edge
-                return minAlpha + (maxAlpha - minAlpha) * (t * t); // Quadratic ease
+                const t = dist / fadeRadius;
+                return minAlpha + (maxAlpha - minAlpha) * (t * t);
             }
             return maxAlpha;
         }
 
-        // Foreground trees
+        // Foreground trees (bigger scale, dark tinted for depth silhouette)
         if (imgReady(this.activeTree)) {
             for (let i = 0; i < this.trees.length; i++) {
                 const tree = this.trees[i];
                 if (tree.layer !== 'fg') continue;
 
-                const tw = 180 * tree.scale;
-                const th = 220 * tree.scale;
+                // FG trees use same base dimensions as bg but scale is already 30% bigger
+                const tw = 200 * tree.scale;
+                const th = 260 * tree.scale;
                 const treeX = sx + tree.x;
-                const treeY = sy - (180 * tree.scale);
+                const treeY = sy - (210 * tree.scale);
                 const treeCX = treeX + tw * 0.4;
                 const treeCY = treeY + th * 0.5;
 
                 const alpha = getFgAlpha(treeCX, treeCY);
-                if (tree.burnt) {
-                    ctx.globalAlpha = alpha * 0.4;
-                } else {
-                    ctx.globalAlpha = alpha;
-                }
+                if (alpha < 0.02) continue; // Skip if practically invisible
 
+                ctx.globalAlpha = tree.burnt ? alpha * 0.3 : alpha;
+
+                // Draw tree sprite
                 ctx.drawImage(this.activeTree, treeX, treeY, tw, th);
+
+                // Dark tint overlay for silhouette depth effect
+                // This is what makes fg trees look DIFFERENT from bg trees
+                ctx.fillStyle = 'rgba(10,15,8,0.25)';
+                ctx.fillRect(treeX, treeY, tw, th);
+
                 ctx.globalAlpha = 1;
             }
         }
 
-        // Foreground tall grass tufts
+        // Foreground tall grass tufts (big, lush)
         if (imgReady(Assets.grass)) {
             for (let i = 0; i < this.fgGrass.length; i++) {
                 const g = this.fgGrass[i];
-                const gw = 60 * g.scale;
-                const gh = 60 * g.scale;
+                const gw = 70 * g.scale;
+                const gh = 70 * g.scale;
                 const gx = sx + g.x;
-                const gy = sy - (40 * g.scale);
+                const gy = sy - (48 * g.scale);
                 const gcx = gx + gw * 0.5;
                 const gcy = gy + gh * 0.5;
 
-                ctx.globalAlpha = getFgAlpha(gcx, gcy) * 0.85;
+                const alpha = getFgAlpha(gcx, gcy) * 0.9;
+                if (alpha < 0.02) continue;
+
+                ctx.globalAlpha = alpha;
                 if (g.flip) {
                     ctx.save();
                     ctx.translate(gx + gw, gy);

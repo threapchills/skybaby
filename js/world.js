@@ -138,18 +138,22 @@ export class Camera {
 }
 
 class ParallaxLayer {
-    constructor(imagePath, speed, yOffset, autoScrollSpeed) {
+    constructor(imagePath, speed, yOffset, autoScrollSpeed, alpha) {
         this.image = new Image();
         this.image.src = imagePath;
         this.speed = speed;
         this.autoScrollSpeed = autoScrollSpeed || 0;
         this.yOffset = yOffset || 0;
+        this.alpha = alpha !== undefined ? alpha : 1.0;
         this.loaded = false;
         this.image.onload = () => { this.loaded = true; };
     }
 
     draw(ctx, camera) {
         if (!this.loaded) return;
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = prevAlpha * this.alpha;
+
         const windOffset = (Date.now() / 1000) * this.autoScrollSpeed;
         const totalX = -(camera.x * this.speed) - windOffset;
         const imgW = this.image.width;
@@ -159,6 +163,7 @@ class ParallaxLayer {
         for (let i = 0; i < needed; i++) {
             ctx.drawImage(this.image, xPos + imgW * i, this.yOffset);
         }
+        ctx.globalAlpha = prevAlpha;
     }
 }
 
@@ -168,10 +173,14 @@ export class World {
         this.height = height;
         this.camera = new Camera(800, 600, width, height);
 
+        // Sky parallax layers with smart transparency so all layers are visible
+        // Back layer: most opaque (sky fills behind gradient)
+        // Middle layer: semi-transparent so back layer shows through
+        // Front layer (clouds): most transparent so depth is preserved
         this.layers = [
-            new ParallaxLayer('assets/backgrounds/sky_layer_1.png', 0.08, 0, 3),
-            new ParallaxLayer('assets/backgrounds/sky_layer_2.png', 0.35, 0, 12),
-            new ParallaxLayer('assets/backgrounds/clouds_fg.png', 0.65, 80, 30)
+            new ParallaxLayer('assets/backgrounds/sky_layer_1.jpeg', 0.08, 0, 3, 0.8),
+            new ParallaxLayer('assets/backgrounds/sky_layer_2.png', 0.35, 0, 12, 0.55),
+            new ParallaxLayer('assets/backgrounds/clouds_fg.png', 0.65, 80, 30, 0.4)
         ];
 
         // Procedural sky gradient (drawn behind parallax)
