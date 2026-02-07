@@ -128,23 +128,23 @@ class Game {
     }
 
     _generateWorld() {
-        // Home islands
-        this.islands.push(new Island(200, 1000, 600, 60, 'green'));
-        this.islands.push(new Island(5200, 1000, 600, 60, 'blue'));
+        // Home islands (BIG - dwarfs the tiny people)
+        this.islands.push(new Island(200, 1000, 800, 80, 'green'));
+        this.islands.push(new Island(5200, 1000, 800, 80, 'blue'));
 
-        // Generate world islands
-        for (let i = 0; i < 38; i++) {
+        // Generate world islands (larger, chunkier)
+        for (let i = 0; i < 35; i++) {
             for (let attempt = 0; attempt < 80; attempt++) {
                 const rx = 800 + Math.random() * 4200;
                 const ry = 500 + Math.random() * 1500;
-                const rw = 300 + Math.random() * 500;
-                const rh = 60;
+                const rw = 500 + Math.random() * 500;
+                const rh = 80;
 
                 let ok = true;
                 for (let j = 0; j < this.islands.length; j++) {
                     const e = this.islands[j];
-                    if (rx < e.x + e.w + 280 && rx + rw + 280 > e.x &&
-                        ry < e.y + e.h + 280 && ry + rh + 280 > e.y) {
+                    if (rx < e.x + e.w + 350 && rx + rw + 350 > e.x &&
+                        ry < e.y + e.h + 350 && ry + rh + 350 > e.y) {
                         ok = false; break;
                     }
                 }
@@ -1076,6 +1076,18 @@ class Game {
             ctx.lineTo(tRect.x, tRect.y);
             ctx.stroke();
             ctx.setLineDash([]);
+        }
+
+        // Silksong-style foreground layer: trees & grass that overlap entities
+        // with smart transparency near the player
+        {
+            const pRect = cam.getScreenRect(
+                this.player.x + this.player.w * 0.5,
+                this.player.y + this.player.h * 0.5, 0, 0
+            );
+            for (let i = 0; i < sortedIslands.length; i++) {
+                sortedIslands[i].drawForeground(ctx, cam, pRect.x, pRect.y);
+            }
         }
 
         // Weather FG layer

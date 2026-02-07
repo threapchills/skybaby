@@ -186,39 +186,55 @@ export class Island extends Entity {
         this.hasFireplace = Math.random() > 0.4;
         this.conversionTimer = 0;
 
-        // 2.5D depth (visible underside)
-        this.depth = 35 + Math.random() * 30;
+        // 2.5D depth (visible underside) - CHUNKY floating rocks
+        this.depth = 80 + Math.random() * 70;
 
         // Procedural rocky bottom edge
         this.rockPoints = [];
         const segments = Math.max(4, Math.floor(w / 40));
         for (let i = 0; i <= segments; i++) {
             const t = i / segments;
-            const baseDepth = this.depth * (1 - Math.pow(2 * t - 1, 4)); // Tapered edges
+            const baseDepth = this.depth * (1 - Math.pow(2 * t - 1, 4));
             this.rockPoints.push({
                 x: t * w,
                 y: baseDepth * (0.6 + Math.random() * 0.4) + (Math.random() - 0.5) * 10
             });
         }
 
-        // Trees (no CSS filter - use pre-computed tint)
+        // Trees - split into background and foreground layers
         this.trees = [];
-        const numTrees = 1 + Math.floor(Math.random() * (w / 80));
+        const numTrees = 2 + Math.floor(Math.random() * (w / 70));
         for (let i = 0; i < numTrees; i++) {
+            const xPos = 30 + Math.random() * (w - 100);
+            const edgeDist = Math.min(xPos, w - xPos) / w; // 0=edge, 0.5=center
+            // Trees near edges (outer 30%) are more likely to be foreground
+            const isFg = edgeDist < 0.3 ? Math.random() < 0.5 : Math.random() < 0.2;
             this.trees.push({
-                x: 30 + Math.random() * (w - 100),
-                scale: 0.8 + Math.random() * 1.5,
-                burnt: false, burntTimer: 0
+                x: xPos,
+                scale: 1.0 + Math.random() * 1.0,
+                burnt: false, burntTimer: 0,
+                layer: isFg ? 'fg' : 'bg'
             });
         }
 
-        // Grass patches
+        // Background grass patches (drawn with island)
         this.grassPatches = [];
-        const numGrass = 2 + Math.floor(Math.random() * (w / 50));
+        const numGrass = 2 + Math.floor(Math.random() * (w / 45));
         for (let i = 0; i < numGrass; i++) {
             this.grassPatches.push({
-                x: Math.random() * (w - 30),
-                scale: 0.8 + Math.random() * 0.5
+                x: Math.random() * (w - 40),
+                scale: 1.0 + Math.random() * 0.8
+            });
+        }
+
+        // Foreground grass tufts (drawn over entities)
+        this.fgGrass = [];
+        const numFgGrass = 1 + Math.floor(Math.random() * (w / 120));
+        for (let i = 0; i < numFgGrass; i++) {
+            this.fgGrass.push({
+                x: Math.random() * (w - 40),
+                scale: 1.2 + Math.random() * 1.0,
+                flip: Math.random() > 0.5
             });
         }
 
@@ -295,10 +311,10 @@ export class Island extends Entity {
 
         // === 2.5D FLOATING ISLAND RENDERING ===
 
-        // 1. Drop shadow (projected below island)
-        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        // 1. Drop shadow (projected below island - bigger for chunky rocks)
+        ctx.fillStyle = 'rgba(0,0,0,0.10)';
         ctx.beginPath();
-        ctx.ellipse(sx + w * 0.5, sy + h + dep + 25, w * 0.42, 10, 0, 0, Math.PI * 2);
+        ctx.ellipse(sx + w * 0.5, sy + h + dep + 35, w * 0.45, 14, 0, 0, Math.PI * 2);
         ctx.fill();
 
         // 2. Rocky underside with gradient
@@ -326,7 +342,7 @@ export class Island extends Entity {
 
         // 3. Top surface with earth layers
         // Earth side stripe (visible front face)
-        const sideH = Math.min(h, 12);
+        const sideH = Math.min(h, 16);
         const sideGrad = ctx.createLinearGradient(0, sy, 0, sy + sideH);
         sideGrad.addColorStop(0, '#5a8c3a');
         sideGrad.addColorStop(0.3, '#7a5c3a');
@@ -368,19 +384,21 @@ export class Island extends Entity {
         if (imgReady(Assets.grass)) {
             for (let i = 0; i < this.grassPatches.length; i++) {
                 const g = this.grassPatches[i];
-                const gw = 32 * g.scale;
-                const gh = 32 * g.scale;
-                ctx.drawImage(Assets.grass, sx + g.x, sy - (25 * g.scale), gw, gh);
+                const gw = 50 * g.scale;
+                const gh = 50 * g.scale;
+                ctx.drawImage(Assets.grass, sx + g.x, sy - (35 * g.scale), gw, gh);
             }
         }
 
-        // 5. Trees (behind tent)
+        // 5. Background trees only (foreground trees rendered later via drawForeground)
         if (imgReady(this.activeTree)) {
             for (let i = 0; i < this.trees.length; i++) {
                 const tree = this.trees[i];
-                const tw = 120 * tree.scale;
-                const th = 150 * tree.scale;
-                const treeY = sy - (110 * tree.scale);
+                if (tree.layer === 'fg') continue; // Skip foreground trees
+
+                const tw = 180 * tree.scale;
+                const th = 220 * tree.scale;
+                const treeY = sy - (180 * tree.scale);
 
                 if (tree.burnt) {
                     ctx.globalAlpha = 0.4;
@@ -389,7 +407,7 @@ export class Island extends Entity {
                 // Tree shadow
                 ctx.fillStyle = 'rgba(0,0,0,0.1)';
                 ctx.beginPath();
-                ctx.ellipse(sx + tree.x + tw * 0.4, sy - 2, tw * 0.25, 5, 0, 0, Math.PI * 2);
+                ctx.ellipse(sx + tree.x + tw * 0.4, sy - 2, tw * 0.3, 6, 0, 0, Math.PI * 2);
                 ctx.fill();
 
                 ctx.drawImage(this.activeTree, sx + tree.x, treeY, tw, th);
@@ -397,31 +415,37 @@ export class Island extends Entity {
             }
         }
 
-        // 6. Teepee
+        // 6. Teepee (big structure - dwarfs the people)
         const teepeeImg = (this.team === 'green') ? Assets.teepeeGreen : Assets.teepeeBlue;
         if (imgReady(teepeeImg)) {
+            const tpW = 160;
+            const tpH = 160;
+            const tpX = sx + w * 0.3 - tpW * 0.5;
+            const tpY = sy - tpH + 16;
             // Teepee shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.12)';
+            ctx.fillStyle = 'rgba(0,0,0,0.14)';
             ctx.beginPath();
-            ctx.ellipse(sx + 68, sy - 2, 30, 5, 0, 0, Math.PI * 2);
+            ctx.ellipse(tpX + tpW * 0.5, sy - 2, tpW * 0.35, 7, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.drawImage(teepeeImg, sx + 20, sy - 66, 96, 96);
+            ctx.drawImage(teepeeImg, tpX, tpY, tpW, tpH);
         }
 
-        // 7. Fire with glow
+        // 7. Fire with glow (bigger)
         if (this.hasFireplace && imgReady(Assets.fire)) {
-            const fx = sx + w * 0.5 - 40;
-            const fy = sy - 54;
+            const fireW = 120;
+            const fireH = 120;
+            const fx = sx + w * 0.55 - fireW * 0.5;
+            const fy = sy - fireH + 30;
 
             // Fire glow
             ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = 'rgba(255,120,20,0.06)';
+            ctx.fillStyle = 'rgba(255,120,20,0.08)';
             ctx.beginPath();
-            ctx.arc(fx + 40, fy + 50, 60, 0, Math.PI * 2);
+            ctx.arc(fx + fireW * 0.5, fy + fireH * 0.5, 80, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalCompositeOperation = 'source-over';
 
-            ctx.drawImage(Assets.fire, fx, fy, 80, 80);
+            ctx.drawImage(Assets.fire, fx, fy, fireW, fireH);
         }
 
         // Territory border glow
@@ -429,6 +453,83 @@ export class Island extends Entity {
             const glowColor = this.team === 'green' ? 'rgba(0,255,0,0.08)' : 'rgba(0,150,255,0.08)';
             ctx.fillStyle = glowColor;
             ctx.fillRect(sx - 2, sy - 5, w + 4, 10);
+        }
+    }
+
+    // Silksong-style foreground layer: trees & grass rendered OVER entities
+    // with smart transparency so the player is always visible
+    drawForeground(ctx, camera, playerSX, playerSY) {
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h + this.depth);
+        if (!rect.onScreen) return;
+
+        const sx = rect.x;
+        const sy = rect.y;
+        const w = this.w;
+
+        // Helper: compute alpha based on distance to player
+        const fadeRadius = 120; // px from player center where fg fades
+        const minAlpha = 0.12;  // never fully invisible
+        const maxAlpha = 0.7;  // max opacity for fg elements
+
+        function getFgAlpha(elScreenX, elScreenY) {
+            const dx = elScreenX - playerSX;
+            const dy = elScreenY - playerSY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < fadeRadius) {
+                const t = dist / fadeRadius; // 0=on player, 1=at edge
+                return minAlpha + (maxAlpha - minAlpha) * (t * t); // Quadratic ease
+            }
+            return maxAlpha;
+        }
+
+        // Foreground trees
+        if (imgReady(this.activeTree)) {
+            for (let i = 0; i < this.trees.length; i++) {
+                const tree = this.trees[i];
+                if (tree.layer !== 'fg') continue;
+
+                const tw = 180 * tree.scale;
+                const th = 220 * tree.scale;
+                const treeX = sx + tree.x;
+                const treeY = sy - (180 * tree.scale);
+                const treeCX = treeX + tw * 0.4;
+                const treeCY = treeY + th * 0.5;
+
+                const alpha = getFgAlpha(treeCX, treeCY);
+                if (tree.burnt) {
+                    ctx.globalAlpha = alpha * 0.4;
+                } else {
+                    ctx.globalAlpha = alpha;
+                }
+
+                ctx.drawImage(this.activeTree, treeX, treeY, tw, th);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // Foreground tall grass tufts
+        if (imgReady(Assets.grass)) {
+            for (let i = 0; i < this.fgGrass.length; i++) {
+                const g = this.fgGrass[i];
+                const gw = 60 * g.scale;
+                const gh = 60 * g.scale;
+                const gx = sx + g.x;
+                const gy = sy - (40 * g.scale);
+                const gcx = gx + gw * 0.5;
+                const gcy = gy + gh * 0.5;
+
+                ctx.globalAlpha = getFgAlpha(gcx, gcy) * 0.85;
+                if (g.flip) {
+                    ctx.save();
+                    ctx.translate(gx + gw, gy);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(Assets.grass, 0, 0, gw, gh);
+                    ctx.restore();
+                } else {
+                    ctx.drawImage(Assets.grass, gx, gy, gw, gh);
+                }
+                ctx.globalAlpha = 1;
+            }
         }
     }
 }
