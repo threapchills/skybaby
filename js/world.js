@@ -1,110 +1,163 @@
-/* THE STAGE MANAGER (World & Camera)
-   Definitive V4: VISUAL JUICE UPDATE 🥤
-   - Handles "Bloom" logic in main draw.
-   - Adds Impact Frames helper.
+/* WORLD & CAMERA SYSTEM - REMASTERED
+   Advanced camera: trauma shake, time dilation, dynamic zoom, look-ahead,
+   procedural sky rendering with parallax layers.
 */
 
 export class Camera {
-    constructor(viewportWidth, viewportHeight, worldWidth, worldHeight, zoom = 1.0) {
-        this.zoom = zoom;
-        this.w = viewportWidth / zoom;
-        this.h = viewportHeight / zoom;
+    constructor(viewportWidth, viewportHeight, worldWidth, worldHeight) {
+        this.w = viewportWidth;
+        this.h = viewportHeight;
         this.worldW = worldWidth;
         this.worldH = worldHeight;
         this.x = 0;
         this.y = 0;
-        this.shake = 0;
+
+        // Zoom system
+        this.zoom = 0.75;
+        this.targetZoom = 0.75;
+        this.baseZoom = 0.75;
+        this.minZoom = 0.5;
+        this.maxZoom = 1.4;
+
+        // Trauma-based shake (squared for exponential feel)
+        this.trauma = 0;
+        this.maxTrauma = 1.0;
+        this.traumaDecay = 1.2;
+        this.shakeScale = 12;
+        this.shakeAngle = 0;
+        this.shakeTime = 0;
+
+        // Time dilation
+        this.timeDilation = 1.0;
+        this.targetTimeDilation = 1.0;
+        this.dilationLerpSpeed = 4.0;
+
+        // Look-ahead
+        this.lookAheadX = 0;
+        this.lookAheadY = 0;
+        this.lookAheadScale = 0.15;
     }
 
-    // Helper to get screen coordinates handling wrapping
-    getScreenRect(x, y, w, h) {
-        // 1. Center logic relative to camera center
-        const camCenterX = this.x + this.w / 2;
-        let dx = x - camCenterX;
+    get effectiveW() { return this.w / this.zoom; }
+    get effectiveH() { return this.h / this.zoom; }
 
-        // 2. Wrap via Shortest Path
+    addTrauma(amount) {
+        this.trauma = Math.min(this.maxTrauma, this.trauma + amount);
+    }
+
+    setTimeDilation(target, speed) {
+        this.targetTimeDilation = Math.max(0.05, Math.min(1.0, target));
+        if (speed !== undefined) this.dilationLerpSpeed = speed;
+    }
+
+    resetTimeDilation() {
+        this.targetTimeDilation = 1.0;
+        this.dilationLerpSpeed = 4.0;
+    }
+
+    setZoom(target) {
+        this.targetZoom = Math.max(this.minZoom, Math.min(this.maxZoom, target));
+    }
+
+    resetZoom() {
+        this.targetZoom = this.baseZoom;
+    }
+
+    getScreenRect(worldX, worldY, w, h) {
+        const ew = this.effectiveW;
+        const eh = this.effectiveH;
+        const camCenterX = this.x + ew / 2;
+        let dx = worldX - camCenterX;
+
+        // Wrap via shortest path
         const halfWorld = this.worldW / 2;
         if (dx > halfWorld) dx -= this.worldW;
         else if (dx < -halfWorld) dx += this.worldW;
 
-        // 3. Screen Position
-        const screenX = (this.w / 2) + dx;
-        const screenY = y - this.y;
+        const screenX = (ew / 2) + dx;
+        const screenY = worldY - this.y;
+        const margin = 100;
 
-        return { x: screenX, y: screenY, onScreen: (screenX + w > 0 && screenX < this.w) };
+        return {
+            x: screenX,
+            y: screenY,
+            onScreen: (screenX + w > -margin && screenX < ew + margin &&
+                       screenY + h > -margin && screenY < eh + margin)
+        };
     }
 
-    follow(target, dt) {
-        if (this.shake > 0) {
-            this.shake -= 20 * dt;
-            if (this.shake < 0) this.shake = 0;
-        }
+    follow(target, realDt) {
+        // Time dilation interpolation (uses real dt, not dilated)
+        this.timeDilation += (this.targetTimeDilation - this.timeDilation) * this.dilationLerpSpeed * realDt;
 
-        // Target center
-        let tx = target.x - this.w / 2;
-        let ty = target.y - this.h / 2;
+        // Zoom interpolation
+        this.zoom += (this.targetZoom - this.zoom) * 3.0 * realDt;
 
-        // Unclamped Y (or clamped? User said "wrapping around play area", implying X. Y usually blocked by ground/sky).
-        // Let's keep Y clamped for now as it's a platformer with ground.
-        if (ty < -500) ty = -500; // Allow looking up high
-        if (ty + this.h > this.worldH) ty = this.worldH - this.h;
+        const ew = this.effectiveW;
+        const eh = this.effectiveH;
 
-        // X is INFINITE. We just follow. 
-        // Note: We need to handle the case where target wraps from 5000 to 0.
-        // But the target entity itself should probably manage its x to stay 0..5000.
-        // If camera is at 4900 and target goes to 100, target.x is 100.
-        // tx would be 100 - w/2. 
-        // We need smooth interpolation even across the wrap boundary.
+        // Look-ahead based on velocity
+        this.lookAheadX += ((target.vx || 0) * this.lookAheadScale - this.lookAheadX) * 2.0 * realDt;
+        this.lookAheadY += ((target.vy || 0) * this.lookAheadScale * 0.5 - this.lookAheadY) * 2.0 * realDt;
 
-        // Complex Lerp Wrapping:
-        // Calculate shortest distance to target X
-        let dx = (target.x - this.w / 2) - this.x;
-        // Wrap dx
+        // Target position with look-ahead
+        let tx = target.x + this.lookAheadX - ew / 2;
+        let ty = target.y + this.lookAheadY - eh / 2;
+
+        // Clamp Y
+        if (ty < -600) ty = -600;
+        if (ty + eh > this.worldH + 200) ty = this.worldH + 200 - eh;
+
+        // Wrapping X follow
+        let dx = tx - this.x;
         if (dx > this.worldW / 2) dx -= this.worldW;
         if (dx < -this.worldW / 2) dx += this.worldW;
 
-        this.x += dx * 5 * dt;
-        this.y += (ty - this.y) * 5 * dt;
+        const followSpeed = 4.0;
+        this.x += dx * followSpeed * realDt;
+        this.y += (ty - this.y) * followSpeed * realDt;
 
-        // Normalize Camera X to keep it within bounds (optional, but good for math)
-        // Actually, for "infinite" feel without entity glitches, maybe safer to keep camera Unbounded?
-        // But Background parallax depends on camera.x. Let's modulus it.
+        // Normalize camera X
         while (this.x < 0) this.x += this.worldW;
         while (this.x >= this.worldW) this.x -= this.worldW;
 
-        if (this.shake > 0) {
-            this.x += (Math.random() - 0.5) * this.shake * 10;
-            this.y += (Math.random() - 0.5) * this.shake * 10;
+        // Trauma-based shake
+        if (this.trauma > 0) {
+            this.trauma = Math.max(0, this.trauma - this.traumaDecay * realDt);
+            const shake = this.trauma * this.trauma; // Squared for exponential feel
+            this.shakeTime += realDt * 30;
+            const offsetX = Math.sin(this.shakeTime * 1.1) * shake * this.shakeScale;
+            const offsetY = Math.cos(this.shakeTime * 1.7) * shake * this.shakeScale;
+            this.shakeAngle = Math.sin(this.shakeTime * 0.7) * shake * 0.02;
+            this.x += offsetX;
+            this.y += offsetY;
+        } else {
+            this.shakeAngle = 0;
         }
     }
 }
 
 class ParallaxLayer {
-    constructor(imagePath, speed, yOffset = 0, autoScrollSpeed = 0) {
+    constructor(imagePath, speed, yOffset, autoScrollSpeed) {
         this.image = new Image();
         this.image.src = imagePath;
         this.speed = speed;
-        this.autoScrollSpeed = autoScrollSpeed;
-        this.yOffset = yOffset;
+        this.autoScrollSpeed = autoScrollSpeed || 0;
+        this.yOffset = yOffset || 0;
         this.loaded = false;
         this.image.onload = () => { this.loaded = true; };
     }
 
     draw(ctx, camera) {
         if (!this.loaded) return;
-
         const windOffset = (Date.now() / 1000) * this.autoScrollSpeed;
         const totalX = -(camera.x * this.speed) - windOffset;
+        const imgW = this.image.width;
+        const xPos = ((totalX % imgW) + imgW) % imgW - imgW;
 
-        // Use Math.floor to prevent sub-pixel tearing lines
-        const xPos = Math.floor(totalX % this.image.width);
-
-        ctx.drawImage(this.image, xPos, this.yOffset);
-        ctx.drawImage(this.image, xPos + this.image.width, this.yOffset);
-        ctx.drawImage(this.image, xPos + this.image.width * 2, this.yOffset);
-
-        if (xPos > 0) {
-            ctx.drawImage(this.image, xPos - this.image.width, this.yOffset);
+        const needed = Math.ceil(camera.effectiveW / imgW) + 2;
+        for (let i = 0; i < needed; i++) {
+            ctx.drawImage(this.image, xPos + imgW * i, this.yOffset);
         }
     }
 }
@@ -113,32 +166,50 @@ export class World {
     constructor(width, height) {
         this.width = width;
         this.height = height;
-        this.camera = new Camera(800, 600, width, height, 0.8);
+        this.camera = new Camera(800, 600, width, height);
 
         this.layers = [
-            // Back: Sky Layer 1
-            new ParallaxLayer('assets/backgrounds/sky_layer_1.png', 0.1, 0, 5),
-            // Mid: Sky Layer 2
-            new ParallaxLayer('assets/backgrounds/sky_layer_2.png', 0.5, 0, 20),
-            // Front: Clouds FG
-            new ParallaxLayer('assets/backgrounds/clouds_fg.png', 0.8, 100, 50)
+            new ParallaxLayer('assets/backgrounds/sky_layer_1.png', 0.08, 0, 3),
+            new ParallaxLayer('assets/backgrounds/sky_layer_2.png', 0.35, 0, 12),
+            new ParallaxLayer('assets/backgrounds/clouds_fg.png', 0.65, 80, 30)
         ];
+
+        // Procedural sky gradient (drawn behind parallax)
+        this.skyColors = {
+            day: { top: '#1a0533', mid: '#2d1b69', bot: '#ff6b35' },
+            night: { top: '#050510', mid: '#0a0a20', bot: '#1a0a30' }
+        };
     }
 
-    update(player, dt) {
-        this.camera.follow(player, dt);
+    update(player, realDt) {
+        this.camera.follow(player, realDt);
     }
 
-    draw(ctx, season) {
-        ctx.save();
+    draw(ctx, season, dayProgress) {
+        // Procedural sky gradient
+        const nightBlend = Math.max(0, -Math.sin(dayProgress || 0)) * 0.7;
+        const grad = ctx.createLinearGradient(0, 0, 0, this.camera.effectiveH);
 
-        // WINTER FILTER: Shift Hue to Blue/Green
-        if (season === 'winter') {
-            ctx.filter = 'hue-rotate(12deg) brightness(1.1)';
+        const sc = this.skyColors;
+        if (nightBlend < 0.3) {
+            grad.addColorStop(0, sc.day.top);
+            grad.addColorStop(0.5, sc.day.mid);
+            grad.addColorStop(1, sc.day.bot);
+        } else {
+            grad.addColorStop(0, sc.night.top);
+            grad.addColorStop(0.5, sc.night.mid);
+            grad.addColorStop(1, sc.night.bot);
         }
 
-        this.layers.forEach(layer => layer.draw(ctx, this.camera));
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, this.camera.effectiveW, this.camera.effectiveH);
 
-        ctx.restore(); // Remove filter for game objects
+        // Season filter applied to backgrounds only
+        ctx.save();
+        if (season === 'winter') {
+            ctx.globalAlpha = 0.85;
+        }
+        this.layers.forEach(layer => layer.draw(ctx, this.camera));
+        ctx.restore();
     }
 }

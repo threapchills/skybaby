@@ -1,11 +1,14 @@
-/* THE CONDUCTOR (Audio Engine)
-   Definitive V5: SPELL SOUNDS ADDED 🧙‍♂️🎵
-   - Added playSpell() for pitched-down magical effects.
+/* AUDIO ENGINE - REMASTERED
+   Sound limiting, better volume management, efficient playback.
 */
 
 export class AudioManager {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.connect(this.ctx.destination);
+        this.masterGain.gain.value = 0.8;
+
         this.sounds = {};
         this.files = {
             'ambience': 'assets/sounds/ambience.ogg',
@@ -22,38 +25,42 @@ export class AudioManager {
             'water': 'assets/sounds/spell2.wav',
             'earth': 'assets/sounds/spell3.wav',
             'air': 'assets/sounds/spell4.wav',
-            'horn': 'assets/sounds/teepee.ogg',      // Fallback: reuse teepee
-            'drum_loop': 'assets/sounds/ambience.ogg' // Fallback: reuse ambience
+            'horn': 'assets/sounds/teepee.ogg',
+            'drum_loop': 'assets/sounds/ambience.ogg'
         };
 
         this.loops = {};
-        this.isMuted = false;
         this.initialized = false;
+
+        // Sound limiting: prevent audio spam
+        this._lastPlayTime = {};
+        this._minInterval = {
+            'hit': 0.05,
+            'shoot': 0.04,
+            'air': 0.15,
+            'jump': 0.1
+        };
     }
 
     async loadAll() {
         const promises = Object.entries(this.files).map(([key, url]) => this._loadBuffer(key, url));
         await Promise.all(promises);
-        console.log("🎵 Audio Loaded & Ready!");
     }
 
     async _loadBuffer(key, url) {
         try {
             const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            if (!response.ok) return;
             const arrayBuffer = await response.arrayBuffer();
-            const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
-            this.sounds[key] = audioBuffer;
+            this.sounds[key] = await this.ctx.decodeAudioData(arrayBuffer);
         } catch (e) {
-            console.warn(`⚠️ Sound file missing or broken: ${url}. Error: ${e.message}`);
+            // Silent fail for missing audio
         }
     }
 
     resume() {
         if (this.ctx.state === 'suspended') {
-            this.ctx.resume().then(() => {
-                this.initialized = true;
-            }).catch(e => console.error(e));
+            this.ctx.resume().then(() => { this.initialized = true; });
         } else {
             this.initialized = true;
         }
@@ -62,51 +69,30 @@ export class AudioManager {
     play(name, vol = 1.0, pitchVar = 0.0) {
         if (!this.sounds[name]) return;
 
+        // Sound limiting
+        const now = this.ctx.currentTime;
+        const minInt = this._minInterval[name] || 0.02;
+        if (this._lastPlayTime[name] && (now - this._lastPlayTime[name]) < minInt) return;
+        this._lastPlayTime[name] = now;
+
         try {
             const source = this.ctx.createBufferSource();
             source.buffer = this.sounds[name];
 
             if (pitchVar > 0) {
-                const variance = (Math.random() * pitchVar * 2) - pitchVar;
-                source.playbackRate.value = 1.0 + variance;
+                source.playbackRate.value = 1.0 + (Math.random() * 2 - 1) * pitchVar;
             }
 
             const gainNode = this.ctx.createGain();
             gainNode.gain.value = vol;
-
             source.connect(gainNode);
-            gainNode.connect(this.ctx.destination);
+            gainNode.connect(this.masterGain);
             source.start(0);
-        } catch (e) {
-            console.warn(`Audio play error for ${name}:`, e);
-        }
-    }
-
-    // NEW: Specialized Spell Sound (Pitched down Teepee)
-    playSpell() {
-        if (!this.sounds['teepee']) return;
-        try {
-            const source = this.ctx.createBufferSource();
-            source.buffer = this.sounds['teepee'];
-
-            // Pitch down by one octave (0.5 rate)
-            source.playbackRate.value = 0.5;
-
-            const gainNode = this.ctx.createGain();
-            gainNode.gain.value = 0.8; // Louder
-
-            source.connect(gainNode);
-            gainNode.connect(this.ctx.destination);
-            source.start(0);
-        } catch (e) {
-            console.warn("Spell audio error:", e);
-        }
+        } catch (e) { /* ignore */ }
     }
 
     startLoop(name, vol = 1.0) {
-        if (!this.sounds[name]) return;
-        if (this.loops[name]) return;
-
+        if (!this.sounds[name] || this.loops[name]) return;
         try {
             const source = this.ctx.createBufferSource();
             source.buffer = this.sounds[name];
@@ -114,22 +100,19 @@ export class AudioManager {
 
             const gainNode = this.ctx.createGain();
             gainNode.gain.value = vol;
-
             source.connect(gainNode);
-            gainNode.connect(this.ctx.destination);
+            gainNode.connect(this.masterGain);
             source.start(0);
 
             this.loops[name] = { source, gain: gainNode };
-        } catch (e) {
-            console.warn(`Audio loop error for ${name}:`, e);
-        }
+        } catch (e) { /* ignore */ }
     }
 
     setLoopVolume(name, vol) {
         if (this.loops[name]) {
             try {
                 this.loops[name].gain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.1);
-            } catch (e) { }
+            } catch (e) { /* ignore */ }
         }
     }
 
@@ -137,7 +120,11 @@ export class AudioManager {
         if (this.loops[name]) {
             try {
                 this.loops[name].source.playbackRate.setTargetAtTime(rate, this.ctx.currentTime, 0.1);
-            } catch (e) { }
+            } catch (e) { /* ignore */ }
         }
+    }
+
+    setMasterVolume(vol) {
+        this.masterGain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.05);
     }
 }

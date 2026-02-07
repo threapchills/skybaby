@@ -1,3 +1,7 @@
+/* RESOURCE MANAGER - REMASTERED
+   Populous-inspired power system. Mana scales with territory.
+   Throttled UI updates for performance.
+*/
 
 export class ResourceManager {
     constructor() {
@@ -6,19 +10,19 @@ export class ResourceManager {
         this.blueTents = 1;
         this.bluePop = 0;
 
-        // --- SPELL SYSTEM ---
-        // 0: FIRE (Ball), 1: AIR (Hook), 2: EARTH (Quake), 3: WATER (Spawn)
         this.currentSpell = 0;
         this.spellNames = ["FIREBALL", "AEROKINESIS", "QUAKE", "TIDE OF LIFE"];
         this.spellColors = ["#FF4500", "#87CEEB", "#8B4513", "#00BFFF"];
+        this.spellCosts = [80, 5, 40, 80]; // per cast (air is per second)
 
-        // RESOURCES - MANA OVERHAUL
         this.mana = 100;
         this.maxMana = 100;
 
-        this.manaRegenTimer = 0;
+        // Throttle UI updates
+        this._uiTimer = 0;
+        this._uiInterval = 0.05; // 20 updates/sec max
 
-        // UI ELEMENTS CACHE
+        // UI elements (cached)
         this.ui = {
             pPop: document.getElementById('p-pop'),
             pTents: document.getElementById('p-tents'),
@@ -26,7 +30,7 @@ export class ResourceManager {
             ePop: document.getElementById('e-pop'),
             eTents: document.getElementById('e-tents'),
             eHealth: document.getElementById('e-health'),
-            barMana: document.getElementById('bar-mana'), // SINGLE BAR
+            barMana: document.getElementById('bar-mana'),
             msgArea: document.getElementById('message-area'),
             spells: [
                 document.getElementById('spell-0'),
@@ -38,77 +42,50 @@ export class ResourceManager {
     }
 
     cycleSpell(direction) {
-        this.currentSpell += direction;
-        if (this.currentSpell > 3) this.currentSpell = 0;
-        if (this.currentSpell < 0) this.currentSpell = 3;
-        this.updateSpellUI();
+        this.currentSpell = ((this.currentSpell + direction) % 4 + 4) % 4;
+        this._updateSpellUI();
     }
 
     setSpell(index) {
         if (index >= 0 && index <= 3) {
             this.currentSpell = index;
-            this.updateSpellUI();
+            this._updateSpellUI();
         }
     }
 
-    updateSpellUI() {
-        if (!this.ui.spells) return;
-        this.ui.spells.forEach((el, i) => {
+    _updateSpellUI() {
+        if (!this.ui.spells[0]) return;
+        for (let i = 0; i < 4; i++) {
+            const el = this.ui.spells[i];
             if (el) {
                 if (i === this.currentSpell) el.classList.add('active');
                 else el.classList.remove('active');
             }
-        });
+        }
     }
 
-    // --- REPLENISHMENT ---
     replenishAll() {
         this.mana = this.maxMana;
-        console.log("🌟 MANA RUSH! Resources Replenished!");
-        this.showFloatingMessage("MANA SURGE!", "#FFD700");
+        this.showMessage("MANA SURGE!", "#FFD700");
     }
 
     addMana(amount) {
         this.mana = Math.min(this.mana + amount, this.maxMana);
     }
 
-    // New: Water from Blood (Kills) - Economy of Souls
-    addWater(amount) {
-        this.addMana(amount); // Soul = Mana (Efficiency)
-        this.showFloatingMessage("SOUL CAPTURED!", "#00BFFF");
+    addSouls(amount) {
+        this.addMana(amount);
     }
-
-    // --- SPENDING ---
 
     spendMana(amount) {
         if (this.mana >= amount) {
             this.mana -= amount;
             return true;
         }
-        this.showFloatingMessage("NOT ENOUGH MANA!", "#FF4500");
         return false;
     }
 
-    spendEarth() { return this.spendMana(90); } // Legacy wrapper if needed, but better to call spendMana directly
-    spendWater() { return this.spendMana(80); }
-    spendAir(dt) { return this.spendMana(5 * dt); } // Low cost per second? 
-    spendFire() { return this.spendMana(80); }
-
-    update(dt, isGrounded, isMoving, isNearFire) {
-        // RECHARGE SLOWLY WHEN WAITING BY ANY CAMPFIRE
-        if (isNearFire) {
-            this.manaRegenTimer += dt;
-            if (this.manaRegenTimer > 0.1) {
-                this.manaRegenTimer = 0;
-                // Regen rate: ~10 per second
-                if (this.mana < this.maxMana) {
-                    this.mana = Math.min(this.mana + 1, this.maxMana);
-                }
-            }
-        } else {
-            this.manaRegenTimer = 0;
-        }
-    }
+    spendAir(dt) { return this.spendMana(5 * dt); }
 
     updateStats(gTents, gPop, bTents, bPop) {
         this.greenTents = gTents;
@@ -117,40 +94,40 @@ export class ResourceManager {
         this.bluePop = bPop;
     }
 
-    // NEW DOM-BASED UI UPDATE
-    updateUI(playerHp, playerMaxHp, enemyHp, enemyMaxHp) {
-        if (!this.ui.pPop) return; // Safety check if UI not found
+    updateUI(playerHp, playerMaxHp, enemyHp, enemyMaxHp, dt) {
+        this._uiTimer += dt || 0;
+        if (this._uiTimer < this._uiInterval) return;
+        this._uiTimer = 0;
 
-        // Update Stats
+        if (!this.ui.pPop) return;
+
         this.ui.pPop.textContent = this.greenPop;
         this.ui.pTents.textContent = `Tents: ${this.greenTents}`;
         this.ui.ePop.textContent = this.bluePop;
         this.ui.eTents.textContent = `Tents: ${this.blueTents}`;
 
-        // Health Bars
         const pPct = Math.max(0, (playerHp / playerMaxHp) * 100);
         this.ui.pHealth.style.width = `${pPct}%`;
 
         const ePct = Math.max(0, (enemyHp / enemyMaxHp) * 100);
         this.ui.eHealth.style.width = `${ePct}%`;
 
-        // Resource Bars - SINGLE MANA BAR
         if (this.ui.barMana) {
             this.ui.barMana.style.width = `${(this.mana / this.maxMana) * 100}%`;
         }
     }
 
-    showFloatingMessage(text, color) {
-        const msg = document.getElementById('message-area');
-        if (msg) {
-            msg.textContent = text;
-            msg.style.color = color;
-            msg.style.opacity = 1;
-            msg.style.transform = "scale(1.2)";
-            setTimeout(() => {
-                msg.style.opacity = 0;
-                msg.style.transform = "scale(1)";
-            }, 2000);
-        }
+    showMessage(text, color) {
+        const msg = this.ui.msgArea;
+        if (!msg) return;
+        msg.textContent = text;
+        msg.style.color = color;
+        msg.style.opacity = '1';
+        msg.style.transform = 'scale(1.2)';
+        clearTimeout(this._msgTimeout);
+        this._msgTimeout = setTimeout(() => {
+            msg.style.opacity = '0';
+            msg.style.transform = 'scale(1)';
+        }, 2000);
     }
 }

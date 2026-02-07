@@ -1,8 +1,6 @@
-/* THE HEART OF THE GAME
-   Definitive V39.0: THE "EARTHQUAKE" UPDATE 🌍
-   - Restored full spell logic.
-   - Implemented Earthquake (Spell 2).
-   - Fixed file corruption.
+/* GAME ENGINE - REMASTERED
+   Optimized core with time dilation, spatial awareness,
+   2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
 import { InputHandler } from './input.js';
@@ -10,8 +8,9 @@ import { ResourceManager } from './resources.js';
 import { World } from './world.js';
 import {
     Player, Island, Villager, Warrior, Projectile,
-    Particle, Pig, Leaf, Snowflake, Assets,
-    Fireball, StoneWall, RainCloud, VisualEffect, Totem
+    Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
+    RainCloud, VisualEffect, Totem,
+    spawnBlood, spawnParticle, updateParticles, drawParticles
 } from './entities.js';
 import { AudioManager } from './audio.js';
 
@@ -24,31 +23,25 @@ class Game {
 
         this.worldWidth = 6000;
         this.worldHeight = 3000;
-
         this.uiState = 'TITLE';
 
         this.titleImg = new Image(); this.titleImg.src = 'assets/title.png';
         this.tooltipImg = new Image(); this.tooltipImg.src = 'assets/tooltip.png';
 
         this.uiLayer = document.getElementById('ui-layer');
-        this.uiLayer.style.display = 'none'; // Start hidden
+        this.uiLayer.style.display = 'none';
 
         this.input = new InputHandler();
-
-        // Bind Spell Wheel
-        this.input.onScroll((delta) => {
-            this.resources.cycleSpell(delta > 0 ? 1 : -1);
-        });
-
         this.resources = new ResourceManager();
         this.world = new World(this.worldWidth, this.worldHeight);
-
         this.audio = new AudioManager();
         this.audio.loadAll();
 
+        this.input.onScroll((delta) => this.resources.cycleSpell(delta > 0 ? 1 : -1));
+
         this.player = new Player(400, 200, 'green');
         this.enemyChief = new Player(5500, 200, 'blue');
-        this.enemyChief.mana = 100; // Enemy Mana Tracking
+        this.enemyChief.mana = 100;
         this.enemyChief.maxMana = 100;
 
         this.islands = [];
@@ -56,7 +49,6 @@ class Game {
         this.projectiles = [];
         this.fireballs = [];
         this.walls = [];
-        this.particles = [];
         this.visualEffects = [];
         this.pigs = [];
         this.leaves = [];
@@ -65,37 +57,36 @@ class Game {
         this.totems = [];
 
         this.season = Math.random() > 0.5 ? 'summer' : 'winter';
-        console.log(`SEASON START: ${this.season.toUpperCase()}`);
-
         this._generateWorld();
-
-        const isWinter = (this.season === 'winter');
-        this.islands.forEach(island => island.setSeason(isWinter));
+        this.islands.forEach(island => island.setSeason(this.season === 'winter'));
 
         this.lastTime = 0;
         this.spawnTimer = 0;
         this.hookTarget = null;
         this.gameOver = false;
-
         this.impactFrameTimer = 0;
 
+        // Day/night cycle
         this.dayCycleTimer = 0;
         this.dayTime = 0;
         this.dayCount = 0;
 
-        this.windTimer = 0;
+        // Weather caps
+        this.maxLeaves = 40;
+        this.maxSnowflakes = 50;
         this.weatherTimer = 0;
-        this.pulseTime = 0;
-        this.lightningTimer = 0;
 
-        // WAR DIRECTOR
-        this.warState = 'BUILD'; // BUILD -> GATHER -> ATTACK
-        this.warTimer = 40.0;
-        console.log("WAR DIRECTOR STARTED: BUILD PHASE");
+        // War Director
+        this.warState = 'BUILD';
+        this.warTimer = 40;
+
+        // Performance: track FPS
+        this._frameCount = 0;
+        this._fpsTimer = 0;
+        this.fps = 60;
 
         window.addEventListener('click', () => this._startAudio(), { once: true });
         window.addEventListener('keydown', () => this._startAudio(), { once: true });
-
         this._bindNavigation();
 
         requestAnimationFrame((ts) => this.loop(ts));
@@ -114,6 +105,8 @@ class Game {
             setTimeout(() => { this.navCooldown = false; }, 200);
         } else if (this.uiState === 'TOOLTIP' && !this.navCooldown) {
             this.uiState = 'PLAYING';
+            const lt = document.getElementById('loading-text');
+            if (lt) lt.style.display = 'none';
         }
     }
 
@@ -123,7 +116,6 @@ class Game {
         this.audio.resume();
         this.audio.startLoop('ambience', 0.5);
         this.audio.startLoop('music', 0.4);
-        this.audio.startLoop('fall', 0.0);
     }
 
     resizeCanvas() {
@@ -136,50 +128,44 @@ class Game {
     }
 
     _generateWorld() {
-        this.islands.push(new Island(200, 1000, 600, 60, 'green')); // Squashed
-        this.islands.push(new Island(5200, 1000, 600, 60, 'blue')); // Squashed
+        // Home islands
+        this.islands.push(new Island(200, 1000, 600, 60, 'green'));
+        this.islands.push(new Island(5200, 1000, 600, 60, 'blue'));
 
-        const maxAttempts = 100;
-
-        for (let i = 0; i < 40; i++) { // INCREASED DENSITY
-            let placed = false;
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        // Generate world islands
+        for (let i = 0; i < 38; i++) {
+            for (let attempt = 0; attempt < 80; attempt++) {
                 const rx = 800 + Math.random() * 4200;
                 const ry = 500 + Math.random() * 1500;
                 const rw = 300 + Math.random() * 500;
-                const rh = 60; // SQUASHED HEIGHT
+                const rh = 60;
 
-                let overlaps = false;
-                for (let existing of this.islands) {
-                    if (rx < existing.x + existing.w + 300 &&
-                        rx + rw + 300 > existing.x &&
-                        ry < existing.y + existing.h + 300 &&
-                        ry + rh + 300 > existing.y) {
-                        overlaps = true;
-                        break;
+                let ok = true;
+                for (let j = 0; j < this.islands.length; j++) {
+                    const e = this.islands[j];
+                    if (rx < e.x + e.w + 280 && rx + rw + 280 > e.x &&
+                        ry < e.y + e.h + 280 && ry + rh + 280 > e.y) {
+                        ok = false; break;
                     }
                 }
 
-                if (!overlaps) {
+                if (ok) {
                     let team = 'neutral';
                     if (rx < 1500) team = 'green';
                     if (rx > 4500) team = 'blue';
-                    const newIsland = new Island(rx, ry, rw, rh, team);
-                    this.islands.push(newIsland);
-                    placed = true;
+                    this.islands.push(new Island(rx, ry, rw, rh, team));
                     break;
                 }
             }
         }
 
+        // Pigs
         const pigCount = 5 + Math.floor(Math.random() * 6);
         for (let i = 0; i < pigCount; i++) {
             const home = this.islands[Math.floor(Math.random() * this.islands.length)];
-            const px = home.x + Math.random() * (home.w - 50);
-            const py = home.y - 60;
-            const piggy = new Pig(px, py);
-            piggy.homeIsland = home;
-            this.pigs.push(piggy);
+            const pig = new Pig(home.x + Math.random() * (home.w - 50), home.y - 60);
+            pig.homeIsland = home;
+            this.pigs.push(pig);
         }
 
         this.player.visitedIslands.add(this.islands[0]);
@@ -187,44 +173,49 @@ class Game {
     }
 
     _spawnInitialUnits() {
-        // Spawn 3 Villagers + 2 Warriors per team
-        const teams = ['green', 'blue'];
-        teams.forEach(team => {
-            let countV = 0;
-            let countW = 0;
+        ['green', 'blue'].forEach(team => {
             const validIslands = this.islands.filter(i => i.team === team || i.team === 'neutral');
-
-            while (countV < 3 || countW < 2) {
+            let cV = 0, cW = 0;
+            while (cV < 3 || cW < 2) {
                 const island = validIslands[Math.floor(Math.random() * validIslands.length)];
                 if (!island) continue;
-
                 const x = island.x + 50 + Math.random() * 100;
                 const y = island.y - 50;
-
-                if (countV < 3) {
+                if (cV < 3) {
                     const v = new Villager(x, y, team);
                     v.homeIsland = island;
                     this.villagers.push(v);
-                    countV++;
-                } else if (countW < 2) {
+                    cV++;
+                } else {
                     const w = new Warrior(x, y, team);
                     w.homeIsland = island;
                     this.villagers.push(w);
-                    countW++;
+                    cW++;
                 }
             }
         });
-        console.log("INITIAL UNITS SPAWNED: 5 Green, 5 Blue");
     }
 
     loop(timestamp) {
         const dtRaw = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
-        const dt = Math.min(dtRaw, 0.05);
+        const realDt = Math.min(dtRaw, 0.05);
+
+        // Time dilation: game dt is scaled by camera's time dilation
+        const gameDt = realDt * this.world.camera.timeDilation;
+
+        // FPS tracking
+        this._frameCount++;
+        this._fpsTimer += realDt;
+        if (this._fpsTimer >= 1) {
+            this.fps = this._frameCount;
+            this._frameCount = 0;
+            this._fpsTimer = 0;
+        }
 
         try {
-            this.update(dt);
-            this.draw();
+            this.update(gameDt, realDt);
+            this.draw(realDt);
         } catch (e) {
             console.error("GAME CRASH PREVENTED:", e);
         }
@@ -232,11 +223,10 @@ class Game {
         requestAnimationFrame((ts) => this.loop(ts));
     }
 
-    update(dt) {
-        if (this.uiState !== 'PLAYING') return;
-        if (this.gameOver) return;
+    update(dt, realDt) {
+        if (this.uiState !== 'PLAYING' || this.gameOver) return;
 
-        // Spell Key Shortcuts
+        // Spell keys
         if (this.input.keys.digit1) this.resources.setSpell(0);
         if (this.input.keys.digit2) this.resources.setSpell(1);
         if (this.input.keys.digit3) this.resources.setSpell(2);
@@ -245,17 +235,18 @@ class Game {
         this._updateTotemLogic(dt);
         this._updateIslandDynamics(dt);
 
+        // Impact frame pause
         if (this.impactFrameTimer > 0) {
-            this.impactFrameTimer -= dt;
-            if (this.impactFrameTimer > 0.1) return;
+            this.impactFrameTimer -= realDt;
+            if (this.impactFrameTimer > 0.08) return;
         }
 
+        // Day/night cycle
         this.dayCycleTimer += dt;
         if (this.dayCycleTimer < 20) {
             this.dayTime = (this.dayCycleTimer / 20) * Math.PI;
         } else if (this.dayCycleTimer < 30) {
-            const nightProgress = (this.dayCycleTimer - 20) / 10;
-            this.dayTime = Math.PI + (nightProgress * Math.PI);
+            this.dayTime = Math.PI + ((this.dayCycleTimer - 20) / 10) * Math.PI;
         } else {
             this.dayCycleTimer = 0;
             this.dayTime = 0;
@@ -263,218 +254,242 @@ class Game {
             this._checkSeasonChange();
         }
 
-        const isMoving = this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
-        this.world.update(this.player, dt);
-        this._updateTotemLogic(dt);
+        // Player update
+        this.player.update(dt, this.input, this.resources, this.worldWidth, this.worldHeight, this.islands, this.audio, this.enemyChief, this.walls);
+        this.world.update(this.player, realDt);
 
+        // Weather
         this._updateWeather(dt);
 
-        // Update Villagers (and Warriors)
-        this.villagers.forEach(v => {
-            if (!v.dead) {
-                if (v instanceof Warrior) {
-                    // Warrior needs combat context
-                    v.updateLogic(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
-                        (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
-                        this.worldWidth, this.worldHeight, this.audio,
-                        (v.team === 'green' ? this.player : this.enemyChief),
-                        this.villagers, this.walls, this.warState
-                    );
-                } else {
-                    // Villager needs simpler context (passing pigs for milling behavior)
-                    v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls, this.warState);
-                }
+        // Villagers
+        for (let i = 0; i < this.villagers.length; i++) {
+            const v = this.villagers[i];
+            if (v.dead) continue;
+            if (v instanceof Warrior) {
+                v.updateLogic(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
+                    (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
+                    this.worldWidth, this.worldHeight, this.audio,
+                    v.team === 'green' ? this.player : this.enemyChief,
+                    this.villagers, this.walls, this.warState
+                );
+            } else {
+                v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls, this.warState);
             }
-        });
+        }
 
-        // Update Pigs
-        this.pigs.forEach(p => p.update(dt, this.islands, this.worldWidth, this.worldHeight));
+        // Pigs
+        for (let i = 0; i < this.pigs.length; i++) {
+            this.pigs[i].update(dt, this.islands, this.worldWidth, this.worldHeight);
+        }
 
         this._handleSpellCasting(dt);
         this._checkCollisions(dt);
         this._handleCombat(dt);
         this._handleShooting(dt);
 
-        // Spawn/Respawn Logic
+        // Spawning
         this.spawnTimer += dt;
-        if (this.spawnTimer > 10.0) {
+        if (this.spawnTimer > 10) {
             this._spawnVillagers();
             this._spawnPigs();
             this.spawnTimer = 0;
         }
 
+        // Enemy chief
         if (!this.enemyChief.dead) {
             this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls);
             this._updateEnemyAI(dt);
         }
 
-        // --- WAR DIRECTOR ---
+        // War Director
         this._updateWarDirector(dt);
 
-        // --- STATS & UI ---
+        // Particles (pooled)
+        updateParticles(dt);
+
+        // Stats
         const greenCount = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
         const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
         const greenTents = this.islands.filter(i => i.hasTeepee && i.team === 'green').length;
         const blueTents = this.islands.filter(i => i.hasTeepee && i.team === 'blue').length;
 
         this.resources.updateStats(greenTents, greenCount, blueTents, blueCount);
-        this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp);
+        this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp, dt);
 
-        // --- VICTORY / DEFEAT CONDITIONS ---
-        // (Existing logic follows)
+        // Victory / Defeat
+        this._checkWinConditions(greenCount, blueCount);
+
+        // Gradually restore time dilation
+        if (this.world.camera.targetTimeDilation < 1.0) {
+            this._dilationResetTimer = (this._dilationResetTimer || 0) + dt;
+            if (this._dilationResetTimer > 0.8) {
+                this.world.camera.resetTimeDilation();
+                this.world.camera.resetZoom();
+                this._dilationResetTimer = 0;
+            }
+        }
+    }
+
+    _checkWinConditions(greenCount, blueCount) {
         if (this.player.dead) {
             if (greenCount > 0) {
-                this.player.respawnTimer -= dt;
+                this.player.respawnTimer -= 0.016;
                 if (this.player.respawnTimer <= 0) {
                     this.player.dead = false;
                     this.player.hp = 100;
                     this.player.x = this.islands[0].x;
                     this.player.y = this.islands[0].y - 100;
-                    this._spawnBlood(this.player.x, this.player.y, '#00ff00');
+                    spawnBlood(this.player.x, this.player.y, '#00ff00', 15);
                 }
             } else {
                 this.gameOver = true;
-                this.resources.showFloatingMessage("DEFEAT! Your tribe has fallen.", "#FF0000");
+                this.resources.showMessage("DEFEAT! Your tribe has fallen.", "#FF0000");
                 setTimeout(() => location.reload(), 4000);
             }
         }
 
-        // ENEMY DEATH & RESPAWN CHECK
         if (this.enemyChief.dead) {
             if (blueCount > 0) {
-                this.enemyChief.respawnTimer -= dt;
+                this.enemyChief.respawnTimer -= 0.016;
                 if (this.enemyChief.respawnTimer <= 0) {
                     this.enemyChief.dead = false;
                     this.enemyChief.hp = 100;
-                    this.enemyChief.x = this.islands[this.islands.length - 1].x;
-                    this.enemyChief.y = this.islands[this.islands.length - 1].y - 100;
+                    const lastIsland = this.islands[this.islands.length - 1];
+                    this.enemyChief.x = lastIsland.x;
+                    this.enemyChief.y = lastIsland.y - 100;
                 }
             } else {
                 this.gameOver = true;
-                this.resources.showFloatingMessage("VICTORY! You have conquered the skies!", "#FFD700");
+                this.resources.showMessage("VICTORY! You have conquered the skies!", "#FFD700");
                 setTimeout(() => location.reload(), 4000);
             }
         }
     }
 
     _updateTotemLogic(dt) {
-        // Reset island counts
-        this.islands.forEach(i => { i.greenCount = 0; i.blueCount = 0; });
+        // Reset counts
+        for (let i = 0; i < this.islands.length; i++) {
+            this.islands[i].greenCount = 0;
+            this.islands[i].blueCount = 0;
+        }
 
-        // Count villagers per island (Dynamic Migration Census)
-        this.villagers.forEach(v => {
-            if (!v.dead) {
-                // 1. Check where they actually ARE (Migration Check)
-                const currentIsland = this.islands.find(i =>
-                    v.x >= i.x && v.x <= i.x + i.w &&
-                    v.y >= i.y - 120 && v.y <= i.y + i.h // Tight bounds for landing
-                );
+        // Census
+        for (let i = 0; i < this.villagers.length; i++) {
+            const v = this.villagers[i];
+            if (v.dead) continue;
 
-                if (currentIsland) {
-                    v.homeIsland = currentIsland; // Welcome to your new home
-                }
-
-                // 2. Count them for their Home (whether there or flying above)
-                if (v.homeIsland && this.islands.includes(v.homeIsland)) {
-                    if (v.team === 'green') v.homeIsland.greenCount++;
-                    if (v.team === 'blue') v.homeIsland.blueCount++;
+            // Check which island they're on
+            for (let j = 0; j < this.islands.length; j++) {
+                const isl = this.islands[j];
+                if (v.x >= isl.x && v.x <= isl.x + isl.w &&
+                    v.y >= isl.y - 120 && v.y <= isl.y + isl.h) {
+                    v.homeIsland = isl;
+                    break;
                 }
             }
-        });
 
+            if (v.homeIsland && this.islands.includes(v.homeIsland)) {
+                if (v.team === 'green') v.homeIsland.greenCount++;
+                else if (v.team === 'blue') v.homeIsland.blueCount++;
+            }
+        }
 
-
-        // 1. Spawn Logic
-        this.islands.forEach(island => {
-            ['green', 'blue'].forEach(team => {
-                const count = (team === 'green') ? island.greenCount : island.blueCount;
+        // Spawn totems
+        for (let i = 0; i < this.islands.length; i++) {
+            const island = this.islands[i];
+            for (let t = 0; t < 2; t++) {
+                const team = t === 0 ? 'green' : 'blue';
+                const count = team === 'green' ? island.greenCount : island.blueCount;
                 if (count > 10) {
-                    // Spawn totem if not present on this island for this team
-                    const hasTotem = this.totems.some(t => t.team === team && Math.abs(t.x - (island.x + island.w / 2)) < 200 && Math.abs(t.y - (island.y - 10)) < 200);
-
+                    const hasTotem = this.totems.some(tot =>
+                        tot.team === team &&
+                        Math.abs(tot.x - (island.x + island.w * 0.5)) < 200 &&
+                        Math.abs(tot.y - (island.y - 10)) < 200
+                    );
                     if (!hasTotem) {
-                        const tx = island.x + island.w / 2;
-                        const ty = island.y - 10;
-                        this.totems.push(new Totem(tx, ty, team));
+                        this.totems.push(new Totem(island.x + island.w * 0.5, island.y - 10, team));
                         this.audio.play('teepee');
                     }
                 }
-            });
-        });
+            }
+        }
 
-        // 2. Collapse Logic
+        // Collapse totems
         for (let i = this.totems.length - 1; i >= 0; i--) {
             const t = this.totems[i];
             const island = this.islands.find(isl =>
                 t.x >= isl.x - 50 && t.x <= isl.x + isl.w + 50 &&
                 t.y >= isl.y - 150 && t.y <= isl.y + isl.h + 50
             );
-
             if (island) {
-                const count = (t.team === 'green') ? island.greenCount : island.blueCount;
-                if (count < 5) {
-                    t.active = false;
-                    this.totems.splice(i, 1);
-                    // Optional: Play collapse sound (reuse stone break?)
-                    // this.audio.play('hit', 0.2); 
-                }
+                const count = t.team === 'green' ? island.greenCount : island.blueCount;
+                if (count < 5) { t.active = false; this.totems.splice(i, 1); }
             } else {
                 this.totems.splice(i, 1);
             }
         }
 
-        // Update Totems
-        this.totems.forEach(t => t.update(dt, this.villagers));
+        // Update totems
+        for (let i = 0; i < this.totems.length; i++) {
+            this.totems[i].update(dt, this.villagers);
+        }
     }
 
     _checkSeasonChange() {
         if (Math.random() < 0.3) {
-            this.season = (this.season === 'summer') ? 'winter' : 'summer';
-            const isWinter = (this.season === 'winter');
-            this.islands.forEach(island => island.setSeason(isWinter));
-            this.resources.showFloatingMessage(`SEASON CHANGED TO ${this.season.toUpperCase()}!`, "#FFFFFF");
+            this.season = this.season === 'summer' ? 'winter' : 'summer';
+            this.islands.forEach(island => island.setSeason(this.season === 'winter'));
+            this.resources.showMessage(`SEASON: ${this.season.toUpperCase()}`, "#FFFFFF");
         }
     }
 
     _updateWeather(dt) {
         this.weatherTimer -= dt;
         if (this.weatherTimer <= 0) {
-            this.weatherTimer = 0.1; // Spawn rate
+            this.weatherTimer = 0.15;
             const cam = this.world.camera;
-            const x = cam.x + Math.random() * cam.w;
+            const x = cam.x + Math.random() * cam.effectiveW;
             const y = cam.y - 100;
 
-            if (this.season === 'winter') {
+            if (this.season === 'winter' && this.snowflakes.length < this.maxSnowflakes) {
                 this.snowflakes.push(new Snowflake(x, y, Math.random() > 0.5 ? 'fg' : 'bg'));
-            } else {
-                // Autumn Leaves
+            } else if (this.season === 'summer' && this.leaves.length < this.maxLeaves) {
                 this.leaves.push(new Leaf(x, y, Math.random() > 0.5 ? 'fg' : 'bg'));
             }
         }
 
-        // Update Particles
-        this.particles.forEach(p => p.update(dt));
-        this.particles = this.particles.filter(p => p.life > 0);
+        // Update visual effects
+        for (let i = this.visualEffects.length - 1; i >= 0; i--) {
+            this.visualEffects[i].update(dt);
+            if (this.visualEffects[i].dead) this.visualEffects.splice(i, 1);
+        }
 
-        this.visualEffects.forEach(e => e.update(dt));
-        this.visualEffects = this.visualEffects.filter(e => !e.dead);
+        // Update weather particles
+        for (let i = this.leaves.length - 1; i >= 0; i--) {
+            this.leaves[i].update(dt);
+            if (this.leaves[i].dead || this.leaves[i].y > this.world.camera.y + this.world.camera.effectiveH + 100) {
+                this.leaves.splice(i, 1);
+            }
+        }
+        for (let i = this.snowflakes.length - 1; i >= 0; i--) {
+            this.snowflakes[i].update(dt);
+            if (this.snowflakes[i].dead || this.snowflakes[i].y > this.world.camera.y + this.world.camera.effectiveH + 100) {
+                this.snowflakes.splice(i, 1);
+            }
+        }
 
-        this.leaves.forEach(l => l.update(dt, this.world.camera.y + this.world.camera.h));
-        this.leaves = this.leaves.filter(l => l.y < this.world.camera.y + this.world.camera.h + 100);
-
-        this.snowflakes.forEach(s => s.update(dt, this.world.camera.y + this.world.camera.h));
-        this.snowflakes = this.snowflakes.filter(s => s.y < this.world.camera.y + this.world.camera.h + 100);
-
-        this.rainClouds.forEach(r => r.update(dt));
-        this.rainClouds = this.rainClouds.filter(r => r.life > 0);
+        // Rain clouds
+        for (let i = this.rainClouds.length - 1; i >= 0; i--) {
+            this.rainClouds[i].update(dt);
+            if (this.rainClouds[i].dead) this.rainClouds.splice(i, 1);
+        }
     }
 
     _updateIslandDynamics(dt) {
-        this.islands.forEach(island => {
-            // 1. DRIFT INIT & UPDATE
-            if (!island.driftTarget) {
-                island.driftTimer = 0;
-            }
+        for (let i = 0; i < this.islands.length; i++) {
+            const island = this.islands[i];
+
+            if (!island.driftTarget) island.driftTimer = 0;
             island.driftTimer -= dt;
             if (island.driftTimer <= 0) {
                 island.driftTarget = {
@@ -484,312 +499,287 @@ class Game {
                 island.driftTimer = 5 + Math.random() * 10;
             }
 
-            // Apply Drift Force (if not joined heavily)
             if (!island.joinedWith) {
                 island.vx += (island.driftTarget.vx - island.vx) * 0.5 * dt;
                 island.vy += (island.driftTarget.vy - island.vy) * 0.5 * dt;
             }
 
-            // Decrement join timer
             if (island.joinedWith) {
                 island.joinTimer -= dt;
                 if (island.joinTimer <= 0) {
-                    island.joinedWith.joinedWith = null; // Unstick other
-                    island.joinedWith = null; // Unstick self
+                    if (island.joinedWith) island.joinedWith.joinedWith = null;
+                    island.joinedWith = null;
                 }
             }
 
-            // 2. VERTICAL SEPARATION (Repulsion)
-            this.islands.forEach(other => {
-                if (island !== other) {
-                    this._resolveIslandCollisions(island, other, dt);
-                }
-            });
+            // Collision with other islands
+            for (let j = i + 1; j < this.islands.length; j++) {
+                this._resolveIslandCollision(island, this.islands[j], dt);
+            }
 
-            // Integrate
             island.update(dt, this.player, this.enemyChief, this.audio);
-        });
-    }
-
-    _resolveIslandCollisions(islandA, islandB, dt) {
-        // Simple AABB overlap check + separating force
-        if (islandA.x < islandB.x + islandB.w &&
-            islandA.x + islandA.w > islandB.x &&
-            islandA.y < islandB.y + islandB.h &&
-            islandA.y + islandA.h > islandB.y) {
-
-            const dy = (islandA.y + islandA.h / 2) - (islandB.y + islandB.h / 2);
-            const dist = Math.abs(dy);
-            const minced = (islandA.h + islandB.h) / 2;
-
-            // If stacking vertically
-            if (dist < minced * 0.9) {
-                const force = (minced - dist) * 10.0;
-                if (dy > 0) islandA.vy += force * dt;
-                else islandA.vy -= force * dt;
-            }
-
-            // Stick/Bounce Logic
-            const vRel = Math.sqrt((islandA.vx - islandB.vx) ** 2 + (islandA.vy - islandB.vy) ** 2);
-            if (vRel < 50 && !islandA.joinedWith && !islandB.joinedWith) {
-                // STICK
-                islandA.joinedWith = islandB;
-                islandB.joinedWith = islandA;
-                islandA.joinTimer = 10 + Math.random() * 10;
-                // Sync velocities
-                const avgVx = (islandA.vx + islandB.vx) / 2;
-                const avgVy = (islandA.vy + islandB.vy) / 2;
-                islandA.vx = avgVx; islandB.vx = avgVx;
-                islandA.vy = avgVy; islandB.vy = avgVy;
-            } else if (vRel > 100) {
-                // BOUNCE
-                islandA.vx *= -0.8;
-                islandB.vx *= -0.8;
-            }
         }
     }
 
+    _resolveIslandCollision(a, b, dt) {
+        if (a.x < b.x + b.w && a.x + a.w > b.x &&
+            a.y < b.y + b.h && a.y + a.h > b.y) {
+
+            const dy = (a.y + a.h * 0.5) - (b.y + b.h * 0.5);
+            const dist = Math.abs(dy);
+            const minced = (a.h + b.h) * 0.5;
+
+            if (dist < minced * 0.9) {
+                const force = (minced - dist) * 10;
+                if (dy > 0) a.vy += force * dt;
+                else a.vy -= force * dt;
+            }
+
+            const vRel = Math.sqrt((a.vx - b.vx) ** 2 + (a.vy - b.vy) ** 2);
+            if (vRel < 50 && !a.joinedWith && !b.joinedWith) {
+                a.joinedWith = b;
+                b.joinedWith = a;
+                a.joinTimer = 10 + Math.random() * 10;
+                const avgVx = (a.vx + b.vx) * 0.5;
+                const avgVy = (a.vy + b.vy) * 0.5;
+                a.vx = avgVx; b.vx = avgVx;
+                a.vy = avgVy; b.vy = avgVy;
+            } else if (vRel > 100) {
+                a.vx *= -0.8;
+                b.vx *= -0.8;
+            }
+        }
+    }
 
     _updateWarDirector(dt) {
         this.warTimer += dt;
 
         if (this.warState === 'BUILD') {
-            if (this.warTimer > 60.0) { // 60s Peace
+            if (this.warTimer > 60) {
                 this.warState = 'GATHER';
                 this.warTimer = 0;
-                this.resources.showFloatingMessage("WAR DRUMS SOUND!", "#FF4500");
-                this.audio.play('drum_loop', 0.5, true);
+                this.resources.showMessage("WAR DRUMS SOUND!", "#FF4500");
+                this.audio.play('drum_loop', 0.5);
             }
         } else if (this.warState === 'GATHER') {
-            if (this.warTimer > 15.0) { // 15s Gather
+            if (this.warTimer > 15) {
                 this.warState = 'ATTACK';
                 this.warTimer = 0;
-                this.resources.showFloatingMessage("CHARGE!", "#FF0000");
+                this.resources.showMessage("CHARGE!", "#FF0000");
                 this.audio.play('horn');
+
+                // Epic zoom out for battle
+                this.world.camera.setZoom(0.6);
             }
         } else if (this.warState === 'ATTACK') {
-            const greenCount = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
-            const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
+            const gc = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
+            const bc = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
 
-            // End war if one side is decimated or time up
-            if (this.warTimer > 60.0 || greenCount < 3 || blueCount < 3) {
+            if (this.warTimer > 60 || gc < 3 || bc < 3) {
                 this.warState = 'BUILD';
                 this.warTimer = 0;
-                this.resources.showFloatingMessage("RETREAT & REBUILD", "#00FF00");
+                this.resources.showMessage("RETREAT & REBUILD", "#00FF00");
+                this.world.camera.resetZoom();
             }
         }
     }
 
     _checkCollisions(dt) {
-        // 1. MANA RECHARGE (Campfire/Teepee) - ALL FIRES WORK FOR EVERYONE
-        this.islands.forEach(island => {
-            if (island.hasTeepee) {
-                const tx = island.x + island.w / 2;
-                const ty = island.y - 80;
+        // Mana recharge near fires
+        for (let i = 0; i < this.islands.length; i++) {
+            const island = this.islands[i];
+            if (!island.hasTeepee) continue;
+            const tx = island.x + island.w * 0.5;
+            const ty = island.y - 80;
+            const rangeSq = 150 * 150;
 
-                // Player Recharge
-                const pDist = Math.sqrt((this.player.x - tx) ** 2 + (this.player.y - ty) ** 2);
-                if (pDist < 150) {
-                    this.resources.addMana(30 * dt);
-                }
-
-                // Enemy Chief Recharge
-                if (!this.enemyChief.dead) {
-                    const eDist = Math.sqrt((this.enemyChief.x - tx) ** 2 + (this.enemyChief.y - ty) ** 2);
-                    if (eDist < 150) {
-                        this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 30 * dt);
-                    }
-                }
+            const pdx = this.player.x - tx;
+            const pdy = this.player.y - ty;
+            if (pdx * pdx + pdy * pdy < rangeSq) {
+                this.resources.addMana(30 * dt);
             }
-        });
 
-        // 2. EAT PIGS (Health)
-        this.pigs.forEach(p => {
-            if (!p.dead) {
-                const dist = Math.sqrt((this.player.x - p.x) ** 2 + (this.player.y - p.y) ** 2);
-                if (dist < 50) {
-                    p.dead = true;
-                    this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
-                    this.audio.play('hit', 1.0, 1.5); // High pitch hit as 'eat' sound
-                    this._spawnBlood(p.x, p.y, '#FFC0CB', 10); // Pink particles
+            if (!this.enemyChief.dead) {
+                const edx = this.enemyChief.x - tx;
+                const edy = this.enemyChief.y - ty;
+                if (edx * edx + edy * edy < rangeSq) {
+                    this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 30 * dt);
                 }
-            }
-        });
-
-        // Cleanup dead pigs
-        this.pigs = this.pigs.filter(p => !p.dead);
-    }
-
-    _updateEnemyAI(dt) {
-        const dist = Math.sqrt((this.player.x - this.enemyChief.x) ** 2 + (this.player.y - this.enemyChief.y) ** 2);
-
-        // Mana Regen
-        this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 5 * dt);
-
-        if (dist < 800) {
-            // Shoot arrows if close
-            if (this.enemyChief.fireCooldown <= 0) {
-                this.enemyChief.fireCooldown = 1.5;
-                const angle = Math.atan2(this.player.y - this.enemyChief.y, this.player.x - this.enemyChief.x);
-                this.projectiles.push(new Projectile(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue', 15));
             }
         }
 
-        // Cast Spells
+        // Eat pigs
+        for (let i = this.pigs.length - 1; i >= 0; i--) {
+            const p = this.pigs[i];
+            if (p.dead) continue;
+            const dx = this.player.x - p.x;
+            const dy = this.player.y - p.y;
+            if (dx * dx + dy * dy < 2500) {
+                p.dead = true;
+                this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
+                this.audio.play('hit', 1.0, 1.5);
+                spawnBlood(p.x, p.y, '#FFC0CB', 8);
+                this.pigs.splice(i, 1);
+            }
+        }
+    }
+
+    _updateEnemyAI(dt) {
+        const dx = this.player.x - this.enemyChief.x;
+        const dy = this.player.y - this.enemyChief.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 5 * dt);
+
+        if (dist < 800 && this.enemyChief.fireCooldown <= 0) {
+            this.enemyChief.fireCooldown = 1.5;
+            const angle = Math.atan2(dy, dx);
+            this.projectiles.push(new Projectile(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue', 15));
+        }
+
         if (this.enemyChief.mana > 80 && Math.random() < 0.01) {
-            // Cast Fireball
             this.enemyChief.mana -= 80;
-            const angle = Math.atan2(this.player.y - this.enemyChief.y, this.player.x - this.enemyChief.x);
+            const angle = Math.atan2(dy, dx);
             this.fireballs.push(new Fireball(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue'));
         }
     }
 
     _handleSpellCasting(dt) {
-        if (this.input.mouse.rightDown) {
-            const mx = this.input.mouse.x + this.world.camera.x;
-            const my = this.input.mouse.y + this.world.camera.y;
-            const spell = this.resources.currentSpell;
-
-            // 1: AIR (Hookshot) - Continuous Cost
-            if (spell === 1) {
-                if (this.resources.spendAir(dt)) {
-                    this._doHookshotLogic(dt, mx, my);
-                    if (Math.random() < 0.1) this.audio.play('air', 0.12);
-                }
-            }
-            // OTHER SPELLS
-            else if (this.player.fireCooldown <= 0) {
-                // 0: FIREBALL - High Cost
-                if (spell === 0 && this.resources.spendMana(80)) {
-                    this.player.fireCooldown = 0.5;
-                    const angle = Math.atan2(my - (this.player.y + 20), mx - (this.player.x + 20));
-                    this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle, 'green'));
-                    this.audio.play('fire', 0.25);
-                }
-                // 2: EARTHQUAKE - Medium Cost
-                else if (spell === 2 && this.resources.spendMana(40)) {
-                    this.player.fireCooldown = 2.0;
-                    this.world.camera.shake = 30;
-                    this.audio.play('earth', 0.2);
-
-                    // ... (Code continues unchanged for earthquake logic)
-                    this.villagers.forEach(v => {
-                        if (v.team !== 'green' && !v.dead && v.onGround) {
-                            v.vy = -1000;
-                            v.hp -= 50;
-                            this._spawnBlood(v.x, v.y, '#8B4513', 10);
-                            if (v.hp <= 0) {
-                                v.dead = true;
-                                this._spawnBlood(v.x, v.y);
-                            }
-                        }
-                    });
-
-                    if (!this.enemyChief.dead && this.enemyChief.isGrounded) {
-                        this.enemyChief.vy = -1000;
-                        this.enemyChief.hp -= 20;
-                        this._spawnBlood(this.enemyChief.x, this.enemyChief.y, '#cc0000', 20);
-                    }
-
-                    for (let k = 0; k < 20; k++) {
-                        const px = this.world.camera.x + Math.random() * this.world.camera.w;
-                        const py = this.world.camera.y + this.world.camera.h;
-                        this.particles.push(new Particle(px, py, '#8B4513', 0, 1.0, 10 + Math.random() * 20));
-                    }
-                }
-                // 3: WATER (SPAWN) - High Cost
-                else if (spell === 3 && this.resources.spendMana(80)) {
-                    this.player.fireCooldown = 1.0;
-                    this.rainClouds.push(new RainCloud(mx, my, 'green'));
-                    this._forceSpawnVillagers(mx, my, 'green');
-                    this.audio.play('water', 0.25);
-                }
-            }
-        } else {
+        if (!this.input.mouse.rightDown) {
             this.hookTarget = null;
+            return;
+        }
+
+        const wm = this.input.getWorldMouse(this.world.camera);
+        const mx = wm.x;
+        const my = wm.y;
+        const spell = this.resources.currentSpell;
+
+        // AIR: Hookshot (continuous)
+        if (spell === 1) {
+            if (this.resources.spendAir(dt)) {
+                this._doHookshot(dt, mx, my);
+                if (Math.random() < 0.1) this.audio.play('air', 0.12);
+            }
+        } else if (this.player.fireCooldown <= 0) {
+            // FIREBALL
+            if (spell === 0 && this.resources.spendMana(80)) {
+                this.player.fireCooldown = 0.5;
+                const angle = Math.atan2(my - (this.player.y + 20), mx - (this.player.x + 20));
+                this.fireballs.push(new Fireball(this.player.x + 20, this.player.y + 20, angle, 'green'));
+                this.audio.play('fire', 0.25);
+
+                // Time dilation on fireball cast
+                this.world.camera.setTimeDilation(0.3, 6);
+                this.world.camera.setZoom(0.9);
+                this.world.camera.addTrauma(0.2);
+            }
+            // EARTHQUAKE
+            else if (spell === 2 && this.resources.spendMana(40)) {
+                this.player.fireCooldown = 2.0;
+                this.world.camera.addTrauma(0.7);
+                this.audio.play('earth', 0.2);
+
+                // Epic time dilation
+                this.world.camera.setTimeDilation(0.15, 3);
+                this.world.camera.setZoom(0.65);
+
+                for (let i = 0; i < this.villagers.length; i++) {
+                    const v = this.villagers[i];
+                    if (v.team !== 'green' && !v.dead && v.onGround) {
+                        v.vy = -1000;
+                        v.hp -= 50;
+                        spawnBlood(v.x, v.y, '#8B4513', 8);
+                        if (v.hp <= 0) { v.dead = true; spawnBlood(v.x, v.y); }
+                    }
+                }
+
+                if (!this.enemyChief.dead && this.enemyChief.isGrounded) {
+                    this.enemyChief.vy = -1000;
+                    this.enemyChief.hp -= 20;
+                    spawnBlood(this.enemyChief.x, this.enemyChief.y, '#cc0000', 15);
+                }
+
+                // Ground debris
+                for (let k = 0; k < 15; k++) {
+                    spawnParticle(
+                        this.world.camera.x + Math.random() * this.world.camera.effectiveW,
+                        this.world.camera.y + this.world.camera.effectiveH,
+                        '#8B4513', 0, 1.0, 10 + Math.random() * 15, 'normal'
+                    );
+                }
+            }
+            // TIDE OF LIFE
+            else if (spell === 3 && this.resources.spendMana(80)) {
+                this.player.fireCooldown = 1.0;
+                this.rainClouds.push(new RainCloud(mx, my, 'green'));
+                this._forceSpawnVillagers(mx, my, 'green');
+                this.audio.play('water', 0.25);
+
+                // Gentle time dilation
+                this.world.camera.setTimeDilation(0.5, 5);
+            }
         }
     }
 
-    _doHookshotLogic(dt, mx, my) {
+    _doHookshot(dt, mx, my) {
         let hit = false;
-        for (let island of this.islands) {
-            // Expanded hit box for ease of use
+        for (let i = 0; i < this.islands.length; i++) {
+            const island = this.islands[i];
             if (mx >= island.x - 20 && mx <= island.x + island.w + 20 &&
                 my >= island.y - 20 && my <= island.y + island.h + 20) {
-
                 hit = true;
-                const dx = this.player.x - island.x; // Pull towards player X
-
-                // VERTICAL ALIGNMENT for Traversal
-                // Target Y: Player feet should match Island Top
+                const dx = this.player.x - island.x;
                 const targetY = (this.player.y + this.player.h) - 10;
                 const dy = targetY - island.y;
-
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // Stronger Pull
                 island.vx += (dx / (dist + 1)) * 1500 * dt;
-
-                // Vertical Snap Force (Stronger than horizontal to align)
-                if (Math.abs(dy) > 10) {
-                    island.vy += (dy * 5.0) * dt;
-                } else {
-                    island.vy *= 0.8; // Dampen if aligned
-                }
-
+                if (Math.abs(dy) > 10) island.vy += dy * 5 * dt;
+                else island.vy *= 0.8;
                 break;
             }
         }
-        this.hookTarget = { x: mx, y: my, hit: hit };
+        this.hookTarget = { x: mx, y: my, hit };
     }
 
     _handleCombat(dt) {
-        // --- 1. PROJECTILES ---
+        // Projectiles
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             const p = this.projectiles[i];
-
-            p.update(dt, (x, y, color) => {
-                this.particles.push(new Particle(x, y, color, 0, 0.4, 3, 'trail'));
-            }, this.walls);
-
+            p.update(dt, this.walls);
             let hitSomething = false;
 
-            // Hit Enemy Chief
+            // Hit enemy chief
             if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
-                this._spawnBlood(p.x, p.y);
+                spawnBlood(p.x, p.y);
                 this.enemyChief.hp -= p.damage;
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
-                if (this.enemyChief.hp <= 0) {
-                    this._killChief(this.enemyChief);
-                }
+                if (this.enemyChief.hp <= 0) this._killChief(this.enemyChief);
             }
 
-            // Hit Player
+            // Hit player
             if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
-                this._spawnBlood(p.x, p.y);
+                spawnBlood(p.x, p.y);
                 this.player.hp -= p.damage;
                 hitSomething = true;
                 this.audio.play('hit', 0.4, 0.3);
-                if (this.player.hp <= 0) {
-                    this._killChief(this.player);
-                }
+                if (this.player.hp <= 0) this._killChief(this.player);
             }
 
-            // Hit Villagers/Warriors
-            for (let v of this.villagers) {
+            // Hit villagers
+            for (let j = 0; j < this.villagers.length; j++) {
+                const v = this.villagers[j];
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
-                    this._spawnBlood(v.x, v.y);
+                    spawnBlood(v.x, v.y);
                     v.hp -= p.damage;
                     hitSomething = true;
                     this.audio.play('hit', 0.3, 0.3);
                     if (v.hp <= 0) {
                         v.dead = true;
-                        this._spawnBlood(v.x, v.y);
-
-                        if (p.team === 'green') {
-                            this.resources.addWater(5);
-                        }
+                        spawnBlood(v.x, v.y);
+                        if (p.team === 'green') this.resources.addSouls(5);
                     }
                 }
             }
@@ -798,166 +788,120 @@ class Game {
             if (p.dead) this.projectiles.splice(i, 1);
         }
 
-        // --- 2. FIREBALLS ---
+        // Fireballs
         for (let i = this.fireballs.length - 1; i >= 0; i--) {
             const f = this.fireballs[i];
             f.update(dt);
-
             let hit = false;
 
-            // Wall Hit
-            for (let w of this.walls) {
-                if (this._checkHit(f, w)) {
-                    w.hp -= 200 * dt;
+            // Island collision
+            for (let j = 0; j < this.islands.length; j++) {
+                const island = this.islands[j];
+                if (f.x > island.x && f.x < island.x + island.w &&
+                    f.y > island.y && f.y < island.y + island.h) {
                     f.dead = true;
                     hit = true;
-                    this._spawnBlood(f.x, f.y, '#FF4500', 10); // Sparks
+                    spawnBlood(f.x, f.y, '#FF4500', 12);
+                    this.audio.play('hit', 0.5, 0.1);
+
+                    // Scorch trees
+                    for (let t = 0; t < island.trees.length; t++) {
+                        if (Math.abs((island.x + island.trees[t].x) - f.x) < 80) {
+                            island.trees[t].burnt = true;
+                            island.trees[t].burntTimer = 15;
+                        }
+                    }
                     break;
                 }
             }
 
-            // ISLAND COLLISION (New)
-            if (!hit) {
-                for (let island of this.islands) {
-                    if (f.x > island.x && f.x < island.x + island.w &&
-                        f.y > island.y && f.y < island.y + island.h) {
-
-                        f.dead = true;
-                        hit = true;
-                        this._spawnBlood(f.x, f.y, '#FF4500', 15); // Explosion
-                        this.audio.play('hit', 0.5, 0.1);
-
-                        // Scorch Tree if close
-                        island.trees.forEach(t => {
-                            if (Math.abs((island.x + t.x) - f.x) < 80) {
-                                t.burnt = true;
-                                t.burntTimer = 15.0;
-                            }
-                        });
-                        break;
-                    }
-                }
-            }
-
-            // Burn Enemy Chief (if Green fireball)
+            // Hit chiefs
             if (f.team === 'green' && !this.enemyChief.dead && this._checkHit(f, this.enemyChief)) {
                 this.enemyChief.hp -= 40 * dt;
             }
-            // Burn Player (if Blue fireball)
             if (f.team === 'blue' && !this.player.dead && this._checkHit(f, this.player)) {
                 this.player.hp -= 40 * dt;
             }
 
-            // INSTA-KILL Villagers of opposite team
-            this.villagers.forEach(v => {
+            // Insta-kill villagers
+            for (let j = 0; j < this.villagers.length; j++) {
+                const v = this.villagers[j];
                 if (!v.dead && v.team !== f.team && this._checkHit(f, v)) {
                     v.dead = true;
-                    this._spawnBlood(v.x, v.y, '#FF4500', 20);
-
-                    if (f.team === 'green') {
-                        this.resources.addWater(5);
-                    }
+                    spawnBlood(v.x, v.y, '#FF4500', 15);
+                    if (f.team === 'green') this.resources.addSouls(5);
                 }
-            });
-
-            // Decorate Trees (Visual Only)
-            this.islands.forEach(island => {
-                if (f.x > island.x && f.x < island.x + island.w && Math.abs(f.y - island.y) < 100) {
-                    island.trees.forEach(t => {
-                        if (Math.abs((island.x + t.x) - f.x) < 50) {
-                            t.burnt = true;
-                            t.burntTimer = 10.0; // Heal in 10s
-                        }
-                    });
-                }
-            });
+            }
 
             if (f.dead) this.fireballs.splice(i, 1);
         }
 
-        this.villagers = this.villagers.filter(v => !v.dead);
+        // Clean dead villagers
+        for (let i = this.villagers.length - 1; i >= 0; i--) {
+            if (this.villagers[i].dead) this.villagers.splice(i, 1);
+        }
     }
 
     _killChief(chief) {
         chief.dead = true;
         chief.respawnTimer = 8.0;
-        this._spawnBlood(chief.x, chief.y, '#cc0000', 100);
-        this.world.camera.shake = 80;
+        spawnBlood(chief.x, chief.y, '#cc0000', 40);
+        this.world.camera.addTrauma(0.9);
         this.audio.play('death', 0.8, 0.1);
 
-        // ANIME IMPACT
-        this.impactFrameTimer = 0.2;
-        this.visualEffects.push(new VisualEffect(0, 0, 'impact'));
+        // EPIC KILL: Time dilation + zoom
+        this.world.camera.setTimeDilation(0.08, 2);
+        this.world.camera.setZoom(1.2);
+        this.impactFrameTimer = 0.15;
 
-        // REPLENISH MANA ON KILL
         if (chief === this.enemyChief) {
             this.resources.replenishAll();
         }
     }
 
-    _checkHit(entity1, entity2) {
-        return (entity1.x < entity2.x + entity2.w &&
-            entity1.x + entity1.w > entity2.x &&
-            entity1.y < entity2.y + entity2.h &&
-            entity1.y + entity1.h > entity2.y);
-    }
-
-    _spawnBlood(x, y, color = '#cc0000', count = 25) {
-        for (let i = 0; i < count; i++) {
-            const size = 5 + Math.random() * 7;
-            this.particles.push(new Particle(x, y, color, Math.random() * 150, 0.5 + Math.random() * 0.5, size, 'normal'));
-        }
+    _checkHit(a, b) {
+        return a.x < b.x + b.w && a.x + a.w > b.x &&
+               a.y < b.y + b.h && a.y + a.h > b.y;
     }
 
     _handleShooting(dt) {
-        // LEFT CLICK = RAPID ARROWS - FEEL THE POWER!
-        if (this.input.mouse.leftDown) {
-            if (this.player.fireCooldown <= 0) {
-                this.player.fireCooldown = 0.1; // ULTRA FAST FIRE!
-                const mx = this.input.mouse.x + this.world.camera.x;
-                const my = this.input.mouse.y + this.world.camera.y;
-                const angle = Math.atan2(my - (this.player.y + 20), mx - (this.player.x + 20));
+        if (!this.input.mouse.leftDown || this.player.fireCooldown > 0) return;
 
-                // Slight spread for satisfying burst feel
-                const spread = (Math.random() - 0.5) * 0.1;
-                this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle + spread, 'green', 20));
+        this.player.fireCooldown = 0.1;
+        const wm = this.input.getWorldMouse(this.world.camera);
+        const angle = Math.atan2(wm.y - (this.player.y + 20), wm.x - (this.player.x + 20));
+        const spread = (Math.random() - 0.5) * 0.1;
 
-                // RECOIL - pushes player back slightly for impact feel
-                this.player.vx -= Math.cos(angle) * 80;
-                this.player.vy -= Math.sin(angle) * 40;
+        this.projectiles.push(new Projectile(this.player.x + 20, this.player.y + 20, angle + spread, 'green', 20));
 
-                // Variable pitch for satisfying pew-pew sound
-                this.audio.play('shoot', 0.5, 0.3);
-            }
-        }
+        // Recoil
+        this.player.vx -= Math.cos(angle) * 80;
+        this.player.vy -= Math.sin(angle) * 40;
+
+        this.audio.play('shoot', 0.5, 0.3);
     }
 
     _forceSpawnVillagers(x, y, team) {
-        // Find nearest friendly hut to cursor
         let bestDist = Infinity;
         let bestIsland = null;
 
-        this.islands.forEach(island => {
+        for (let i = 0; i < this.islands.length; i++) {
+            const island = this.islands[i];
             if (island.team === team && island.hasTeepee) {
                 const d = Math.sqrt((island.x - x) ** 2 + (island.y - y) ** 2);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestIsland = island;
-                }
+                if (d < bestDist) { bestDist = d; bestIsland = island; }
             }
-        });
+        }
 
         if (bestIsland && bestDist < 1000) {
             const count = 3 + Math.floor(Math.random() * 3);
-            for (let i = 0; i < count; i++) {
-                if (this.villagers.length >= 200) break;
-
-                const unit = (Math.random() < 0.4) ?
-                    new Warrior(bestIsland.x + 50, bestIsland.y - 40, team) :
-                    new Villager(bestIsland.x + 50, bestIsland.y - 40, team);
+            for (let i = 0; i < count && this.villagers.length < 200; i++) {
+                const unit = Math.random() < 0.4
+                    ? new Warrior(bestIsland.x + 50, bestIsland.y - 40, team)
+                    : new Villager(bestIsland.x + 50, bestIsland.y - 40, team);
                 unit.homeIsland = bestIsland;
                 unit.vx = (Math.random() - 0.5) * 200;
-                unit.vy = -300; // Pop out!
+                unit.vy = -300;
                 this.villagers.push(unit);
             }
         }
@@ -965,53 +909,54 @@ class Game {
 
     _spawnVillagers() {
         if (this.villagers.length >= 200) return;
-
-        const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
-
-        for (let island of shuffledIslands) {
-            if (island.hasTeepee && (island.team === 'green' || island.team === 'blue')) {
-                if (Math.random() < 0.3) {
-                    const unit = (Math.random() < 0.4) ?
-                        new Warrior(island.x + 50, island.y - 40, island.team) :
-                        new Villager(island.x + 50, island.y - 40, island.team);
-                    unit.homeIsland = island;
-                    this.villagers.push(unit);
-
-                    if (this.villagers.length >= 200) break;
-                }
+        for (let i = 0; i < this.islands.length; i++) {
+            const island = this.islands[i];
+            if (island.hasTeepee && (island.team === 'green' || island.team === 'blue') && Math.random() < 0.3) {
+                const unit = Math.random() < 0.4
+                    ? new Warrior(island.x + 50, island.y - 40, island.team)
+                    : new Villager(island.x + 50, island.y - 40, island.team);
+                unit.homeIsland = island;
+                this.villagers.push(unit);
+                if (this.villagers.length >= 200) break;
             }
         }
     }
 
     _spawnPigs() {
-        if (this.pigs.length >= 77) return;
-
-        const shuffledIslands = [...this.islands].sort(() => 0.5 - Math.random());
-
-        for (let island of shuffledIslands) {
-            if (Math.random() < 0.1) {
-                const px = island.x + Math.random() * (island.w - 50);
-                const py = island.y - 60;
-                const piggy = new Pig(px, py);
-                piggy.homeIsland = island;
-                this.pigs.push(piggy);
-                if (this.pigs.length >= 77) break;
+        if (this.pigs.length >= 50) return;
+        for (let i = 0; i < this.islands.length; i++) {
+            if (Math.random() < 0.08) {
+                const island = this.islands[i];
+                const pig = new Pig(island.x + Math.random() * (island.w - 50), island.y - 60);
+                pig.homeIsland = island;
+                this.pigs.push(pig);
+                if (this.pigs.length >= 50) break;
             }
         }
     }
 
-    draw() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    // === RENDER PIPELINE ===
+    draw(realDt) {
+        const ctx = this.ctx;
+        const cam = this.world.camera;
 
-        // --- SPECIAL UI DRAWING ---
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Title / Tooltip screens
         if (this.uiState === 'TITLE') {
             this.uiLayer.style.display = 'none';
-            if (this.titleImg && this.titleImg.complete) {
-                this.ctx.drawImage(this.titleImg, 0, 0, this.canvas.width, this.canvas.height);
+            if (this.titleImg.complete) {
+                ctx.drawImage(this.titleImg, 0, 0, this.canvas.width, this.canvas.height);
             } else {
-                this.ctx.fillStyle = 'black'; this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-                this.ctx.fillStyle = 'white'; this.ctx.font = '40px Arial'; this.ctx.textAlign = 'center';
-                this.ctx.fillText("SKYBABY: EPIC WAR", this.canvas.width / 2, this.canvas.height / 2);
+                ctx.fillStyle = '#0a0a1a';
+                ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 40px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText("SOAR: MYSTIK SKIES", this.canvas.width * 0.5, this.canvas.height * 0.5);
+                ctx.font = '18px sans-serif';
+                ctx.fillStyle = '#888';
+                ctx.fillText("Click to begin", this.canvas.width * 0.5, this.canvas.height * 0.5 + 50);
             }
             return;
         }
@@ -1019,143 +964,168 @@ class Game {
         if (this.uiState === 'TOOLTIP') {
             this.uiLayer.style.display = 'none';
             if (this.tooltipImg && this.tooltipImg.complete) {
-                this.ctx.drawImage(this.tooltipImg, 0, 0, this.canvas.width, this.canvas.height);
+                ctx.drawImage(this.tooltipImg, 0, 0, this.canvas.width, this.canvas.height);
             }
             return;
         }
 
-        // Show UI when playing
         this.uiLayer.style.display = 'flex';
-        // --------------------------
 
-        const sunHeight = Math.sin(this.dayTime);
-        let darkness = 0;
-        if (sunHeight < 0.2) {
-            darkness = Math.abs(sunHeight - 0.2) * 0.8;
-            if (darkness > 0.8) darkness = 0.8;
+        // Impact frame flash
+        const isImpact = this.impactFrameTimer > 0;
+        this.canvas.style.filter = isImpact ? 'invert(1) contrast(1.5)' : 'none';
+
+        ctx.save();
+
+        // Apply zoom
+        const z = cam.zoom;
+        ctx.scale(z, z);
+
+        // Apply camera rotation (from shake)
+        if (cam.shakeAngle !== 0) {
+            const cx = cam.effectiveW * 0.5;
+            const cy = cam.effectiveH * 0.5;
+            ctx.translate(cx, cy);
+            ctx.rotate(cam.shakeAngle);
+            ctx.translate(-cx, -cy);
         }
 
-        this.ctx.save();
+        // Sky + parallax backgrounds
+        this.world.draw(ctx, this.season, this.dayTime);
 
-        // IMPACT FRAME (Global Filter)
-        const isImpactFrame = (this.impactFrameTimer > 0);
-        this.canvas.style.filter = isImpactFrame ? 'invert(1) contrast(1.5)' : 'none';
+        // Weather BG layer
+        for (let i = 0; i < this.leaves.length; i++) { if (this.leaves[i].layer === 'bg') this.leaves[i].draw(ctx, cam); }
+        for (let i = 0; i < this.snowflakes.length; i++) { if (this.snowflakes[i].layer === 'bg') this.snowflakes[i].draw(ctx, cam); }
 
-        // ZOOM SCALE
-        const z = this.world.camera.zoom;
-        this.ctx.scale(z, z);
+        // Rain clouds
+        for (let i = 0; i < this.rainClouds.length; i++) this.rainClouds[i].draw(ctx, cam);
 
-        // BACKGROUNDS
-        this.world.draw(this.ctx, this.season);
+        // 2.5D Islands (depth-sorted by Y)
+        const sortedIslands = this.islands.slice().sort((a, b) => a.y - b.y);
+        for (let i = 0; i < sortedIslands.length; i++) sortedIslands[i].draw(ctx, cam);
 
-        // WEATHER BEHIND (BG)
-        this.leaves.forEach(l => { if (l.layer === 'bg') l.draw(this.ctx, this.world.camera); });
-        this.snowflakes.forEach(s => { if (s.layer === 'bg') s.draw(this.ctx, this.world.camera); });
-        this.rainClouds.forEach(r => r.draw(this.ctx, this.world.camera)); // Clouds usually behind or mid? Let's keep them here.
+        // Walls
+        for (let i = 0; i < this.walls.length; i++) this.walls[i].draw(ctx, cam);
 
-        // ENTITIES
-        this.islands.forEach(i => i.draw(this.ctx, this.world.camera));
-        this.walls.forEach(w => w.draw(this.ctx, this.world.camera));
-        this.totems.forEach(t => t.draw(this.ctx, this.world.camera));
+        // Totems
+        for (let i = 0; i < this.totems.length; i++) this.totems[i].draw(ctx, cam);
 
-        this.pigs.forEach(p => p.draw(this.ctx, this.world.camera));
+        // Pigs
+        for (let i = 0; i < this.pigs.length; i++) this.pigs[i].draw(ctx, cam);
 
-        this.villagers.forEach(v => v.draw(this.ctx, this.world.camera));
-        this.projectiles.forEach(p => p.draw(this.ctx, this.world.camera));
-        this.fireballs.forEach(f => f.draw(this.ctx, this.world.camera));
+        // Villagers
+        for (let i = 0; i < this.villagers.length; i++) this.villagers[i].draw(ctx, cam);
 
-        if (!this.enemyChief.dead) this.enemyChief.draw(this.ctx, this.world.camera);
-        if (!this.player.dead) this.player.draw(this.ctx, this.world.camera);
+        // Projectiles
+        for (let i = 0; i < this.projectiles.length; i++) this.projectiles[i].draw(ctx, cam);
 
-        // SLICK AIM INDICATOR - Laser sight to cursor
+        // Fireballs
+        for (let i = 0; i < this.fireballs.length; i++) this.fireballs[i].draw(ctx, cam);
+
+        // Chiefs
+        if (!this.enemyChief.dead) this.enemyChief.draw(ctx, cam);
+        if (!this.player.dead) this.player.draw(ctx, cam);
+
+        // Aim indicator
         if (!this.player.dead) {
-            const pRect = this.world.camera.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
-            const mx = this.input.mouse.x;
-            const my = this.input.mouse.y;
-
-            // Pulsing glow effect
-            const pulse = 0.5 + Math.sin(Date.now() / 100) * 0.3;
+            const pRect = cam.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
+            const mx = this.input.mouse.x / z;
+            const my = this.input.mouse.y / z;
             const canFire = this.player.fireCooldown <= 0;
+            const pulse = 0.5 + Math.sin(Date.now() * 0.01) * 0.3;
 
-            // Draw aim line
-            this.ctx.save();
-            this.ctx.strokeStyle = canFire ? `rgba(0, 255, 100, ${pulse})` : `rgba(255, 100, 100, 0.3)`;
-            this.ctx.lineWidth = canFire ? 2 : 1;
-            this.ctx.setLineDash(canFire ? [] : [4, 4]);
-            this.ctx.beginPath();
-            this.ctx.moveTo(pRect.x, pRect.y);
-            this.ctx.lineTo(mx, my);
-            this.ctx.stroke();
+            ctx.strokeStyle = canFire ? `rgba(0,255,100,${pulse})` : 'rgba(255,100,100,0.25)';
+            ctx.lineWidth = canFire ? 1.5 : 1;
+            ctx.setLineDash(canFire ? [] : [4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(pRect.x, pRect.y);
+            ctx.lineTo(mx, my);
+            ctx.stroke();
 
-            // Draw crosshair at cursor
             if (canFire) {
-                this.ctx.strokeStyle = `rgba(0, 255, 100, ${pulse})`;
-                this.ctx.lineWidth = 2;
-                this.ctx.beginPath();
-                this.ctx.arc(mx, my, 8, 0, Math.PI * 2);
-                this.ctx.stroke();
-                this.ctx.beginPath();
-                this.ctx.moveTo(mx - 12, my);
-                this.ctx.lineTo(mx + 12, my);
-                this.ctx.moveTo(mx, my - 12);
-                this.ctx.lineTo(mx, my + 12);
-                this.ctx.stroke();
+                ctx.strokeStyle = `rgba(0,255,100,${pulse})`;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(mx, my, 6, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(mx - 10, my);
+                ctx.lineTo(mx + 10, my);
+                ctx.moveTo(mx, my - 10);
+                ctx.lineTo(mx, my + 10);
+                ctx.stroke();
             }
-            this.ctx.setLineDash([]);
-            this.ctx.restore();
+            ctx.setLineDash([]);
         }
 
-        this.particles.forEach(p => p.draw(this.ctx, this.world.camera));
-        this.visualEffects.forEach(e => e.draw(this.ctx, this.world.camera));
+        // Pooled particles
+        drawParticles(ctx, cam);
 
+        // Visual effects
+        for (let i = 0; i < this.visualEffects.length; i++) this.visualEffects[i].draw(ctx, cam);
+
+        // Hookshot line
         if (this.hookTarget) {
-            this.ctx.strokeStyle = this.hookTarget.hit ? 'cyan' : 'gray';
-            this.ctx.lineWidth = 2;
-            this.ctx.setLineDash([5, 5]);
-            this.ctx.beginPath();
-            // Adjust hook draw for camera logic? 
-            // Player and target X are moving. 
-            // Simple approach: Use player screen pos and target screen pos.
-            // But Entity.draw handles wrapping internally now (or will).
-            // For hook, we might see lag if entities wrap. 
-            // Let's rely on standard coordinate space for the hook line (might look weird if wrapped).
-            const pRect = this.world.camera.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
-            const tRect = this.world.camera.getScreenRect(this.hookTarget.x, this.hookTarget.y, 0, 0);
-            this.ctx.moveTo(pRect.x, pRect.y);
-            this.ctx.lineTo(tRect.x, tRect.y);
-            this.ctx.stroke();
-            this.ctx.setLineDash([]);
+            const pRect = cam.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
+            const tRect = cam.getScreenRect(this.hookTarget.x, this.hookTarget.y, 0, 0);
+            ctx.strokeStyle = this.hookTarget.hit ? 'rgba(0,255,255,0.7)' : 'rgba(128,128,128,0.4)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(pRect.x, pRect.y);
+            ctx.lineTo(tRect.x, tRect.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
 
-        // WEATHER FRONT (FG)
-        this.leaves.forEach(l => { if (l.layer !== 'bg') l.draw(this.ctx, this.world.camera); });
-        this.snowflakes.forEach(s => { if (s.layer !== 'bg') s.draw(this.ctx, this.world.camera); });
+        // Weather FG layer
+        for (let i = 0; i < this.leaves.length; i++) { if (this.leaves[i].layer !== 'bg') this.leaves[i].draw(ctx, cam); }
+        for (let i = 0; i < this.snowflakes.length; i++) { if (this.snowflakes[i].layer !== 'bg') this.snowflakes[i].draw(ctx, cam); }
 
-        this.ctx.restore(); // END ZOOM
+        ctx.restore(); // End zoom + rotation
 
-        // DARKNESS OVERLAY (Unscaled)
-        if (darkness > 0.05) {
-            this.ctx.fillStyle = `rgba(0, 0, 30, ${darkness})`;
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        // Darkness overlay (unscaled)
+        const sunHeight = Math.sin(this.dayTime);
+        if (sunHeight < 0.2) {
+            const darkness = Math.min(0.6, Math.abs(sunHeight - 0.2) * 0.7);
+            ctx.fillStyle = `rgba(5,5,25,${darkness})`;
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
-        // IMPACT FLASH (Canvas fill fallback)
-        if (isImpactFrame && this.canvas.style.filter === 'none') {
-            // Fallback if CSS filter not supported/working
-            this.ctx.fillStyle = 'white';
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        // Vignette overlay
+        const vGrad = ctx.createRadialGradient(
+            this.canvas.width * 0.5, this.canvas.height * 0.5,
+            this.canvas.width * 0.25,
+            this.canvas.width * 0.5, this.canvas.height * 0.5,
+            this.canvas.width * 0.75
+        );
+        vGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        vGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
+        ctx.fillStyle = vGrad;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Time dilation indicator
+        if (this.world.camera.timeDilation < 0.7) {
+            ctx.fillStyle = `rgba(255,200,50,${(1 - this.world.camera.timeDilation) * 0.08})`;
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
-        // UI Updates
-        this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp);
-
+        // Respawn text
         if (this.player.dead) {
-            this.ctx.fillStyle = 'red';
-            this.ctx.font = '30px Arial';
-            this.ctx.fillText(`RESPAWNING IN ${Math.ceil(this.player.respawnTimer)}...`, this.canvas.width / 2 - 100, this.canvas.height / 2);
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            ctx.fillStyle = '#ff4444';
+            ctx.font = 'bold 30px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`RESPAWNING IN ${Math.ceil(this.player.respawnTimer)}...`, this.canvas.width * 0.5, this.canvas.height * 0.5);
         }
-    }
 
+        // FPS counter (debug)
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${this.fps} FPS | ${this.villagers.length} units | TD: ${this.world.camera.timeDilation.toFixed(2)}`, 8, this.canvas.height - 8);
+    }
 }
 
 window.onload = () => { new Game(); };
