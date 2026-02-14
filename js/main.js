@@ -912,7 +912,7 @@ class Game {
         for (let i = 0; i < this.islands.length; i++) {
             const island = this.islands[i];
             if (island.hasTeepee && (island.team === 'green' || island.team === 'blue') && Math.random() < 0.6) {
-                const batchSize = 2 + Math.floor(Math.random() * 2);
+                const batchSize = 3 + Math.floor(Math.random() * 3);
                 for (let b = 0; b < batchSize && this.villagers.length < 500; b++) {
                     const spawnX = island.x + 30 + Math.random() * (island.w - 60);
                     const unit = Math.random() < 0.4
