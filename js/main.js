@@ -176,12 +176,12 @@ class Game {
         ['green', 'blue'].forEach(team => {
             const validIslands = this.islands.filter(i => i.team === team || i.team === 'neutral');
             let cV = 0, cW = 0;
-            while (cV < 3 || cW < 2) {
+            while (cV < 20 || cW < 10) {
                 const island = validIslands[Math.floor(Math.random() * validIslands.length)];
                 if (!island) continue;
-                const x = island.x + 50 + Math.random() * 100;
+                const x = island.x + 30 + Math.random() * (island.w - 60);
                 const y = island.y - 50;
-                if (cV < 3) {
+                if (cV < 20) {
                     const v = new Villager(x, y, team);
                     v.homeIsland = island;
                     this.villagers.push(v);
@@ -289,7 +289,7 @@ class Game {
 
         // Spawning
         this.spawnTimer += dt;
-        if (this.spawnTimer > 10) {
+        if (this.spawnTimer > 3) {
             this._spawnVillagers();
             this._spawnPigs();
             this.spawnTimer = 0;
@@ -861,7 +861,7 @@ class Game {
 
     _checkHit(a, b) {
         return a.x < b.x + b.w && a.x + a.w > b.x &&
-               a.y < b.y + b.h && a.y + a.h > b.y;
+            a.y < b.y + b.h && a.y + a.h > b.y;
     }
 
     _handleShooting(dt) {
@@ -894,8 +894,8 @@ class Game {
         }
 
         if (bestIsland && bestDist < 1000) {
-            const count = 3 + Math.floor(Math.random() * 3);
-            for (let i = 0; i < count && this.villagers.length < 200; i++) {
+            const count = 5 + Math.floor(Math.random() * 4);
+            for (let i = 0; i < count && this.villagers.length < 500; i++) {
                 const unit = Math.random() < 0.4
                     ? new Warrior(bestIsland.x + 50, bestIsland.y - 40, team)
                     : new Villager(bestIsland.x + 50, bestIsland.y - 40, team);
@@ -908,16 +908,20 @@ class Game {
     }
 
     _spawnVillagers() {
-        if (this.villagers.length >= 200) return;
+        if (this.villagers.length >= 500) return;
         for (let i = 0; i < this.islands.length; i++) {
             const island = this.islands[i];
-            if (island.hasTeepee && (island.team === 'green' || island.team === 'blue') && Math.random() < 0.3) {
-                const unit = Math.random() < 0.4
-                    ? new Warrior(island.x + 50, island.y - 40, island.team)
-                    : new Villager(island.x + 50, island.y - 40, island.team);
-                unit.homeIsland = island;
-                this.villagers.push(unit);
-                if (this.villagers.length >= 200) break;
+            if (island.hasTeepee && (island.team === 'green' || island.team === 'blue') && Math.random() < 0.6) {
+                const batchSize = 2 + Math.floor(Math.random() * 2);
+                for (let b = 0; b < batchSize && this.villagers.length < 500; b++) {
+                    const spawnX = island.x + 30 + Math.random() * (island.w - 60);
+                    const unit = Math.random() < 0.4
+                        ? new Warrior(spawnX, island.y - 40, island.team)
+                        : new Villager(spawnX, island.y - 40, island.team);
+                    unit.homeIsland = island;
+                    this.villagers.push(unit);
+                }
+                if (this.villagers.length >= 500) break;
             }
         }
     }

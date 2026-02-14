@@ -70,7 +70,7 @@ export class ResourceManager {
     }
 
     addMana(amount) {
-        this.mana = Math.min(this.mana + amount, this.maxMana);
+        this.mana = this.maxMana;
     }
 
     addSouls(amount) {
@@ -78,14 +78,12 @@ export class ResourceManager {
     }
 
     spendMana(amount) {
-        if (this.mana >= amount) {
-            this.mana -= amount;
-            return true;
-        }
-        return false;
+        // Unlimited spells - always succeed, keep mana full
+        this.mana = this.maxMana;
+        return true;
     }
 
-    spendAir(dt) { return this.spendMana(5 * dt); }
+    spendAir(dt) { return true; }
 
     updateStats(gTents, gPop, bTents, bPop) {
         this.greenTents = gTents;

@@ -649,15 +649,20 @@ export class Player extends Entity {
             }
         }
 
+        // Save previous bottom before moving
+        const prevBottom = this.y + this.h;
+
         this.y += this.vy * dt;
         this.isGrounded = false;
 
         if (this.vy >= 0) {
+            const newBottom = this.y + this.h;
             for (let i = 0; i < islands.length; i++) {
                 const island = islands[i];
                 if (this.x < island.x + island.w && this.x + this.w > island.x) {
-                    const threshold = island.y + 30 + this.vy * dt;
-                    if (this.y + this.h >= island.y && this.y + this.h <= threshold) {
+                    // Crossed the surface OR within generous fixed threshold
+                    if ((prevBottom <= island.y + 5 && newBottom >= island.y - 5) ||
+                        (newBottom >= island.y - 5 && newBottom <= island.y + 40)) {
                         this.y = island.y - this.h + 1;
                         this.vy = 0;
                         this.isGrounded = true;
@@ -789,16 +794,20 @@ export class Villager extends Entity {
             if (nextX < this.homeIsland.x || nextX > this.homeIsland.x + this.homeIsland.w) this.vx *= -1;
         }
 
+        // Save previous bottom
+        const prevBottom = this.y + this.h;
+
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
         this.onGround = false;
         if (this.vy >= 0) {
+            const newBottom = this.y + this.h;
             for (let i = 0; i < islands.length; i++) {
                 const island = islands[i];
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                    const threshold = 10 + this.vy * dt * 2;
-                    if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                    if ((prevBottom <= island.y + 5 && newBottom >= island.y - 5) ||
+                        (newBottom >= island.y - 5 && newBottom <= island.y + 40)) {
                         this.y = island.y - this.h;
                         this.vy = 0;
                         this.onGround = true;
@@ -848,11 +857,13 @@ export class Warrior extends Villager {
         this.w = 32; this.h = 32;
         this.hp = 10;
         this.attackCooldown = 0;
-        this.role = Math.random() < 0.5 ? 'bodyguard' : 'raider';
+        // Bodyguard/Homebody/Raider role system
+        const r = Math.random();
+        this.role = r < 0.3 ? 'bodyguard' : r < 0.65 ? 'homebody' : 'raider';
         this.maxFallSpeed = 1000;
         this.patrolTargetX = null;
         this.patrolTimer = 0;
-        this.roleTimer = 0;
+        this.roleTimer = 5 + Math.random() * 10;
     }
 
     draw(ctx, camera) {
@@ -947,23 +958,40 @@ export class Warrior extends Villager {
             }
         }
 
-        // Movement
+        // Movement - Bodyguard/Homebody/Raider state tree
         if (warState === 'BUILD' && moveTargetX === null) {
             this.roleTimer -= dt;
             if (this.roleTimer <= 0) {
                 this.roleTimer = 10 + Math.random() * 10;
-                if (this.role === 'bodyguard' && Math.random() < 0.2) this.role = 'raider';
+                // Role transitions with weighted probabilities
+                const r = Math.random();
+                if (this.role === 'bodyguard') {
+                    this.role = r < 0.3 ? 'homebody' : r < 0.6 ? 'raider' : 'bodyguard';
+                } else if (this.role === 'homebody') {
+                    this.role = r < 0.25 ? 'bodyguard' : r < 0.5 ? 'raider' : 'homebody';
+                } else { // raider
+                    this.role = r < 0.2 ? 'bodyguard' : r < 0.45 ? 'homebody' : 'raider';
+                }
             }
 
             if (this.role === 'bodyguard' && friendlyLeader && !friendlyLeader.dead) {
+                // Stay near chief
                 moveTargetX = friendlyLeader.x + (Math.random() - 0.5) * 150;
                 moveTargetY = friendlyLeader.y;
+            } else if (this.role === 'homebody' && this.homeIsland) {
+                // Defend home island - stay on it, patrol back and forth
+                moveTargetX = this.homeIsland.x + Math.random() * this.homeIsland.w;
+                moveTargetY = this.homeIsland.y - 30;
             } else {
+                // Raider - seek enemy territory
                 this.patrolTimer -= dt;
                 if (this.patrolTimer <= 0 || this.patrolTargetX === null || Math.abs(this.x - this.patrolTargetX) < 100) {
                     this.patrolTimer = 8 + Math.random() * 12;
                     if (islands.length > 0) {
-                        const ri = islands[Math.floor(Math.random() * islands.length)];
+                        // Prefer enemy islands
+                        const enemyIslands = islands.filter(i => i.team !== this.team && i.team !== 'neutral');
+                        const targetIslands = enemyIslands.length > 0 ? enemyIslands : islands;
+                        const ri = targetIslands[Math.floor(Math.random() * targetIslands.length)];
                         this.patrolTargetX = ri.x + ri.w * 0.5;
                         this.patrolTargetY = ri.y - 50;
                     }
@@ -995,17 +1023,21 @@ export class Warrior extends Villager {
         if (this.vy > maxSpeed) this.vy = maxSpeed;
         if (this.vy < -maxSpeed) this.vy = -maxSpeed;
 
+        // Save previous bottom
+        const prevBottom = this.y + this.h;
+
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
         // Landing
         this.onGround = false;
         if (this.vy >= 0) {
+            const newBottom = this.y + this.h;
             for (let i = 0; i < islands.length; i++) {
                 const island = islands[i];
                 if (this.x + this.w > island.x && this.x < island.x + island.w) {
-                    const threshold = 10 + this.vy * dt * 2;
-                    if (this.y + this.h >= island.y - 5 && this.y + this.h <= island.y + threshold) {
+                    if ((prevBottom <= island.y + 5 && newBottom >= island.y - 5) ||
+                        (newBottom >= island.y - 5 && newBottom <= island.y + 40)) {
                         this.y = island.y - this.h;
                         this.vy = 0;
                         this.onGround = true;
