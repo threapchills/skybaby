@@ -502,15 +502,12 @@ export class Island extends Entity {
                 const alpha = getFgAlpha(treeCX, treeCY);
                 if (alpha < 0.02) continue; // Skip if practically invisible
 
-                ctx.globalAlpha = tree.burnt ? alpha * 0.3 : alpha;
+                // Lower alpha for fg trees to create depth silhouette effect
+                // (no fillRect overlay — that causes dark box artifacts on transparent pixels)
+                ctx.globalAlpha = tree.burnt ? alpha * 0.2 : alpha * 0.7;
 
                 // Draw tree sprite
                 ctx.drawImage(this.activeTree, treeX, treeY, tw, th);
-
-                // Dark tint overlay for silhouette depth effect
-                // This is what makes fg trees look DIFFERENT from bg trees
-                ctx.fillStyle = 'rgba(10,15,8,0.25)';
-                ctx.fillRect(treeX, treeY, tw, th);
 
                 ctx.globalAlpha = 1;
             }

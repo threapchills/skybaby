@@ -585,28 +585,6 @@ class Game {
     }
 
     _checkCollisions(dt) {
-        // Mana recharge near fires
-        for (let i = 0; i < this.islands.length; i++) {
-            const island = this.islands[i];
-            if (!island.hasTeepee) continue;
-            const tx = island.x + island.w * 0.5;
-            const ty = island.y - 80;
-            const rangeSq = 150 * 150;
-
-            const pdx = this.player.x - tx;
-            const pdy = this.player.y - ty;
-            if (pdx * pdx + pdy * pdy < rangeSq) {
-                this.resources.addMana(30 * dt);
-            }
-
-            if (!this.enemyChief.dead) {
-                const edx = this.enemyChief.x - tx;
-                const edy = this.enemyChief.y - ty;
-                if (edx * edx + edy * edy < rangeSq) {
-                    this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 30 * dt);
-                }
-            }
-        }
 
         // Eat pigs
         for (let i = this.pigs.length - 1; i >= 0; i--) {
@@ -629,16 +607,15 @@ class Game {
         const dy = this.player.y - this.enemyChief.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        this.enemyChief.mana = Math.min(this.enemyChief.maxMana, this.enemyChief.mana + 5 * dt);
-
         if (dist < 800 && this.enemyChief.fireCooldown <= 0) {
             this.enemyChief.fireCooldown = 1.5;
             const angle = Math.atan2(dy, dx);
             this.projectiles.push(new Projectile(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue', 15));
         }
 
-        if (this.enemyChief.mana > 80 && Math.random() < 0.01) {
-            this.enemyChief.mana -= 80;
+        // Enemy fireball on cooldown instead of mana-gated
+        if (this.enemyChief.fireCooldown <= 0 && Math.random() < 0.01) {
+            this.enemyChief.fireCooldown = 3.0;
             const angle = Math.atan2(dy, dx);
             this.fireballs.push(new Fireball(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue'));
         }
@@ -779,7 +756,7 @@ class Game {
                     if (v.hp <= 0) {
                         v.dead = true;
                         spawnBlood(v.x, v.y);
-                        if (p.team === 'green') this.resources.addSouls(5);
+
                     }
                 }
             }

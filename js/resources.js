@@ -13,7 +13,6 @@ export class ResourceManager {
         this.currentSpell = 0;
         this.spellNames = ["FIREBALL", "AEROKINESIS", "QUAKE", "TIDE OF LIFE"];
         this.spellColors = ["#FF4500", "#87CEEB", "#8B4513", "#00BFFF"];
-        this.spellCosts = [80, 5, 40, 80]; // per cast (air is per second)
 
         this.mana = 100;
         this.maxMana = 100;
@@ -66,7 +65,7 @@ export class ResourceManager {
 
     replenishAll() {
         this.mana = this.maxMana;
-        this.showMessage("MANA SURGE!", "#FFD700");
+        this.showMessage("ENEMY CHIEF SLAIN!", "#FFD700");
     }
 
     addMana(amount) {
