@@ -5,12 +5,13 @@
 
 import { InputHandler } from './input.js';
 import { ResourceManager } from './resources.js';
-import { World } from './world.js';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js';
 import {
     Player, Island, Villager, Warrior, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
     RainCloud, VisualEffect, Totem,
-    spawnBlood, spawnParticle, updateParticles, drawParticles
+    spawnBlood, spawnParticle, updateParticles, drawParticles,
+    getAssetProgress
 } from './entities.js';
 import { AudioManager } from './audio.js';
 
@@ -28,50 +29,66 @@ class DifficultyManager {
     constructor() {
         this.difficulty = 1.0;
         this.targetDifficulty = 1.0;
-        this.minDiff = 0.55;
-        this.maxDiff = 1.6;
+        this.minDiff = 0.40;
+        this.maxDiff = 2.40;
 
-        this.windowSec = 25;            // rolling window for rate calc
-        this.killEvents = [];           // timestamps (sec) of enemy units killed by player
-        this.deathEvents = [];          // timestamps of player chief deaths
-        this.captureEvents = [];        // timestamps of player tent gains
-        this.lossEvents = [];           // timestamps of player tent losses
+        this.windowSec = 18;            // shorter window — responds faster
+        this.killEvents = [];           // enemy units killed by player team
+        this.deathEvents = [];          // player chief deaths
+        this.captureEvents = [];        // player tent gains
+        this.lossEvents = [];           // player tent losses
+        this.damageEvents = [];         // player HP-loss spikes (each event = 10 hp lost)
 
         this._evalTimer = 0;
-        this._evalInterval = 4.0;       // re-target every 4s — smooth, not twitchy
+        this._evalInterval = 2.5;       // re-target every 2.5s
         this._lastTents = { green: -1, blue: -1 };
+        this._lastPlayerHp = 100;
 
-        // For UI hint when difficulty shifts noticeably
+        // Surface-able tier transitions for in-game messages
         this._lastShownTier = null;
-
-        // Bookkeeping on game time (seconds) — the manager keeps its own clock
-        // so reload-safe reasoning isn't required.
         this._t = 0;
     }
 
-    notePlayerKill() { this.killEvents.push(this._t); }
-    notePlayerDeath() { this.deathEvents.push(this._t); }
+    notePlayerKill()  { this.killEvents.push(this._t); }
+    notePlayerDeath() {
+        this.deathEvents.push(this._t);
+        // A chief death is a strong signal — pad the queue so the manager
+        // really feels it without having to wait for the next eval cycle.
+        for (let i = 0; i < 4; i++) this.damageEvents.push(this._t);
+    }
 
-    update(dt, greenTents, blueTents) {
+    update(dt, greenTents, blueTents, playerHp) {
         this._t += dt;
 
-        // Detect tent transitions since last frame
+        // Tent transitions
         if (this._lastTents.green >= 0) {
             const dG = greenTents - this._lastTents.green;
             const dB = blueTents - this._lastTents.blue;
             if (dG > 0) for (let i = 0; i < dG; i++) this.captureEvents.push(this._t);
-            // A blue increase concurrent with green decrease = enemy captured a player tent
             if (dG < 0 && dB > 0) for (let i = 0; i < dB; i++) this.lossEvents.push(this._t);
         }
         this._lastTents.green = greenTents;
         this._lastTents.blue = blueTents;
 
-        // Prune events outside window
+        // Damage taken — every 10hp lost is one damage event
+        if (playerHp != null) {
+            const lost = this._lastPlayerHp - playerHp;
+            if (lost > 0) {
+                const ticks = Math.min(8, Math.floor(lost / 10));
+                for (let i = 0; i < ticks; i++) this.damageEvents.push(this._t);
+            }
+            // Don't track HP regen as positive — only acute loss
+            if (playerHp < this._lastPlayerHp || playerHp >= 100) this._lastPlayerHp = playerHp;
+            else this._lastPlayerHp += (playerHp - this._lastPlayerHp) * 0.5;
+        }
+
+        // Prune
         const cutoff = this._t - this.windowSec;
         this.killEvents = this.killEvents.filter(t => t > cutoff);
         this.deathEvents = this.deathEvents.filter(t => t > cutoff);
         this.captureEvents = this.captureEvents.filter(t => t > cutoff);
         this.lossEvents = this.lossEvents.filter(t => t > cutoff);
+        this.damageEvents = this.damageEvents.filter(t => t > cutoff);
 
         this._evalTimer += dt;
         if (this._evalTimer >= this._evalInterval) {
@@ -79,41 +96,55 @@ class DifficultyManager {
             this._recomputeTarget(greenTents, blueTents);
         }
 
-        // Smooth lerp — ~6 seconds to traverse the band
-        this.difficulty += (this.targetDifficulty - this.difficulty) * 0.18 * dt;
+        // Faster lerp — full band in ~3s
+        this.difficulty += (this.targetDifficulty - this.difficulty) * 0.4 * dt;
     }
 
     _recomputeTarget(greenTents, blueTents) {
         const w = this.windowSec;
-        const killRate = this.killEvents.length / w;       // /sec
-        const captureRate = this.captureEvents.length / w; // /sec
+        const killRate = this.killEvents.length / w;
+        const captureRate = this.captureEvents.length / w;
         const deathRate = this.deathEvents.length / w;
         const lossRate = this.lossEvents.length / w;
+        const damageRate = this.damageEvents.length / w;
         const tentDelta = greenTents - blueTents;
 
         // Score: positive when player is dominant, negative when struggling.
+        // Coefficients tuned aggressively so 30s of clear dominance reaches FIERCE
+        // and 20s of getting curb-stomped reaches CALM.
         let score = 0;
-        score += (killRate - 0.6) * 1.4;     // baseline ~0.6 kills/sec
-        score += captureRate * 35;           // captures are big signals
-        score -= lossRate * 30;
-        score += tentDelta * 0.32;           // territorial dominance
-        score -= deathRate * 4.5;            // dying drops the score
+        score += (killRate - 0.4) * 2.2;     // baseline ~0.4/sec
+        score += captureRate * 55;           // captures dominate the score
+        score -= lossRate * 50;
+        score += tentDelta * 0.55;           // territorial control
+        score -= deathRate * 8.0;
+        score -= damageRate * 1.2;           // taking sustained damage eases AI
 
-        // Map [-6 .. +6] roughly into [0.55 .. 1.6]
-        let target = 1.0 + score * 0.10;
+        // Map roughly [-7 .. +7] into [0.4 .. 2.4]
+        let target = 1.0 + score * 0.20;
         if (target < this.minDiff) target = this.minDiff;
         if (target > this.maxDiff) target = this.maxDiff;
         this.targetDifficulty = target;
     }
 
-    // Friendly tier name for optional UI display
     tier() {
         const d = this.difficulty;
-        if (d < 0.7) return 'CALM';
-        if (d < 0.95) return 'STEADY';
-        if (d < 1.15) return 'BALANCED';
-        if (d < 1.4) return 'FIERCE';
-        return 'RELENTLESS';
+        if (d < 0.65) return 'CALM';
+        if (d < 0.90) return 'STEADY';
+        if (d < 1.20) return 'BALANCED';
+        if (d < 1.60) return 'FIERCE';
+        if (d < 2.00) return 'RELENTLESS';
+        return 'WRATHFUL';
+    }
+
+    // Returns tier name if it changed this frame (for UI toast), else null.
+    pollTierChange() {
+        const t = this.tier();
+        if (this._lastShownTier !== t) {
+            this._lastShownTier = t;
+            return t;
+        }
+        return null;
     }
 }
 
@@ -126,19 +157,44 @@ class Game {
 
         this.worldWidth = 6000;
         this.worldHeight = 3000;
-        this.uiState = 'TITLE';
+        this.uiState = 'LOADING';
 
         this.titleImg = new Image(); this.titleImg.src = 'assets/title.png';
         this.tooltipImg = new Image(); this.tooltipImg.src = 'assets/tooltip.png';
 
+        // Pick a sky variant up-front so the loading screen can use it.
+        this.loadingSkyMeta = pickRandomSkyVariant();
+        this.loadingSkyImg = getSkyVariantImage(this.loadingSkyMeta.path);
+
         this.uiLayer = document.getElementById('ui-layer');
         this.uiLayer.style.display = 'none';
+        // Hide the legacy "Loading..." DOM element — we draw our own scene.
+        const lt = document.getElementById('loading-text');
+        if (lt) lt.style.display = 'none';
 
         this.input = new InputHandler();
         this.resources = new ResourceManager();
         this.world = new World(this.worldWidth, this.worldHeight);
         this.audio = new AudioManager();
-        this.audio.loadAll();
+        this.audioReady = false;
+        this.audio.loadAll().then(() => { this.audioReady = true; });
+
+        // Loading-screen state
+        this._loadStart = performance.now();
+        this._loadProgress = 0;
+        this._loadDone = false;
+        this._loadDoneTime = 0;
+        this._loadingMotes = [];
+        for (let i = 0; i < 60; i++) {
+            this._loadingMotes.push({
+                x: Math.random(),
+                y: Math.random(),
+                z: 0.3 + Math.random() * 1.4,
+                phase: Math.random() * Math.PI * 2,
+                speed: 4 + Math.random() * 14,
+                size: 0.6 + Math.random() * 2.0
+            });
+        }
 
         this.input.onScroll((delta) => this.resources.cycleSpell(delta > 0 ? 1 : -1));
 
@@ -205,7 +261,14 @@ class Game {
     }
 
     _handleScreenNav() {
-        if (this.uiState === 'TITLE') {
+        if (this.uiState === 'LOADING') {
+            // Only advance from LOADING once everything is ready
+            if (this._loadDone) {
+                this.uiState = 'TITLE';
+                this.navCooldown = true;
+                setTimeout(() => { this.navCooldown = false; }, 200);
+            }
+        } else if (this.uiState === 'TITLE' && !this.navCooldown) {
             this.uiState = 'TOOLTIP';
             this.navCooldown = true;
             setTimeout(() => { this.navCooldown = false; }, 200);
@@ -423,7 +486,7 @@ class Game {
         this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp, dt);
 
         // Dynamic difficulty — sees the same tent stats the HUD uses
-        this.difficulty.update(dt, greenTents, blueTents);
+        this.difficulty.update(dt, greenTents, blueTents, this.player.hp);
 
         // Propagate difficulty to live enemy warriors so changes apply
         // immediately, not just to newly spawned units.
@@ -431,6 +494,30 @@ class Game {
         for (let i = 0; i < this.villagers.length; i++) {
             const v = this.villagers[i];
             if (v.team === 'blue' && v instanceof Warrior) v.difficultyScale = _d;
+        }
+
+        // Extra enemy spawn pulse whose interval scales with difficulty.
+        // High difficulty → enemy reinforcements arrive almost twice as fast.
+        this._enemySpawnTimer = (this._enemySpawnTimer || 0) + dt;
+        const enemyInterval = 4.0 / Math.max(0.5, _d);   // 10s easy → 1.7s hard
+        if (this._enemySpawnTimer >= enemyInterval) {
+            this._enemySpawnTimer = 0;
+            this._spawnEnemyOnly();
+        }
+
+        // Surface tier changes as a brief message — keeps the player aware
+        // that the world is responding to them.
+        const tierChange = this.difficulty.pollTierChange();
+        if (tierChange && this.uiState === 'PLAYING') {
+            const tones = {
+                CALM:       '#9CFFB5',
+                STEADY:     '#B0E5FF',
+                BALANCED:   '#FFFFFF',
+                FIERCE:     '#FFB070',
+                RELENTLESS: '#FF8060',
+                WRATHFUL:   '#FF4848'
+            };
+            this.resources.showMessage(`THE TIDE TURNS · ${tierChange}`, tones[tierChange] || '#FFFFFF');
         }
 
         // Victory / Defeat
@@ -1029,8 +1116,8 @@ class Game {
     _spawnVillagers() {
         if (this.villagers.length >= 500) return;
         const d = this.difficulty.difficulty;
-        // Enemy spawn rate scales up with difficulty; player rate stays steady.
-        const enemyBatchBonus = Math.round((d - 1.0) * 2.5); // -1 .. +1.5
+        const enemyBatchBonus = Math.round((d - 1.0) * 3.0);   // wider swing
+        const playerBatchBonus = Math.round((1.0 - d) * 1.5);  // ally help when struggling
 
         for (let i = 0; i < this.islands.length; i++) {
             const island = this.islands[i];
@@ -1038,18 +1125,50 @@ class Game {
                 let batchSize = 3 + Math.floor(Math.random() * 3);
                 if (island.team === 'blue') {
                     batchSize = Math.max(1, batchSize + enemyBatchBonus);
+                } else if (island.team === 'green') {
+                    batchSize = Math.max(1, batchSize + Math.max(0, playerBatchBonus));
                 }
                 for (let b = 0; b < batchSize && this.villagers.length < 500; b++) {
                     const spawnX = island.x + 30 + Math.random() * (island.w - 60);
-                    const unit = Math.random() < 0.4
+                    // Higher warrior ratio for the dominant side via difficulty
+                    const warriorChance = island.team === 'blue' ? Math.min(0.7, 0.4 + (d - 1.0) * 0.3) : 0.4;
+                    const unit = Math.random() < warriorChance
                         ? new Warrior(spawnX, island.y - 40, island.team)
                         : new Villager(spawnX, island.y - 40, island.team);
                     unit.homeIsland = island;
-                    if (island.team === 'blue') unit.difficultyScale = d;
+                    if (island.team === 'blue') {
+                        unit.difficultyScale = d;
+                        if (unit instanceof Warrior) unit.hp = Math.round(10 * (0.7 + 0.3 * d));
+                    }
                     this.villagers.push(unit);
                 }
                 if (this.villagers.length >= 500) break;
             }
+        }
+    }
+
+    // Difficulty-driven extra enemy reinforcement pulse.
+    _spawnEnemyOnly() {
+        if (this.villagers.length >= 500) return;
+        const d = this.difficulty.difficulty;
+        if (d < 0.7) return; // don't reinforce when player is struggling
+        const islands = this.islands.filter(i => i.team === 'blue' && i.hasTeepee);
+        if (islands.length === 0) return;
+        const island = islands[Math.floor(Math.random() * islands.length)];
+        const batch = 1 + Math.round((d - 0.8) * 2.5); // 1..5
+        for (let b = 0; b < batch && this.villagers.length < 500; b++) {
+            const spawnX = island.x + 30 + Math.random() * (island.w - 60);
+            const warriorChance = Math.min(0.8, 0.5 + (d - 1.0) * 0.3);
+            const unit = Math.random() < warriorChance
+                ? new Warrior(spawnX, island.y - 40, 'blue')
+                : new Villager(spawnX, island.y - 40, 'blue');
+            unit.homeIsland = island;
+            unit.difficultyScale = d;
+            if (unit instanceof Warrior) unit.hp = Math.round(10 * (0.7 + 0.3 * d));
+            // give them a launch boost so they pop out dramatically
+            unit.vy = -200 - Math.random() * 150;
+            unit.vx = (Math.random() - 0.5) * 120;
+            this.villagers.push(unit);
         }
     }
 
@@ -1066,12 +1185,188 @@ class Game {
         }
     }
 
+    // === LOADING SCREEN ===
+    _updateLoadProgress(realDt) {
+        const ap = getAssetProgress();
+        const bp = getBackgroundProgress();
+        // Treat audio as one bundle worth ~10 image-equivalents so it weighs in
+        const audioWeight = 10;
+        const audioReady = this.audioReady ? audioWeight : 0;
+        const titleReady = (this.titleImg.complete ? 1 : 0) + (this.tooltipImg.complete ? 1 : 0);
+        const totalReady = ap.ready + bp.ready + audioReady + titleReady;
+        const totalNeed  = ap.total + bp.total + audioWeight + 2;
+        const target = totalNeed > 0 ? totalReady / totalNeed : 1;
+
+        // Smooth the progress bar so it doesn't jitter or jump
+        this._loadProgress += (target - this._loadProgress) * Math.min(1, realDt * 6);
+
+        // Don't claim "done" until target is essentially 1 AND a brief
+        // settle window has passed so the user can see 100%.
+        if (!this._loadDone && target >= 0.999) {
+            this._loadDoneTime += realDt;
+            if (this._loadDoneTime > 0.4) this._loadDone = true;
+        }
+    }
+
+    _drawLoadingScreen(ctx, realDt) {
+        const W = this.canvas.width;
+        const H = this.canvas.height;
+
+        // 1. Painted sky as backdrop (covers the full canvas, gracefully scales).
+        if (this.loadingSkyImg && this.loadingSkyImg.complete && this.loadingSkyImg.naturalWidth > 0) {
+            const ih = this.loadingSkyImg.naturalHeight;
+            const iw = this.loadingSkyImg.naturalWidth;
+            const scale = Math.max(W / iw, H / ih);
+            const sw = iw * scale, sh = ih * scale;
+            ctx.drawImage(this.loadingSkyImg, (W - sw) * 0.5, (H - sh) * 0.5, sw, sh);
+        } else {
+            // Pre-image fallback: deep gradient using the chosen sky's tint
+            const t = this.loadingSkyMeta.tint;
+            const g = ctx.createLinearGradient(0, 0, 0, H);
+            g.addColorStop(0, `rgb(${Math.floor(t.r*0.4)},${Math.floor(t.g*0.4)},${Math.floor(t.b*0.5)})`);
+            g.addColorStop(1, `rgb(${t.r},${t.g},${t.b})`);
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, W, H);
+        }
+
+        // 2. Atmospheric darkening + chromatic vignette so the type pops
+        const vGrad = ctx.createLinearGradient(0, 0, 0, H);
+        vGrad.addColorStop(0, 'rgba(0,0,0,0.35)');
+        vGrad.addColorStop(0.5, 'rgba(0,0,0,0.20)');
+        vGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
+        ctx.fillStyle = vGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // 3. Drifting motes (warm pollen / dust) — adds life to the still scene
+        const time = (performance.now() - this._loadStart) / 1000;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < this._loadingMotes.length; i++) {
+            const m = this._loadingMotes[i];
+            m.phase += realDt * (0.6 + m.z * 0.4);
+            m.x -= (m.speed * m.z * realDt) / W;
+            if (m.x < -0.05) m.x = 1.05;
+            const px = m.x * W + Math.sin(m.phase) * 8;
+            const py = m.y * H + Math.cos(m.phase * 0.7) * 6;
+            const a = (0.18 + Math.sin(m.phase) * 0.12) * m.z;
+            ctx.fillStyle = `rgba(255,235,200,${Math.max(0.05, a)})`;
+            ctx.beginPath();
+            ctx.arc(px, py, m.size * m.z, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // 4. Title block — large display type with subtle bloom
+        ctx.save();
+        ctx.textAlign = 'center';
+        const titleY = H * 0.42;
+
+        // Soft glow pass
+        ctx.fillStyle = 'rgba(255,210,150,0.18)';
+        ctx.font = 'bold 72px "Segoe UI", Tahoma, sans-serif';
+        ctx.fillText('SOAR', W * 0.5, titleY);
+
+        ctx.fillStyle = '#FFE6C2';
+        ctx.shadowColor = 'rgba(255,180,120,0.6)';
+        ctx.shadowBlur = 18;
+        ctx.fillText('SOAR', W * 0.5, titleY);
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '300 22px "Segoe UI", Tahoma, sans-serif';
+        ctx.fillText('M Y S T I K   S K I E S', W * 0.5, titleY + 40);
+        ctx.restore();
+
+        // 5. Progress bar — copper/labradorite palette, glassy
+        const barW = Math.min(560, W * 0.52);
+        const barH = 8;
+        const barX = (W - barW) * 0.5;
+        const barY = H * 0.62;
+
+        // Track
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        this._roundRect(ctx, barX, barY, barW, barH, 4);
+        ctx.fill();
+
+        // Fill — animated gradient
+        const p = Math.min(1, Math.max(0, this._loadProgress));
+        if (p > 0.001) {
+            const fillW = barW * p;
+            const fg = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+            fg.addColorStop(0, '#C97A3D');     // copper
+            fg.addColorStop(0.5, '#E8B872');   // warm highlight
+            fg.addColorStop(1, '#7CD0C2');     // labradorite teal
+            ctx.fillStyle = fg;
+            this._roundRect(ctx, barX, barY, fillW, barH, 4);
+            ctx.fill();
+
+            // Highlight scan
+            const scanX = barX + ((time * 220) % (fillW + 80)) - 40;
+            const scanGrad = ctx.createLinearGradient(scanX - 30, 0, scanX + 30, 0);
+            scanGrad.addColorStop(0, 'rgba(255,255,255,0)');
+            scanGrad.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+            scanGrad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.save();
+            ctx.beginPath();
+            this._roundRect(ctx, barX, barY, fillW, barH, 4);
+            ctx.clip();
+            ctx.fillStyle = scanGrad;
+            ctx.fillRect(scanX - 30, barY, 60, barH);
+            ctx.restore();
+        }
+
+        // 6. Caption: percentage + status text
+        ctx.textAlign = 'center';
+        ctx.font = '500 12px "Segoe UI", Tahoma, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        const pct = Math.floor(p * 100);
+        const verb = this._loadDone ? 'READY' : (pct < 35 ? 'GATHERING WINDS' : pct < 70 ? 'PAINTING SKIES' : pct < 95 ? 'AWAKENING SPIRITS' : 'KINDLING THE EMBERS');
+        ctx.fillText(`${verb}   ·   ${pct}%`, W * 0.5, barY + 32);
+
+        // 7. Click hint (only when ready)
+        if (this._loadDone) {
+            const pulse = 0.55 + Math.sin(time * 3.2) * 0.35;
+            ctx.font = '600 16px "Segoe UI", Tahoma, sans-serif';
+            ctx.fillStyle = `rgba(255,255,255,${pulse})`;
+            ctx.fillText('CLICK OR PRESS ANY KEY TO BEGIN', W * 0.5, H * 0.78);
+        } else {
+            // Tiny moodline / variant name
+            ctx.font = '300 11px "Segoe UI", Tahoma, sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.45)';
+            ctx.fillText(this.loadingSkyMeta.name, W * 0.5, H * 0.78);
+        }
+
+        // 8. Author crest at the bottom
+        ctx.font = '300 10px "Segoe UI", Tahoma, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.30)';
+        ctx.fillText('A WHYLE GAME', W * 0.5, H - 18);
+    }
+
+    _roundRect(ctx, x, y, w, h, r) {
+        if (w < r * 2) r = w * 0.5;
+        if (h < r * 2) r = h * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y,     x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x,     y + h, r);
+        ctx.arcTo(x,     y + h, x,     y,     r);
+        ctx.arcTo(x,     y,     x + w, y,     r);
+        ctx.closePath();
+    }
+
     // === RENDER PIPELINE ===
     draw(realDt) {
         const ctx = this.ctx;
         const cam = this.world.camera;
 
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Loading screen — drawn until every asset is decoded
+        if (this.uiState === 'LOADING') {
+            this._updateLoadProgress(realDt);
+            this._drawLoadingScreen(ctx, realDt);
+            return;
+        }
 
         // Title / Tooltip screens
         if (this.uiState === 'TITLE') {
@@ -1159,6 +1454,16 @@ class Game {
         // Chiefs
         if (!this.enemyChief.dead) this.enemyChief.draw(ctx, cam);
         if (!this.player.dead) this.player.draw(ctx, cam);
+
+        // Volumetric warm fire-light pass — only at night.
+        // Drawn after chiefs so warriors / villagers near the fire bask in it.
+        const sunHeight = Math.sin(this.dayTime);
+        const nightI = Math.max(0, Math.min(1, -sunHeight * 1.0 + 0.05));
+        if (nightI > 0.05) {
+            for (let i = 0; i < this.islands.length; i++) {
+                this.islands[i].drawFireGlow(ctx, cam, nightI);
+            }
+        }
 
         // Aim indicator — restrained, glowy, snappy crosshair
         if (!this.player.dead) {
@@ -1300,11 +1605,17 @@ class Game {
 
         ctx.restore(); // End zoom + rotation
 
-        // Darkness overlay (unscaled)
-        const sunHeight = Math.sin(this.dayTime);
-        if (sunHeight < 0.2) {
-            const darkness = Math.min(0.6, Math.abs(sunHeight - 0.2) * 0.7);
-            ctx.fillStyle = `rgba(5,5,25,${darkness})`;
+        // Darkness overlay (unscaled). Capped a touch lower than before and
+        // tinted with a warmer indigo so fires read brighter against it; also
+        // graded so the upper sky stays deep while the lower scene (where the
+        // fires live) gets a softer wash.
+        const sunHeightO = Math.sin(this.dayTime);
+        if (sunHeightO < 0.2) {
+            const darkness = Math.min(0.48, Math.abs(sunHeightO - 0.2) * 0.62);
+            const dGrad = ctx.createLinearGradient(0, 0, 0, this.canvas.height);
+            dGrad.addColorStop(0, `rgba(8,6,28,${darkness})`);
+            dGrad.addColorStop(1, `rgba(20,10,30,${darkness * 0.78})`);
+            ctx.fillStyle = dGrad;
             ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 

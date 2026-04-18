@@ -62,6 +62,31 @@ for (let i = 0; i < HEAD_FILES.length; i++) {
     Assets.heads.push(im);
 }
 
+// Walk every Image in Assets and report ready / total counts.
+// Used by the loading screen to show real progress.
+export function getAssetProgress() {
+    let ready = 0, total = 0;
+    const check = (im) => {
+        if (!im) return;
+        total++;
+        if (im.complete && im.naturalWidth > 0) ready++;
+    };
+    check(Assets.tilesetNormal); check(Assets.tilesetWinter);
+    check(Assets.treeNormal);    check(Assets.treeWinter);
+    check(Assets.grass);
+    check(Assets.teepeeGreen);   check(Assets.teepeeBlue);
+    check(Assets.fire);          check(Assets.leaf);
+    check(Assets.totem);
+    check(Assets.playerGreen);   check(Assets.playerBlue);
+    check(Assets.pig);
+    check(Assets.warriorGreen);  check(Assets.warriorBlue);
+    check(Assets.projectile);
+    Assets.villagerGreen.forEach(check);
+    Assets.villagerBlue.forEach(check);
+    Assets.heads.forEach(check);
+    return { ready, total };
+}
+
 // --- HELPERS ---
 function imgReady(img) {
     return img && img.complete && img.naturalWidth > 0;
@@ -600,15 +625,21 @@ export class Island extends Entity {
             const fx = sx + w * 0.55 - fireW * 0.5;
             const fy = sy - fireH + 36;
 
-            // Fire glow
+            // Daytime base glow (subtle — the dramatic illumination is in
+            // drawFireGlow, which fires only at night)
             ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = 'rgba(255,120,20,0.10)';
+            ctx.fillStyle = 'rgba(255,140,40,0.12)';
             ctx.beginPath();
-            ctx.arc(fx + fireW * 0.5, fy + fireH * 0.4, 100, 0, Math.PI * 2);
+            ctx.arc(fx + fireW * 0.5, fy + fireH * 0.4, 90, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalCompositeOperation = 'source-over';
 
             ctx.drawImage(Assets.fire, fx, fy, fireW, fireH);
+
+            // Cache fire centre in world coords so drawFireGlow doesn't have
+            // to recompute it.
+            this._fireWorldX = this.x + w * 0.55;
+            this._fireWorldY = this.y - fireH + 36 + fireH * 0.4;
         }
 
         // Territory border glow
@@ -617,6 +648,58 @@ export class Island extends Entity {
             ctx.fillStyle = glowColor;
             ctx.fillRect(sx - 2, sy - 5, w + 4, 10);
         }
+    }
+
+    // Warm volumetric fire-light pass — only contributes at night so days
+    // stay clean. Uses additive blending for a true illumination feel.
+    drawFireGlow(ctx, camera, nightIntensity) {
+        if (!this.hasFireplace || nightIntensity <= 0.05) return;
+        if (this._fireWorldX === undefined) return; // not yet drawn this frame
+        const rect = camera.getScreenRect(this._fireWorldX, this._fireWorldY, 0, 0);
+        if (!rect.onScreen) return;
+
+        const fx = rect.x;
+        const fy = rect.y;
+        const t = Date.now() * 0.001;
+        // Two-axis flicker for organic warmth
+        const flicker = 1 + (Math.sin(t * 7 + this.x * 0.013) * 0.07 + Math.sin(t * 11 + this.y * 0.017) * 0.05);
+        const r = (220 + 80 * flicker) * (0.6 + nightIntensity * 0.6);
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+
+        // Outer warm wash — the throw of the fire onto the surrounding scene
+        const g1 = ctx.createRadialGradient(fx, fy, 0, fx, fy, r);
+        g1.addColorStop(0.00, `rgba(255,170,70,${0.42 * nightIntensity})`);
+        g1.addColorStop(0.35, `rgba(255,120,40,${0.20 * nightIntensity})`);
+        g1.addColorStop(0.70, `rgba(180,60,20,${0.06 * nightIntensity})`);
+        g1.addColorStop(1.00, 'rgba(160,40,0,0)');
+        ctx.fillStyle = g1;
+        ctx.fillRect(fx - r, fy - r, r * 2, r * 2);
+
+        // Hot centre — bright core
+        const cr = 70 * flicker;
+        const g2 = ctx.createRadialGradient(fx, fy, 0, fx, fy, cr);
+        g2.addColorStop(0.00, `rgba(255,240,200,${0.65 * nightIntensity})`);
+        g2.addColorStop(0.45, `rgba(255,180,90,${0.30 * nightIntensity})`);
+        g2.addColorStop(1.00, 'rgba(255,140,40,0)');
+        ctx.fillStyle = g2;
+        ctx.fillRect(fx - cr, fy - cr, cr * 2, cr * 2);
+
+        // Occasional ember spark released upward
+        if (Math.random() < 0.35 * nightIntensity) {
+            spawnParticle(
+                this._fireWorldX + (Math.random() - 0.5) * 30,
+                this._fireWorldY - 20,
+                Math.random() < 0.5 ? '#FFD27A' : '#FF8030',
+                40 + Math.random() * 30,
+                0.6 + Math.random() * 0.6,
+                1.5 + Math.random() * 2,
+                'glow'
+            );
+        }
+
+        ctx.restore();
     }
 
     // Silksong-style foreground layer: trees & grass rendered OVER entities
@@ -1134,6 +1217,20 @@ export class Warrior extends Villager {
 
         drawShadow(ctx, sx, sy + this.h, this.w);
 
+        // High-difficulty enemy warriors gain a subtle wrath glow so the
+        // dynamic AI ramp is felt visually, not just statistically.
+        const ds = this.difficultyScale || 1.0;
+        if (this.team === 'blue' && ds > 1.25) {
+            const intensity = Math.min(1, (ds - 1.25) / 1.0);
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = `rgba(255,90,40,${0.18 * intensity})`;
+            ctx.beginPath();
+            ctx.arc(sx + this.w * 0.5, sy + this.h * 0.5, this.w * 0.85, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
         const img = this.team === 'green' ? Assets.warriorGreen : Assets.warriorBlue;
         if (imgReady(img)) {
             ctx.drawImage(img, sx, sy, this.w, this.h);
@@ -1183,9 +1280,11 @@ export class Warrior extends Villager {
             }
         }
 
-        // Target selection
+        // Target selection — detection range scales with difficulty so harder
+        // enemies aggress from further away and feel more relentless.
         let bestScore = -Infinity;
-        const detectionRange = forcedAggro ? 800 : (enemies.length < 5 ? 10000 : 600);
+        const dscale = this.difficultyScale || 1.0;
+        const detectionRange = (forcedAggro ? 800 : (enemies.length < 5 ? 10000 : 600)) * (0.85 + 0.4 * dscale);
 
         for (let i = 0; i < enemies.length; i++) {
             const e = enemies[i];
@@ -1281,8 +1380,8 @@ export class Warrior extends Villager {
             if (Math.abs(dy) > 50) this.vy += Math.sign(dy) * 1500 * dt;
         }
 
-        // Speed cap
-        const maxSpeed = 350;
+        // Speed cap — also scaled by difficulty so harder warriors close in faster
+        const maxSpeed = 350 * (0.88 + 0.18 * dscale);
         if (this.vx > maxSpeed) this.vx = maxSpeed;
         if (this.vx < -maxSpeed) this.vx = -maxSpeed;
         if (this.vy > maxSpeed) this.vy = maxSpeed;

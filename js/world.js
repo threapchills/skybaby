@@ -134,14 +134,18 @@ export class Camera {
 // Tiled parallax layer (used for mid + foreground cloud bands)
 class ParallaxLayer {
     constructor(imagePath, speed, yOffset, autoScrollSpeed, alpha) {
-        this.image = new Image();
-        this.image.src = imagePath;
+        this.image = _bgImageCache[imagePath] || new Image();
+        if (!this.image.src) this.image.src = imagePath;
         this.speed = speed;
         this.autoScrollSpeed = autoScrollSpeed || 0;
         this.yOffset = yOffset || 0;
         this.alpha = alpha !== undefined ? alpha : 1.0;
-        this.loaded = false;
-        this.image.onload = () => { this.loaded = true; };
+        this.loaded = this.image.complete && this.image.naturalWidth > 0;
+        if (!this.loaded) {
+            const onload = () => { this.loaded = true; };
+            if (this.image.addEventListener) this.image.addEventListener('load', onload);
+            else this.image.onload = onload;
+        }
     }
 
     draw(ctx, camera, alphaMul) {
@@ -169,27 +173,35 @@ class ParallaxLayer {
 // producing seamless infinite scrolling.
 class SkyVariant {
     constructor(path, mood) {
-        this.image = new Image();
-        this.image.src = path;
+        // Reuse the preloaded image when available so the loading screen
+        // can guarantee the painting is fully decoded before play begins.
+        this.image = _bgImageCache[path] || new Image();
+        if (!this.image.src) this.image.src = path;
         this.mood = mood;
-        this.loaded = false;
-        this.image.onload = () => { this.loaded = true; };
+        this.loaded = this.image.complete && this.image.naturalWidth > 0;
+        if (!this.loaded) {
+            const onload = () => { this.loaded = true; };
+            if (this.image.addEventListener) this.image.addEventListener('load', onload);
+            else this.image.onload = onload;
+        }
     }
 
     draw(ctx, camera, alpha) {
         if (!this.loaded) return;
         const ih = this.image.height;
         const iw = this.image.width;
-        const scale = (camera.effectiveH * 1.15) / ih;
+        // Scale up so we mostly see the painted top half of the image — the
+        // horizon line that lives in the lower portion stays below the viewport.
+        const scale = (camera.effectiveH * 1.7) / ih;
         const sw = iw * scale;
         const sh = ih * scale;
-        const yPos = -sh * 0.05;
+        // Anchor sky a little above the viewport top — view sits in the
+        // upper third of the painting (clouds), well clear of the horizon.
+        const yPos = -sh * 0.02;
         const speed = 0.03;
 
         const shift = -(camera.x * speed);
-        // Index of the leftmost (partly off-screen) tile.
         const firstTileIdx = Math.floor(-shift / sw);
-        // Screen-x of that leftmost tile (≤ 0).
         const firstTileX = firstTileIdx * sw + shift;
         const needed = Math.ceil(camera.effectiveW / sw) + 2;
 
@@ -220,6 +232,36 @@ const SKY_VARIANTS = [
     { path: 'assets/backgrounds/sky_pastel_variance_1775766480395_resized.png',  mood: 'pastel',  tint: { r: 200, g: 160, b: 180 }, name: 'PASTEL DAWN' },
     { path: 'assets/backgrounds/sky_sunset_variance_1775766189071_resized.png',  mood: 'sunset',  tint: { r: 200, g: 100, b: 70  }, name: 'EMBERSKY' }
 ];
+
+// Pre-load every sky and parallax image and report progress.
+// Loading screen uses this so the gradient pop-in never happens.
+const _allBackgroundImages = [];
+function _registerBg(path) {
+    const im = new Image();
+    im.src = path;
+    _allBackgroundImages.push(im);
+    return im;
+}
+const _bgImageCache = {};
+for (const v of SKY_VARIANTS) _bgImageCache[v.path] = _registerBg(v.path);
+_bgImageCache['assets/backgrounds/sky_layer_2.png']  = _registerBg('assets/backgrounds/sky_layer_2.png');
+_bgImageCache['assets/backgrounds/clouds_fg.png']    = _registerBg('assets/backgrounds/clouds_fg.png');
+
+export function getBackgroundProgress() {
+    let ready = 0, total = _allBackgroundImages.length;
+    for (const im of _allBackgroundImages) {
+        if (im.complete && im.naturalWidth > 0) ready++;
+    }
+    return { ready, total };
+}
+
+export function pickRandomSkyVariant() {
+    return SKY_VARIANTS[Math.floor(Math.random() * SKY_VARIANTS.length)];
+}
+
+export function getSkyVariantImage(path) {
+    return _bgImageCache[path];
+}
 
 export class World {
     constructor(width, height) {
@@ -320,19 +362,24 @@ export class World {
         // 4. Background fg cloud bank (still behind entities)
         this.fgCloudsBack.draw(ctx, cam, winterDim);
 
-        // 5. Distant horizon haze (bottom band)
-        const horizonGrad = ctx.createLinearGradient(0, eh * 0.55, 0, eh);
-        horizonGrad.addColorStop(0, 'rgba(0,0,0,0)');
-        horizonGrad.addColorStop(1, `rgba(${tint.r},${tint.g},${tint.b},0.45)`);
+        // 5. Distant horizon haze — gradient spans the full canvas so its
+        // rectangle has no visible top edge. Stops are positioned so the
+        // haze starts fading in around 55% down and tops out at the bottom.
+        const horizonGrad = ctx.createLinearGradient(0, 0, 0, eh);
+        horizonGrad.addColorStop(0.00, 'rgba(0,0,0,0)');
+        horizonGrad.addColorStop(0.55, 'rgba(0,0,0,0)');
+        horizonGrad.addColorStop(1.00, `rgba(${tint.r},${tint.g},${tint.b},0.45)`);
         ctx.fillStyle = horizonGrad;
-        ctx.fillRect(0, eh * 0.55, ew, eh * 0.45);
+        ctx.fillRect(0, 0, ew, eh);
 
-        // 6. High-altitude haze (top band — gives that lofty blue-of-the-stratosphere feel)
-        const topGrad = ctx.createLinearGradient(0, 0, 0, eh * 0.35);
-        topGrad.addColorStop(0, `rgba(${tint.r},${tint.g},${tint.b},0.25)`);
-        topGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        // 6. High-altitude haze — same trick: full-canvas rect, gradient
+        // controls visibility, no chance of a hard rectangle edge.
+        const topGrad = ctx.createLinearGradient(0, 0, 0, eh);
+        topGrad.addColorStop(0.00, `rgba(${tint.r},${tint.g},${tint.b},0.25)`);
+        topGrad.addColorStop(0.35, 'rgba(0,0,0,0)');
+        topGrad.addColorStop(1.00, 'rgba(0,0,0,0)');
         ctx.fillStyle = topGrad;
-        ctx.fillRect(0, 0, ew, eh * 0.35);
+        ctx.fillRect(0, 0, ew, eh);
 
         // 7. God rays (additive, only when sky has warm tint)
         if (this.skyMeta.mood === 'sunset' || this.skyMeta.mood === 'pastel' || this.skyMeta.mood === 'crimson') {
@@ -357,17 +404,17 @@ export class World {
         // reads as soft atmospheric scrim, not occlusion.
         this.fgCloudsFront.draw(ctx, cam, 1.0);
 
-        // Bottom volumetric fog (scrolls horizontally, sells altitude)
+        // Bottom volumetric fog — full-canvas gradient with stops positioned
+        // so the fog only appears in the lower portion. No hard rect edges.
         const time = Date.now() / 1000;
-        const fogY = eh * 0.7;
-        const fogH = eh * 0.4;
         const tint = this.skyMeta.tint;
-        const fogGrad = ctx.createLinearGradient(0, fogY, 0, fogY + fogH);
-        fogGrad.addColorStop(0, 'rgba(0,0,0,0)');
-        fogGrad.addColorStop(0.5, `rgba(${tint.r},${tint.g},${tint.b},0.18)`);
-        fogGrad.addColorStop(1, `rgba(${Math.floor(tint.r*0.6)},${Math.floor(tint.g*0.6)},${Math.floor(tint.b*0.7)},0.32)`);
+        const fogGrad = ctx.createLinearGradient(0, 0, 0, eh);
+        fogGrad.addColorStop(0.00, 'rgba(0,0,0,0)');
+        fogGrad.addColorStop(0.70, 'rgba(0,0,0,0)');
+        fogGrad.addColorStop(0.85, `rgba(${tint.r},${tint.g},${tint.b},0.18)`);
+        fogGrad.addColorStop(1.00, `rgba(${Math.floor(tint.r*0.6)},${Math.floor(tint.g*0.6)},${Math.floor(tint.b*0.7)},0.32)`);
         ctx.fillStyle = fogGrad;
-        ctx.fillRect(0, fogY, ew, fogH);
+        ctx.fillRect(0, 0, ew, eh);
 
         // Atmospheric motes — drifting dust/embers in front of action
         ctx.globalCompositeOperation = 'lighter';
