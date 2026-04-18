@@ -15,52 +15,46 @@ import {
 } from './entities.js';
 import { AudioManager } from './audio.js';
 
-/* DYNAMIC DIFFICULTY MANAGER
-   Watches recent player performance and gently scales enemy aggression so the
-   game tends toward equilibrium without ever swinging into "impossible".
-   Key idea: track rolling rates of player kills, deaths, captures, and
-   territory loss, fold them into a single performance score, and lerp a
-   global difficulty multiplier toward a target derived from that score.
-   The multiplier modulates enemy-chief attack cadence, spawn batch size,
-   warrior attack speed, and a slight projectile-damage bonus. Cap at
-   [0.55, 1.6] to keep both win and loss reachable.
+/* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
+   Design constraints learnt the hard way:
+     1. Adjustments must be invisible to the player. No toasts, no auras,
+        no tier label. The system breathes silently.
+     2. Default is a wide DEADBAND around equilibrium where nothing happens.
+        Tent delta within ±2 → no modulation at all.
+     3. Modulation only HELPS the underdog. The dominant side gets a tiny
+        nudge at most. We never compound buffs that create runaway loops.
+     4. Hard cap on every lever (±15% from baseline). Multiple subtle levers
+        beat one big lever, but each one stays gentle.
+     5. Single primary signal (tent delta) — the cleanest, slowest-moving
+        measure of "who is winning". Avoids twitchy reactions to fight RNG.
 */
 class DifficultyManager {
     constructor() {
-        this.difficulty = 1.0;
-        this.targetDifficulty = 1.0;
-        this.minDiff = 0.40;
-        this.maxDiff = 2.40;
+        // score in [-1, +1]: negative = player struggling, positive = dominating.
+        this.score = 0;
+        this.targetScore = 0;
 
-        this.windowSec = 18;            // shorter window — responds faster
-        this.killEvents = [];           // enemy units killed by player team
-        this.deathEvents = [];          // player chief deaths
-        this.captureEvents = [];        // player tent gains
-        this.lossEvents = [];           // player tent losses
-        this.damageEvents = [];         // player HP-loss spikes (each event = 10 hp lost)
-
-        this._evalTimer = 0;
-        this._evalInterval = 2.5;       // re-target every 2.5s
-        this._lastTents = { green: -1, blue: -1 };
-        this._lastPlayerHp = 100;
-
-        // Surface-able tier transitions for in-game messages
-        this._lastShownTier = null;
         this._t = 0;
+        this._evalTimer = 0;
+        this._evalInterval = 3.0;
+        this._lastTents = { green: -1, blue: -1 };
+        this.captureEvents = [];
+        this.lossEvents = [];
+        this.deathEvents = [];
+        this.windowSec = 20;
+
+        // Deadband — within ±N tent delta the system is fully neutral
+        this.deadbandTents = 2;
+        this.fullSwingTents = 6; // |tent delta| of 6 → |score| of 1.0
     }
 
-    notePlayerKill()  { this.killEvents.push(this._t); }
-    notePlayerDeath() {
-        this.deathEvents.push(this._t);
-        // A chief death is a strong signal — pad the queue so the manager
-        // really feels it without having to wait for the next eval cycle.
-        for (let i = 0; i < 4; i++) this.damageEvents.push(this._t);
-    }
+    notePlayerKill()  { /* noise — not used in v3 */ }
+    notePlayerDeath() { this.deathEvents.push(this._t); }
 
-    update(dt, greenTents, blueTents, playerHp) {
+    update(dt, greenTents, blueTents, _playerHp) {
         this._t += dt;
 
-        // Tent transitions
+        // Track tent transitions for momentum (small influence only)
         if (this._lastTents.green >= 0) {
             const dG = greenTents - this._lastTents.green;
             const dB = blueTents - this._lastTents.blue;
@@ -70,25 +64,10 @@ class DifficultyManager {
         this._lastTents.green = greenTents;
         this._lastTents.blue = blueTents;
 
-        // Damage taken — every 10hp lost is one damage event
-        if (playerHp != null) {
-            const lost = this._lastPlayerHp - playerHp;
-            if (lost > 0) {
-                const ticks = Math.min(8, Math.floor(lost / 10));
-                for (let i = 0; i < ticks; i++) this.damageEvents.push(this._t);
-            }
-            // Don't track HP regen as positive — only acute loss
-            if (playerHp < this._lastPlayerHp || playerHp >= 100) this._lastPlayerHp = playerHp;
-            else this._lastPlayerHp += (playerHp - this._lastPlayerHp) * 0.5;
-        }
-
-        // Prune
         const cutoff = this._t - this.windowSec;
-        this.killEvents = this.killEvents.filter(t => t > cutoff);
-        this.deathEvents = this.deathEvents.filter(t => t > cutoff);
         this.captureEvents = this.captureEvents.filter(t => t > cutoff);
-        this.lossEvents = this.lossEvents.filter(t => t > cutoff);
-        this.damageEvents = this.damageEvents.filter(t => t > cutoff);
+        this.lossEvents    = this.lossEvents.filter(t => t > cutoff);
+        this.deathEvents   = this.deathEvents.filter(t => t > cutoff);
 
         this._evalTimer += dt;
         if (this._evalTimer >= this._evalInterval) {
@@ -96,56 +75,56 @@ class DifficultyManager {
             this._recomputeTarget(greenTents, blueTents);
         }
 
-        // Faster lerp — full band in ~3s
-        this.difficulty += (this.targetDifficulty - this.difficulty) * 0.4 * dt;
+        // Slow lerp — score traverses its band over ~5s
+        this.score += (this.targetScore - this.score) * 0.20 * dt;
     }
 
     _recomputeTarget(greenTents, blueTents) {
-        const w = this.windowSec;
-        const killRate = this.killEvents.length / w;
-        const captureRate = this.captureEvents.length / w;
-        const deathRate = this.deathEvents.length / w;
-        const lossRate = this.lossEvents.length / w;
-        const damageRate = this.damageEvents.length / w;
         const tentDelta = greenTents - blueTents;
+        const absDelta = Math.abs(tentDelta);
 
-        // Score: positive when player is dominant, negative when struggling.
-        // Coefficients tuned aggressively so 30s of clear dominance reaches FIERCE
-        // and 20s of getting curb-stomped reaches CALM.
-        let score = 0;
-        score += (killRate - 0.4) * 2.2;     // baseline ~0.4/sec
-        score += captureRate * 55;           // captures dominate the score
-        score -= lossRate * 50;
-        score += tentDelta * 0.55;           // territorial control
-        score -= deathRate * 8.0;
-        score -= damageRate * 1.2;           // taking sustained damage eases AI
-
-        // Map roughly [-7 .. +7] into [0.4 .. 2.4]
-        let target = 1.0 + score * 0.20;
-        if (target < this.minDiff) target = this.minDiff;
-        if (target > this.maxDiff) target = this.maxDiff;
-        this.targetDifficulty = target;
-    }
-
-    tier() {
-        const d = this.difficulty;
-        if (d < 0.65) return 'CALM';
-        if (d < 0.90) return 'STEADY';
-        if (d < 1.20) return 'BALANCED';
-        if (d < 1.60) return 'FIERCE';
-        if (d < 2.00) return 'RELENTLESS';
-        return 'WRATHFUL';
-    }
-
-    // Returns tier name if it changed this frame (for UI toast), else null.
-    pollTierChange() {
-        const t = this.tier();
-        if (this._lastShownTier !== t) {
-            this._lastShownTier = t;
-            return t;
+        // DEADBAND: well-balanced game → fully neutral
+        if (absDelta <= this.deadbandTents) {
+            // Slight pull from death events (let recently-dying player breathe)
+            this.targetScore = -Math.min(0.4, this.deathEvents.length * 0.18);
+            return;
         }
-        return null;
+
+        // Outside deadband: scale by how far we are past it
+        const past = absDelta - this.deadbandTents;
+        const range = this.fullSwingTents - this.deadbandTents;
+        const mag = Math.min(1, past / range);
+        let s = Math.sign(tentDelta) * mag;
+
+        // Tiny momentum adjustment from recent flips (10% influence max)
+        const flipMomentum = (this.captureEvents.length - this.lossEvents.length) * 0.04;
+        s += flipMomentum;
+
+        // Recent player deaths bias the system toward easing up
+        s -= this.deathEvents.length * 0.12;
+
+        if (s > 1) s = 1;
+        if (s < -1) s = -1;
+        this.targetScore = s;
     }
+
+    // === LEVERS — invisible to the player, hard-capped ===
+    // Player support (>=1.0). Boosts kick in only when score < -0.3.
+    playerSupport() {
+        const s = -this.score;          // positive when player struggling
+        if (s < 0.3) return 1.0;
+        return 1.0 + Math.min(0.20, (s - 0.3) * 0.40);
+    }
+    // Enemy aggression (>=1.0). Tiny boost only when player is clearly ahead.
+    enemyAggression() {
+        const s = this.score;            // positive when player dominant
+        if (s < 0.3) return 1.0;
+        return 1.0 + Math.min(0.15, (s - 0.3) * 0.30);
+    }
+    // Boolean: should green islands spawn an extra unit this batch?
+    shouldBoostPlayerSpawn() { return this.score < -0.45; }
+    // Boolean: should blue islands spawn an extra unit this batch?
+    shouldBoostEnemySpawn()  { return this.score > 0.55; }
 }
 
 class Game {
@@ -485,39 +464,23 @@ class Game {
         this.resources.updateStats(greenTents, greenCount, blueTents, blueCount);
         this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp, dt);
 
-        // Dynamic difficulty — sees the same tent stats the HUD uses
+        // Dynamic difficulty — invisible to the player. Updates only the
+        // tent-tracking state; effect functions are queried where needed.
         this.difficulty.update(dt, greenTents, blueTents, this.player.hp);
 
-        // Propagate difficulty to live enemy warriors so changes apply
-        // immediately, not just to newly spawned units.
-        const _d = this.difficulty.difficulty;
-        for (let i = 0; i < this.villagers.length; i++) {
-            const v = this.villagers[i];
-            if (v.team === 'blue' && v instanceof Warrior) v.difficultyScale = _d;
-        }
-
-        // Extra enemy spawn pulse whose interval scales with difficulty.
-        // High difficulty → enemy reinforcements arrive almost twice as fast.
-        this._enemySpawnTimer = (this._enemySpawnTimer || 0) + dt;
-        const enemyInterval = 4.0 / Math.max(0.5, _d);   // 10s easy → 1.7s hard
-        if (this._enemySpawnTimer >= enemyInterval) {
-            this._enemySpawnTimer = 0;
-            this._spawnEnemyOnly();
-        }
-
-        // Surface tier changes as a brief message — keeps the player aware
-        // that the world is responding to them.
-        const tierChange = this.difficulty.pollTierChange();
-        if (tierChange && this.uiState === 'PLAYING') {
-            const tones = {
-                CALM:       '#9CFFB5',
-                STEADY:     '#B0E5FF',
-                BALANCED:   '#FFFFFF',
-                FIERCE:     '#FFB070',
-                RELENTLESS: '#FF8060',
-                WRATHFUL:   '#FF4848'
-            };
-            this.resources.showMessage(`THE TIDE TURNS · ${tierChange}`, tones[tierChange] || '#FFFFFF');
+        // Invisible support heal — when the system reads "player struggling",
+        // gently top up the chief's HP. Capped, slow, never visible as a
+        // notification. Combined with regular regen this keeps the player
+        // alive long enough to recover, without trivialising fights.
+        const support = this.difficulty.playerSupport();
+        if (support > 1.05 && !this.player.dead && this.player.hp < this.player.maxHp) {
+            this._supportHealTimer = (this._supportHealTimer || 0) + dt;
+            if (this._supportHealTimer >= 1.5) {
+                this._supportHealTimer = 0;
+                this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
+            }
+        } else {
+            this._supportHealTimer = 0;
         }
 
         // Victory / Defeat
@@ -811,23 +774,24 @@ class Game {
         const dy = this.player.y - this.enemyChief.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        // Difficulty modulates: detection range, cooldown speed, fireball chance.
-        const d = this.difficulty.difficulty;
-        const detectRange = 700 + 200 * d;          // 805 .. 1020
-        const baseShootCD = 1.5 / d;                // 2.7 (easy) .. 0.94 (hard)
-        const baseBurstCD = 3.0 / d;
-        const fireballChance = 0.005 + 0.012 * d;   // 0.011 .. 0.024
-        const projDmg = Math.round(12 + 6 * d);     // 16 .. 22
+        // Baselines are the original game values. The only difficulty lever
+        // here is enemyAggression(), which can shorten the chief's shoot
+        // cooldown by up to 15% when the player is clearly dominating.
+        const aggro = this.difficulty.enemyAggression();      // 1.00 .. 1.15
+        const detectRange = 800;
+        const shootCD = 1.5 / aggro;
+        const burstCD = 3.0 / aggro;
+        const fireballChance = 0.01;
+        const projDmg = 15;
 
         if (dist < detectRange && this.enemyChief.fireCooldown <= 0) {
-            this.enemyChief.fireCooldown = baseShootCD;
+            this.enemyChief.fireCooldown = shootCD;
             const angle = Math.atan2(dy, dx);
             this.projectiles.push(new Projectile(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue', projDmg));
         }
 
-        // Burst fireball — chance scales with difficulty
         if (this.enemyChief.fireCooldown <= 0 && Math.random() < fireballChance) {
-            this.enemyChief.fireCooldown = baseBurstCD;
+            this.enemyChief.fireCooldown = burstCD;
             const angle = Math.atan2(dy, dx);
             this.fireballs.push(new Fireball(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue'));
         }
@@ -1115,60 +1079,29 @@ class Game {
 
     _spawnVillagers() {
         if (this.villagers.length >= 500) return;
-        const d = this.difficulty.difficulty;
-        const enemyBatchBonus = Math.round((d - 1.0) * 3.0);   // wider swing
-        const playerBatchBonus = Math.round((1.0 - d) * 1.5);  // ally help when struggling
+        // Spawn batch is at the original baseline. The only nudges are:
+        //   - +1 to PLAYER batch when the player is clearly struggling.
+        //   - +1 to ENEMY batch only when the player is clearly dominating.
+        // Both gated by deadband — equilibrium games are completely untouched.
+        const helpPlayer = this.difficulty.shouldBoostPlayerSpawn();
+        const helpEnemy  = this.difficulty.shouldBoostEnemySpawn();
 
         for (let i = 0; i < this.islands.length; i++) {
             const island = this.islands[i];
             if (island.hasTeepee && (island.team === 'green' || island.team === 'blue') && Math.random() < 0.6) {
                 let batchSize = 3 + Math.floor(Math.random() * 3);
-                if (island.team === 'blue') {
-                    batchSize = Math.max(1, batchSize + enemyBatchBonus);
-                } else if (island.team === 'green') {
-                    batchSize = Math.max(1, batchSize + Math.max(0, playerBatchBonus));
-                }
+                if (island.team === 'green' && helpPlayer) batchSize += 1;
+                if (island.team === 'blue'  && helpEnemy)  batchSize += 1;
                 for (let b = 0; b < batchSize && this.villagers.length < 500; b++) {
                     const spawnX = island.x + 30 + Math.random() * (island.w - 60);
-                    // Higher warrior ratio for the dominant side via difficulty
-                    const warriorChance = island.team === 'blue' ? Math.min(0.7, 0.4 + (d - 1.0) * 0.3) : 0.4;
-                    const unit = Math.random() < warriorChance
+                    const unit = Math.random() < 0.4
                         ? new Warrior(spawnX, island.y - 40, island.team)
                         : new Villager(spawnX, island.y - 40, island.team);
                     unit.homeIsland = island;
-                    if (island.team === 'blue') {
-                        unit.difficultyScale = d;
-                        if (unit instanceof Warrior) unit.hp = Math.round(10 * (0.7 + 0.3 * d));
-                    }
                     this.villagers.push(unit);
                 }
                 if (this.villagers.length >= 500) break;
             }
-        }
-    }
-
-    // Difficulty-driven extra enemy reinforcement pulse.
-    _spawnEnemyOnly() {
-        if (this.villagers.length >= 500) return;
-        const d = this.difficulty.difficulty;
-        if (d < 0.7) return; // don't reinforce when player is struggling
-        const islands = this.islands.filter(i => i.team === 'blue' && i.hasTeepee);
-        if (islands.length === 0) return;
-        const island = islands[Math.floor(Math.random() * islands.length)];
-        const batch = 1 + Math.round((d - 0.8) * 2.5); // 1..5
-        for (let b = 0; b < batch && this.villagers.length < 500; b++) {
-            const spawnX = island.x + 30 + Math.random() * (island.w - 60);
-            const warriorChance = Math.min(0.8, 0.5 + (d - 1.0) * 0.3);
-            const unit = Math.random() < warriorChance
-                ? new Warrior(spawnX, island.y - 40, 'blue')
-                : new Villager(spawnX, island.y - 40, 'blue');
-            unit.homeIsland = island;
-            unit.difficultyScale = d;
-            if (unit instanceof Warrior) unit.hp = Math.round(10 * (0.7 + 0.3 * d));
-            // give them a launch boost so they pop out dramatically
-            unit.vy = -200 - Math.random() * 150;
-            unit.vx = (Math.random() - 0.5) * 120;
-            this.villagers.push(unit);
         }
     }
 
@@ -1656,12 +1589,12 @@ class Game {
             ctx.fillText(`RESPAWNING IN ${Math.ceil(this.player.respawnTimer)}...`, this.canvas.width * 0.5, this.canvas.height * 0.5);
         }
 
-        // FPS / debug strip
+        // FPS / debug strip — kept minimal; difficulty intentionally hidden.
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.font = '11px monospace';
         ctx.textAlign = 'left';
         ctx.fillText(
-            `${this.fps} FPS | ${this.villagers.length} units | TD ${this.world.camera.timeDilation.toFixed(2)} | DIFF ${this.difficulty.difficulty.toFixed(2)} (${this.difficulty.tier()})`,
+            `${this.fps} FPS | ${this.villagers.length} units | TD ${this.world.camera.timeDilation.toFixed(2)}`,
             8, this.canvas.height - 8
         );
     }

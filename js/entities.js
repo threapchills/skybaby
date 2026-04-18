@@ -1217,20 +1217,6 @@ export class Warrior extends Villager {
 
         drawShadow(ctx, sx, sy + this.h, this.w);
 
-        // High-difficulty enemy warriors gain a subtle wrath glow so the
-        // dynamic AI ramp is felt visually, not just statistically.
-        const ds = this.difficultyScale || 1.0;
-        if (this.team === 'blue' && ds > 1.25) {
-            const intensity = Math.min(1, (ds - 1.25) / 1.0);
-            ctx.save();
-            ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = `rgba(255,90,40,${0.18 * intensity})`;
-            ctx.beginPath();
-            ctx.arc(sx + this.w * 0.5, sy + this.h * 0.5, this.w * 0.85, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-        }
-
         const img = this.team === 'green' ? Assets.warriorGreen : Assets.warriorBlue;
         if (imgReady(img)) {
             ctx.drawImage(img, sx, sy, this.w, this.h);
@@ -1280,11 +1266,11 @@ export class Warrior extends Villager {
             }
         }
 
-        // Target selection — detection range scales with difficulty so harder
-        // enemies aggress from further away and feel more relentless.
+        // Target selection — baseline range, no difficulty scaling.
+        // (Earlier versions scaled this with DDA and it compounded into runaway
+        // enemy advantage. Held flat now.)
         let bestScore = -Infinity;
-        const dscale = this.difficultyScale || 1.0;
-        const detectionRange = (forcedAggro ? 800 : (enemies.length < 5 ? 10000 : 600)) * (0.85 + 0.4 * dscale);
+        const detectionRange = forcedAggro ? 800 : (enemies.length < 5 ? 10000 : 600);
 
         for (let i = 0; i < enemies.length; i++) {
             const e = enemies[i];
@@ -1305,16 +1291,12 @@ export class Warrior extends Villager {
             if (Math.abs(targetEnemy.x - this.x) < 400) this.vx *= 0.8;
 
             if (this.attackCooldown <= 0) {
-                // Difficulty-scaled cooldown and damage. Default scale is 1.0
-                // for player units; enemy units get a multiplier from the
-                // dynamic difficulty manager when spawned.
-                const scale = this.difficultyScale || 1.0;
-                this.attackCooldown = (1.5 + Math.random()) / scale;
+                // Baseline cooldown and damage for both teams.
+                this.attackCooldown = 1.5 + Math.random();
                 const dx = targetEnemy.x - this.x;
                 const dy = (targetEnemy.y - 20) - this.y;
                 const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.25;
-                const dmg = Math.round(10 * (0.6 + 0.4 * scale));
-                spawnProjectile(this.x, this.y, angle, this.team, dmg);
+                spawnProjectile(this.x, this.y, angle, this.team, 10);
             }
 
             if (warState === 'BUILD') {
@@ -1380,8 +1362,8 @@ export class Warrior extends Villager {
             if (Math.abs(dy) > 50) this.vy += Math.sign(dy) * 1500 * dt;
         }
 
-        // Speed cap — also scaled by difficulty so harder warriors close in faster
-        const maxSpeed = 350 * (0.88 + 0.18 * dscale);
+        // Speed cap — baseline, equal for both teams.
+        const maxSpeed = 350;
         if (this.vx > maxSpeed) this.vx = maxSpeed;
         if (this.vx < -maxSpeed) this.vx = -maxSpeed;
         if (this.vy > maxSpeed) this.vy = maxSpeed;
