@@ -117,6 +117,18 @@ export class ResourceManager {
     showMessage(text, color) {
         const msg = this.ui.msgArea;
         if (!msg) return;
+        // Hard guard: dynamic difficulty must remain INVISIBLE. If anything
+        // ever tries to surface a tier-related string (cached old code, future
+        // accident, anything), silently drop it. The player must never see
+        // the system describing itself.
+        if (typeof text === 'string') {
+            const t = text.toUpperCase();
+            if (t.includes('TIDE TURNS') ||
+                t.includes('THE TIDE') ||
+                /\b(CALM|STEADY|BALANCED|FIERCE|RELENTLESS|WRATHFUL|EASING)\b/.test(t)) {
+                return;
+            }
+        }
         msg.textContent = text;
         msg.style.color = color;
         msg.style.opacity = '1';

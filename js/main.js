@@ -3,17 +3,17 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js';
-import { ResourceManager } from './resources.js';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js';
+import { InputHandler } from './input.js?v=4';
+import { ResourceManager } from './resources.js?v=4';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=4';
 import {
     Player, Island, Villager, Warrior, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
     RainCloud, VisualEffect, Totem,
     spawnBlood, spawnParticle, updateParticles, drawParticles,
     getAssetProgress
-} from './entities.js';
-import { AudioManager } from './audio.js';
+} from './entities.js?v=4';
+import { AudioManager } from './audio.js?v=4';
 
 /* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
    Design constraints learnt the hard way:
