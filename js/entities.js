@@ -15,7 +15,8 @@ export const Assets = {
     pig: new Image(),
     villagerGreen: [], villagerBlue: [],
     warriorGreen: new Image(), warriorBlue: new Image(),
-    projectile: new Image(), totem: new Image()
+    projectile: new Image(), totem: new Image(),
+    heads: []  // populated below from the player-heads-to-randomly-select folder
 };
 
 Assets.tilesetNormal.src = 'assets/environment/island_tileset.png';
@@ -40,6 +41,25 @@ for (let i = 1; i <= 4; i++) {
     Assets.villagerGreen.push(vG);
     let vB = new Image(); vB.src = `assets/sprites/villager_blue_${i}.png`;
     Assets.villagerBlue.push(vB);
+}
+
+// Mystic head pool — every chief is crowned by a random spirit head.
+const HEAD_FILES = [
+    'air_heads_3.png', 'air_heads_4.png', 'air_heads_5.png',
+    'air_heads_6.png', 'air_heads_8.png', 'air_heads_9.png',
+    'fire_heads_1.png', 'fire_heads_2.png', 'fire_heads_3.png',
+    'fire_heads_4.png', 'fire_heads_5.png', 'fire_heads_6.png',
+    'fire_heads_7.png', 'fire_heads_8.png', 'fire_heads_9.png',
+    'water_heads_1.png', 'water_heads_2.png', 'water_heads_4.png',
+    'water_heads_5.png', 'water_heads_6.png', 'water_heads_7.png'
+];
+for (let i = 0; i < HEAD_FILES.length; i++) {
+    const im = new Image();
+    im.src = `assets/sprites/player-heads-to-randomly-select/${HEAD_FILES[i]}`;
+    // Each head carries an element tag for tinting on aura/halo
+    const el = HEAD_FILES[i].split('_')[0]; // 'air', 'fire', 'water'
+    im._element = el;
+    Assets.heads.push(im);
 }
 
 // --- HELPERS ---
@@ -135,6 +155,8 @@ export function updateParticles(dt) {
 }
 
 export function drawParticles(ctx, camera) {
+    // Group draws by composite mode to minimise state changes.
+    let inLighter = false;
     for (let i = 0; i < activeParticles.length; i++) {
         const p = activeParticles[i];
         const sx = p.x - camera.x;
@@ -143,19 +165,32 @@ export function drawParticles(ctx, camera) {
 
         const alpha = p.life / p.maxLife;
         if (p.type === 'glow') {
-            ctx.globalAlpha = alpha * 0.6;
-            ctx.globalCompositeOperation = 'lighter';
+            if (!inLighter) { ctx.globalCompositeOperation = 'lighter'; inLighter = true; }
+            // Soft outer halo + bright core (two passes of the same arc)
+            ctx.globalAlpha = alpha * 0.35;
             ctx.fillStyle = p.color;
             ctx.beginPath();
-            ctx.arc(sx, sy, p.size * 1.5, 0, Math.PI * 2);
+            ctx.arc(sx, sy, p.size * 2.2, 0, Math.PI * 2);
             ctx.fill();
-            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = alpha * 0.85;
+            ctx.beginPath();
+            ctx.arc(sx, sy, p.size * 0.9, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (p.type === 'trail') {
+            if (inLighter) { ctx.globalCompositeOperation = 'source-over'; inLighter = false; }
+            ctx.globalAlpha = alpha * 0.7;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(sx, sy, p.size * 0.5, 0, Math.PI * 2);
+            ctx.fill();
         } else {
+            if (inLighter) { ctx.globalCompositeOperation = 'source-over'; inLighter = false; }
             ctx.globalAlpha = alpha;
             ctx.fillStyle = p.color;
             ctx.fillRect(sx - p.size * 0.5, sy - p.size * 0.5, p.size, p.size);
         }
     }
+    if (inLighter) ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
 }
 
@@ -187,7 +222,7 @@ export class Island extends Entity {
         this.conversionTimer = 0;
 
         // 2.5D depth (visible underside) - MASSIVE floating rocks
-        this.depth = 120 + Math.random() * 100;
+        this.depth = 140 + Math.random() * 120;
 
         // Procedural rocky bottom edge
         this.rockPoints = [];
@@ -201,20 +236,55 @@ export class Island extends Entity {
             });
         }
 
+        // Hanging roots/vines drape from the underside lip into the void.
+        // Pre-built so they're stable across frames.
+        this.roots = [];
+        const numRoots = 3 + Math.floor(w / 80);
+        for (let i = 0; i < numRoots; i++) {
+            this.roots.push({
+                x: 30 + Math.random() * (w - 60),
+                len: 30 + Math.random() * 60,
+                sway: Math.random() * Math.PI * 2,
+                thick: 1.5 + Math.random() * 1.6
+            });
+        }
+        // Mossy patches on the underside top edge for cohesion with grass
+        this.mossPatches = [];
+        const numMoss = 3 + Math.floor(w / 90);
+        for (let i = 0; i < numMoss; i++) {
+            this.mossPatches.push({
+                x: Math.random() * w,
+                w: 30 + Math.random() * 50,
+                drop: 4 + Math.random() * 12
+            });
+        }
+        // Embedded rock chunks in the underside for pixel-art-friendly texture
+        this.rockChunks = [];
+        const numChunks = 4 + Math.floor(w / 50);
+        for (let i = 0; i < numChunks; i++) {
+            this.rockChunks.push({
+                x: Math.random() * w,
+                y: 0.15 + Math.random() * 0.55,   // 0..1 down the depth
+                r: 4 + Math.random() * 9,
+                shade: -10 + Math.random() * 20
+            });
+        }
+
         // Trees - split into background and foreground layers
         // BG trees: normal game-layer trees behind entities
-        // FG trees: bigger, slightly darker, rendered OVER entities (Silksong-style)
+        // FG trees: a touch bigger, drawn OVER entities for Silksong depth.
+        // Rare so they accent rather than crowd the scene.
         this.trees = [];
         const numTrees = 3 + Math.floor(Math.random() * (w / 60));
         for (let i = 0; i < numTrees; i++) {
             const xPos = 20 + Math.random() * (w - 80);
             const edgeDist = Math.min(xPos, w - xPos) / w;
-            // Edge trees very likely foreground; center trees rarely
-            const isFg = edgeDist < 0.25 ? Math.random() < 0.7 : Math.random() < 0.15;
+            // Edge trees can be foreground — but sparingly so the action stays readable.
+            const isFg = edgeDist < 0.18 ? Math.random() < 0.35 : Math.random() < 0.04;
             this.trees.push({
                 x: xPos,
-                // FG trees are 30% bigger (perspective: closer = larger)
-                scale: isFg ? (1.5 + Math.random() * 1.2) : (1.0 + Math.random() * 1.2),
+                // FG trees a touch larger to suggest closer-to-camera; not dominating.
+                scale: isFg ? (1.05 + Math.random() * 0.45) : (1.0 + Math.random() * 1.2),
                 burnt: false, burntTimer: 0,
                 layer: isFg ? 'fg' : 'bg'
             });
@@ -314,46 +384,151 @@ export class Island extends Entity {
 
         // === 2.5D FLOATING ISLAND RENDERING ===
 
-        // 1. Drop shadow (projected below island - massive for big floating rocks)
+        // The crust is the part the tileset paints (roughly the top quarter
+        // of the island block). The rocky underside picks up directly from
+        // the bottom of that crust so there is no visible seam.
+        const crustH = Math.min(h, 28);              // visible "earth" height shown above
+        const undersideTop = sy + crustH - 2;        // slight overlap upward to kill any gap
+
+        // 1. Drop shadow (projected below the island)
         ctx.fillStyle = 'rgba(0,0,0,0.10)';
         ctx.beginPath();
-        ctx.ellipse(sx + w * 0.5, sy + h + dep + 45, w * 0.48, 18, 0, 0, Math.PI * 2);
+        ctx.ellipse(sx + w * 0.5, undersideTop + dep + 45, w * 0.48, 18, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // 2. Rocky underside with gradient
+        // 2. Rocky underside — palette tuned to match the painted tileset above.
+        ctx.save();
         ctx.beginPath();
-        ctx.moveTo(sx + 5, sy + h);
+        ctx.moveTo(sx, undersideTop);
         for (let i = 0; i < this.rockPoints.length; i++) {
             const rp = this.rockPoints[i];
-            ctx.lineTo(sx + rp.x, sy + h + rp.y);
+            ctx.lineTo(sx + rp.x, undersideTop + rp.y);
         }
-        ctx.lineTo(sx + w - 5, sy + h);
+        ctx.lineTo(sx + w, undersideTop);
         ctx.closePath();
+        ctx.clip(); // clip subsequent fills to underside silhouette
 
-        const underGrad = ctx.createLinearGradient(0, sy + h, 0, sy + h + dep);
-        underGrad.addColorStop(0, '#6b4226');
-        underGrad.addColorStop(0.3, '#4a2d17');
-        underGrad.addColorStop(0.7, '#2d1a0e');
-        underGrad.addColorStop(1, '#150a05');
+        const underTopY = undersideTop;
+        const underBotY = undersideTop + dep;
+        const underGrad = ctx.createLinearGradient(0, underTopY, 0, underBotY);
+        // Mossy crust at top fading through warm earth, cool stone, into deep void.
+        underGrad.addColorStop(0.00, '#5d6e2a');   // mossy green crust
+        underGrad.addColorStop(0.10, '#6a4a23');   // warm earth
+        underGrad.addColorStop(0.35, '#4b3018');   // mid earth
+        underGrad.addColorStop(0.65, '#2a1c10');   // deep stone
+        underGrad.addColorStop(1.00, '#0c0604');   // void
         ctx.fillStyle = underGrad;
-        ctx.fill();
+        ctx.fillRect(sx, underTopY, w, dep + 4);
 
-        // Underside edge highlight
-        ctx.strokeStyle = 'rgba(139,90,43,0.4)';
+        // Strata bands (subtle horizontal layering — geological feel)
+        for (let b = 0; b < 3; b++) {
+            const bandY = underTopY + dep * (0.18 + b * 0.22);
+            ctx.fillStyle = `rgba(20,12,5,${0.10 + b * 0.04})`;
+            ctx.fillRect(sx, bandY, w, 2 + b);
+        }
+
+        // Embedded rock chunks (pixel-friendly painterly stones)
+        for (let i = 0; i < this.rockChunks.length; i++) {
+            const rc = this.rockChunks[i];
+            const cx = sx + rc.x;
+            const cy = underTopY + dep * rc.y;
+            const baseShade = 60 + rc.shade;
+            ctx.fillStyle = `rgb(${baseShade},${baseShade - 8},${baseShade - 16})`;
+            ctx.beginPath();
+            ctx.arc(cx, cy, rc.r, 0, Math.PI * 2);
+            ctx.fill();
+            // Highlight on top
+            ctx.fillStyle = `rgba(255,220,180,0.18)`;
+            ctx.beginPath();
+            ctx.arc(cx - rc.r * 0.25, cy - rc.r * 0.3, rc.r * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Soft inner shadow on the inside of the underside silhouette
+        const rim = ctx.createLinearGradient(0, underTopY, 0, underTopY + 18);
+        rim.addColorStop(0, 'rgba(0,0,0,0.0)');
+        rim.addColorStop(1, 'rgba(0,0,0,0.0)');
+        ctx.fillStyle = rim;
+        ctx.fillRect(sx, underTopY, w, dep);
+        ctx.restore();
+
+        // Underside silhouette outline (very subtle — just enough to read)
+        ctx.beginPath();
+        ctx.moveTo(sx, undersideTop);
+        for (let i = 0; i < this.rockPoints.length; i++) {
+            const rp = this.rockPoints[i];
+            ctx.lineTo(sx + rp.x, undersideTop + rp.y);
+        }
+        ctx.lineTo(sx + w, undersideTop);
+        ctx.strokeStyle = 'rgba(40,24,12,0.55)';
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // 3. Top surface with earth layers
-        // Earth side stripe (visible front face)
-        const sideH = Math.min(h, 20);
-        const sideGrad = ctx.createLinearGradient(0, sy, 0, sy + sideH);
-        sideGrad.addColorStop(0, '#5a8c3a');
-        sideGrad.addColorStop(0.3, '#7a5c3a');
-        sideGrad.addColorStop(1, '#6b4226');
-        ctx.fillStyle = sideGrad;
-        ctx.fillRect(sx, sy, w, sideH);
+        // Mossy patches drooping over the underside lip — softens the seam
+        // between tileset top and procedural underside.
+        for (let i = 0; i < this.mossPatches.length; i++) {
+            const m = this.mossPatches[i];
+            const mx = sx + m.x;
+            const my = undersideTop;
+            const grad = ctx.createLinearGradient(0, my - 2, 0, my + m.drop);
+            grad.addColorStop(0, 'rgba(74,110,40,0.95)');
+            grad.addColorStop(0.6, 'rgba(58,86,28,0.65)');
+            grad.addColorStop(1, 'rgba(40,60,18,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(mx, my - 2);
+            ctx.bezierCurveTo(mx + m.w * 0.25, my + m.drop * 0.4, mx + m.w * 0.55, my + m.drop, mx + m.w * 0.5, my + m.drop);
+            ctx.bezierCurveTo(mx + m.w * 0.55, my + m.drop * 0.6, mx + m.w * 0.85, my + m.drop * 0.4, mx + m.w, my - 2);
+            ctx.closePath();
+            ctx.fill();
+        }
 
-        // Top grass surface
+        // Hanging roots — subtle sway via Date.now()
+        const time = Date.now() * 0.001;
+        for (let i = 0; i < this.roots.length; i++) {
+            const r = this.roots[i];
+            const baseX = sx + r.x;
+            const baseY = undersideTop + 2;
+            const swayX = Math.sin(time * 0.6 + r.sway) * 4;
+            const tipX = baseX + swayX;
+            const tipY = baseY + r.len;
+            const grad = ctx.createLinearGradient(0, baseY, 0, tipY);
+            grad.addColorStop(0, 'rgba(60,42,22,0.85)');
+            grad.addColorStop(1, 'rgba(40,28,14,0.0)');
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = r.thick;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.quadraticCurveTo(baseX + swayX * 0.5, baseY + r.len * 0.5, tipX, tipY);
+            ctx.stroke();
+        }
+
+        // 3. Tileset overlay on top surface (drawn AFTER underside so the painted
+        // crust covers any seam and the colour transition reads as one piece).
+        if (imgReady(this.activeTileset)) {
+            const sliceW = Math.floor(this.activeTileset.width / 3);
+            const sliceH = this.activeTileset.height;
+            ctx.drawImage(this.activeTileset, 0, 0, sliceW, sliceH, sx, sy - 2, sliceW, crustH + 4);
+            const rightX = sx + w - sliceW;
+            const midW = rightX - (sx + sliceW);
+            if (midW > 0) {
+                ctx.drawImage(this.activeTileset, sliceW, 0, sliceW, sliceH, sx + sliceW, sy - 2, midW + 2, crustH + 4);
+            }
+            ctx.drawImage(this.activeTileset, sliceW * 2, 0, sliceW, sliceH, rightX, sy - 2, sliceW, crustH + 4);
+        } else {
+            // Fallback painted crust if tileset isn't ready
+            const sideH = crustH;
+            const sideGrad = ctx.createLinearGradient(0, sy, 0, sy + sideH);
+            sideGrad.addColorStop(0, '#5a8c3a');
+            sideGrad.addColorStop(0.3, '#7a5c3a');
+            sideGrad.addColorStop(1, '#6b4226');
+            ctx.fillStyle = sideGrad;
+            ctx.fillRect(sx, sy, w, sideH);
+        }
+
+        // Top grass surface band — sits ON TOP of the tileset for that crisp
+        // emerald edge, team-tinted.
         const topGrad = ctx.createLinearGradient(0, sy - 4, 0, sy + 6);
         if (this.team === 'green') {
             topGrad.addColorStop(0, '#4CAF50');
@@ -366,22 +541,7 @@ export class Island extends Entity {
             topGrad.addColorStop(1, '#558B2F');
         }
         ctx.fillStyle = topGrad;
-        ctx.fillRect(sx, sy - 3, w, 8);
-
-        // Tileset overlay on top surface
-        if (imgReady(this.activeTileset)) {
-            const sliceW = Math.floor(this.activeTileset.width / 3);
-            const sliceH = this.activeTileset.height;
-            ctx.globalAlpha = 0.7;
-            ctx.drawImage(this.activeTileset, 0, 0, sliceW, sliceH, sx, sy - 2, sliceW, h);
-            const rightX = sx + w - sliceW;
-            const midW = rightX - (sx + sliceW);
-            if (midW > 0) {
-                ctx.drawImage(this.activeTileset, sliceW, 0, sliceW, sliceH, sx + sliceW, sy - 2, midW + 2, h);
-            }
-            ctx.drawImage(this.activeTileset, sliceW * 2, 0, sliceW, sliceH, rightX, sy - 2, sliceW, h);
-            ctx.globalAlpha = 1;
-        }
+        ctx.fillRect(sx, sy - 3, w, 6);
 
         // 4. Grass sprites on top edge (lush, big)
         if (imgReady(Assets.grass)) {
@@ -485,13 +645,12 @@ export class Island extends Entity {
             return maxAlpha;
         }
 
-        // Foreground trees (bigger scale, dark tinted for depth silhouette)
+        // Foreground trees — kept restrained so the player remains the focal point.
         if (imgReady(this.activeTree)) {
             for (let i = 0; i < this.trees.length; i++) {
                 const tree = this.trees[i];
                 if (tree.layer !== 'fg') continue;
 
-                // FG trees use same base dimensions as bg but scale is already 30% bigger
                 const tw = 200 * tree.scale;
                 const th = 260 * tree.scale;
                 const treeX = sx + tree.x;
@@ -500,15 +659,11 @@ export class Island extends Entity {
                 const treeCY = treeY + th * 0.5;
 
                 const alpha = getFgAlpha(treeCX, treeCY);
-                if (alpha < 0.02) continue; // Skip if practically invisible
+                if (alpha < 0.02) continue;
 
-                // Lower alpha for fg trees to create depth silhouette effect
-                // (no fillRect overlay — that causes dark box artifacts on transparent pixels)
-                ctx.globalAlpha = tree.burnt ? alpha * 0.2 : alpha * 0.7;
-
-                // Draw tree sprite
+                // Lower max opacity so FG trees feel like a soft scrim, not occlusion.
+                ctx.globalAlpha = tree.burnt ? alpha * 0.15 : alpha * 0.42;
                 ctx.drawImage(this.activeTree, treeX, treeY, tw, th);
-
                 ctx.globalAlpha = 1;
             }
         }
@@ -524,7 +679,7 @@ export class Island extends Entity {
                 const gcx = gx + gw * 0.5;
                 const gcy = gy + gh * 0.5;
 
-                const alpha = getFgAlpha(gcx, gcy) * 0.9;
+                const alpha = getFgAlpha(gcx, gcy) * 0.6;
                 if (alpha < 0.02) continue;
 
                 ctx.globalAlpha = alpha;
@@ -569,6 +724,14 @@ export class Player extends Entity {
         this.mana = 100; this.maxMana = 100;
         this.aiTargetIsland = null;
         this.aiStateTimer = 0;
+
+        // === COSMETIC ===
+        // Each chief is crowned with a random spirit head (mystic theme)
+        this.headIdx = Math.floor(Math.random() * Math.max(1, Assets.heads.length));
+        this.bobPhase = Math.random() * Math.PI * 2;
+        this.flyTrailTimer = 0;
+        this._lastVy = 0;
+        this._squash = 1.0;       // 1.0 = neutral, <1 = flat, >1 = stretched
     }
 
     update(dt, input, resources, worldWidth, worldHeight, islands, audio, enemy, walls) {
@@ -686,34 +849,131 @@ export class Player extends Entity {
         const sx = Math.floor(rect.x);
         const sy = Math.floor(rect.y);
 
-        // Shadow
-        drawShadow(ctx, sx, sy + this.h, this.w);
+        // Idle bob & landing squash (purely cosmetic — derived, no state cost)
+        this.bobPhase += 0.06;
+        const bob = this.isGrounded ? Math.sin(this.bobPhase) * 0.6 : 0;
+        // squash on hard landing
+        if (this.isGrounded && this._lastVy > 600) this._squash = 0.78;
+        else this._squash += (1.0 - this._squash) * 0.18;
+        this._lastVy = this.vy;
 
-        // Chief indicator (player only)
+        const drawY = sy + bob;
+
+        // === DROP SHADOW (scales with altitude — looks great mid-air) ===
+        let altitudeShadowScale = 1.0;
+        if (!this.isGrounded) {
+            const fall = Math.min(180, Math.abs(this.vy) * 0.05);
+            altitudeShadowScale = Math.max(0.55, 1 - fall / 200);
+        }
+        ctx.fillStyle = `rgba(0,0,0,${0.18 * altitudeShadowScale})`;
+        ctx.beginPath();
+        ctx.ellipse(sx + this.w * 0.5, sy + this.h, this.w * 0.5 * altitudeShadowScale, 4 * altitudeShadowScale, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // === MYSTIC HEAD (random spirit avatar, scaled & pinned over the body) ===
+        const headImg = Assets.heads[this.headIdx];
+        const headReady = imgReady(headImg);
+
+        // === CHIEF AURA (pulsing halo behind the head — brighter for the player) ===
+        const aurPulse = 0.45 + Math.sin(Date.now() * 0.003) * 0.18;
+        const aurR = 18;
+        let aurColor;
+        if (headReady) {
+            const el = headImg._element;
+            const k = this.team === 'green' ? 0.32 : 0.22; // player aura a touch brighter
+            if (el === 'fire')      aurColor = `rgba(255,140,40,${k * aurPulse})`;
+            else if (el === 'water') aurColor = `rgba(80,180,255,${k * aurPulse})`;
+            else                     aurColor = `rgba(220,220,255,${k * aurPulse})`;
+        } else {
+            aurColor = this.team === 'green' ? `rgba(80,255,120,${0.22 * aurPulse})` : `rgba(80,180,255,${0.22 * aurPulse})`;
+        }
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = aurColor;
+        ctx.beginPath();
+        ctx.arc(sx + this.w * 0.5, drawY - 14, aurR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Chief indicator arrow (player only) — sits above the head with a soft glow
         if (this.team === 'green') {
-            ctx.fillStyle = '#00ff00';
+            const ax = sx + this.w * 0.5;
+            const ay = drawY - 38;
+            ctx.save();
+            ctx.shadowColor = 'rgba(124,255,149,0.8)';
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = '#9CFFB5';
             ctx.beginPath();
-            ctx.moveTo(sx + this.w * 0.5, sy - 22);
-            ctx.lineTo(sx + this.w * 0.5 - 8, sy - 30);
-            ctx.lineTo(sx + this.w * 0.5 + 8, sy - 30);
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(ax - 8, ay - 11);
+            ctx.lineTo(ax + 8, ay - 11);
+            ctx.closePath();
             ctx.fill();
+            ctx.restore();
+            ctx.strokeStyle = 'rgba(0,40,10,0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(ax - 8, ay - 11);
+            ctx.lineTo(ax + 8, ay - 11);
+            ctx.closePath();
+            ctx.stroke();
         }
 
-        // Sprite
+        // === BODY SPRITE with squash/stretch ===
         const img = this.team === 'green' ? Assets.playerGreen : Assets.playerBlue;
+        const sq = this._squash;
+        const bodyW = 48 * (2 - sq);   // squash horizontally, stretch when squashed
+        const bodyH = 48 * sq;
+        const bodyX = sx - 4 - (bodyW - 48) * 0.5;
+        const bodyY = drawY - 4 + (48 - bodyH);
         if (imgReady(img)) {
-            ctx.drawImage(img, sx - 4, sy - 4, 48, 48);
+            ctx.drawImage(img, bodyX, bodyY, bodyW, bodyH);
         } else {
             ctx.fillStyle = this.team === 'green' ? '#0a0' : '#06f';
-            ctx.fillRect(sx, sy, this.w, this.h);
+            ctx.fillRect(sx, drawY, this.w, this.h);
         }
 
-        // Health bar
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(sx, sy - 8, this.w, 4);
+        // === HEAD OVERLAY ===
+        // Matched in size to the original pixel-art head/headdress so the
+        // painted spirit head reads as the chief's actual head, not a totem.
+        if (headReady) {
+            const targetW = 22;
+            const aspect = headImg.naturalHeight / headImg.naturalWidth;
+            const headW = targetW;
+            const headH = targetW * aspect;
+            const headX = sx + this.w * 0.5 - headW * 0.5;
+            // Bottom of head sits just over the body's shoulders, replacing
+            // the area where the original head/headdress used to be.
+            const headY = drawY - headH * 0.85;
+
+            // Subtle shadow tucked under the chin
+            ctx.save();
+            ctx.globalAlpha = 0.25;
+            ctx.translate(1, 1);
+            ctx.drawImage(headImg, headX, headY, headW, headH);
+            ctx.restore();
+
+            ctx.drawImage(headImg, headX, headY, headW, headH);
+        }
+
+        // === FLIGHT TRAIL (when ascending fast) ===
+        if (!this.isGrounded && this.vy < -200 && Math.random() < 0.55) {
+            spawnParticle(
+                this.x + this.w * 0.5 + (Math.random() - 0.5) * 16,
+                this.y + this.h * 0.9,
+                this.team === 'green' ? '#7CFF95' : '#7CD0FF',
+                10, 0.4, 4 + Math.random() * 3, 'glow'
+            );
+        }
+
+        // === HEALTH BAR (slimmer, glassy) ===
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(sx, sy - 10, this.w, 4);
         const hpPct = Math.max(0, this.hp / this.maxHp);
-        ctx.fillStyle = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00';
-        ctx.fillRect(sx, sy - 8, this.w * hpPct, 4);
+        const hpCol = hpPct > 0.5 ? '#7CFF95' : hpPct > 0.25 ? '#FFD24A' : '#FF5A5A';
+        ctx.fillStyle = hpCol;
+        ctx.fillRect(sx + 1, sy - 9, (this.w - 2) * hpPct, 2);
     }
 }
 
@@ -1174,6 +1434,20 @@ export class Projectile extends Entity {
         const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
         if (!rect.onScreen) return;
 
+        // Motion-blur streak — short additive line behind the arrow
+        const trailColor = this.team === 'green' ? 'rgba(170,255,180,0.55)' : 'rgba(170,220,255,0.55)';
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = trailColor;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        const trailLen = 22;
+        ctx.moveTo(rect.x, rect.y);
+        ctx.lineTo(rect.x - Math.cos(this.angle) * trailLen, rect.y - Math.sin(this.angle) * trailLen);
+        ctx.stroke();
+        ctx.restore();
+
         ctx.save();
         ctx.translate(rect.x, rect.y);
         ctx.rotate(this.angle);
@@ -1208,15 +1482,23 @@ export class Fireball extends Entity {
         this.life -= dt;
         if (this.life <= 0) this.dead = true;
 
-        // Spawn fire particles (pooled)
+        // Embers + glow + smoke trail (pooled)
         this._particleTimer -= dt;
         if (this._particleTimer <= 0) {
-            this._particleTimer = 0.03;
-            const color = this.team === 'green' ? '#FF4500' : '#8A2BE2';
+            this._particleTimer = 0.025;
+            const hot = this.team === 'green' ? '#FFB040' : '#C080FF';
+            const core = this.team === 'green' ? '#FF6020' : '#8A2BE2';
+            // Glow puff
             spawnParticle(
-                this.x + (Math.random() - 0.5) * 30,
-                this.y + (Math.random() - 0.5) * 30,
-                color, 30, 0.3 + Math.random() * 0.3, 8 + Math.random() * 12, 'glow'
+                this.x + (Math.random() - 0.5) * 22,
+                this.y + (Math.random() - 0.5) * 22,
+                core, 30, 0.32 + Math.random() * 0.28, 10 + Math.random() * 14, 'glow'
+            );
+            // Bright ember speck
+            spawnParticle(
+                this.x + (Math.random() - 0.5) * 16,
+                this.y + (Math.random() - 0.5) * 16,
+                hot, 0, 0.5 + Math.random() * 0.4, 1.5 + Math.random() * 2, 'glow'
             );
         }
     }
@@ -1227,30 +1509,42 @@ export class Fireball extends Entity {
 
         const cx = rect.x + this.w * 0.5;
         const cy = rect.y + this.h * 0.5;
+        const breathe = 1 + Math.sin(Date.now() * 0.02) * 0.08;
 
-        // Core glow
+        ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        const coreColor = this.team === 'green' ? 'rgba(255,100,0,' : 'rgba(138,43,226,';
 
-        // Outer glow
-        ctx.fillStyle = coreColor + '0.15)';
+        // Outer glow halo (huge, subtle)
+        const haloColor = this.team === 'green'
+            ? 'rgba(255,140,40,0.10)'
+            : 'rgba(160,80,255,0.10)';
+        ctx.fillStyle = haloColor;
         ctx.beginPath();
-        ctx.arc(cx, cy, 40, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 70 * breathe, 0, Math.PI * 2);
         ctx.fill();
 
-        // Inner glow
-        ctx.fillStyle = coreColor + '0.4)';
+        // Mid glow
+        const midColor = this.team === 'green'
+            ? 'rgba(255,90,20,0.35)'
+            : 'rgba(140,60,255,0.35)';
+        ctx.fillStyle = midColor;
         ctx.beginPath();
-        ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 28 * breathe, 0, Math.PI * 2);
         ctx.fill();
 
-        // Bright core
-        ctx.fillStyle = 'rgba(255,255,200,0.7)';
+        // Hot inner
+        ctx.fillStyle = this.team === 'green' ? 'rgba(255,200,60,0.65)' : 'rgba(200,140,255,0.65)';
         ctx.beginPath();
-        ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 14 * breathe, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.globalCompositeOperation = 'source-over';
+        // Bright white core
+        ctx.fillStyle = 'rgba(255,255,220,0.85)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 6 * breathe, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
     }
 }
 

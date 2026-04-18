@@ -717,7 +717,10 @@ class Game {
                 break;
             }
         }
+        const prevHit = this.hookTarget && this.hookTarget.hit;
         this.hookTarget = { x: mx, y: my, hit };
+        // Whoosh on initial connect for that satisfying yank
+        if (hit && !prevHit) this.audio.playWhoosh(1.0);
     }
 
     _handleCombat(dt) {
@@ -952,9 +955,12 @@ class Game {
 
         this.uiLayer.style.display = 'flex';
 
-        // Impact frame flash
+        // Reset any inherited canvas filter (legacy code used CSS invert; we now do
+        // it as a clean overlay below so the rest of the frame isn't mangled).
+        if (this.canvas.style.filter && this.canvas.style.filter !== 'none') {
+            this.canvas.style.filter = 'none';
+        }
         const isImpact = this.impactFrameTimer > 0;
-        this.canvas.style.filter = isImpact ? 'invert(1) contrast(1.5)' : 'none';
 
         ctx.save();
 
@@ -971,8 +977,8 @@ class Game {
             ctx.translate(-cx, -cy);
         }
 
-        // Sky + parallax backgrounds
-        this.world.draw(ctx, this.season, this.dayTime);
+        // Sky + parallax backgrounds (back pass)
+        this.world.drawBackground(ctx, this.season, this.dayTime);
 
         // Weather BG layer
         for (let i = 0; i < this.leaves.length; i++) { if (this.leaves[i].layer === 'bg') this.leaves[i].draw(ctx, cam); }
@@ -1007,36 +1013,57 @@ class Game {
         if (!this.enemyChief.dead) this.enemyChief.draw(ctx, cam);
         if (!this.player.dead) this.player.draw(ctx, cam);
 
-        // Aim indicator
+        // Aim indicator — restrained, glowy, snappy crosshair
         if (!this.player.dead) {
             const pRect = cam.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
             const mx = this.input.mouse.x / z;
             const my = this.input.mouse.y / z;
             const canFire = this.player.fireCooldown <= 0;
-            const pulse = 0.5 + Math.sin(Date.now() * 0.01) * 0.3;
+            const pulse = 0.55 + Math.sin(Date.now() * 0.008) * 0.25;
 
-            ctx.strokeStyle = canFire ? `rgba(0,255,100,${pulse})` : 'rgba(255,100,100,0.25)';
-            ctx.lineWidth = canFire ? 1.5 : 1;
-            ctx.setLineDash(canFire ? [] : [4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(pRect.x, pRect.y);
-            ctx.lineTo(mx, my);
-            ctx.stroke();
-
-            if (canFire) {
-                ctx.strokeStyle = `rgba(0,255,100,${pulse})`;
-                ctx.lineWidth = 1.5;
+            // Aim line — short tracer near the mouse, fading toward the player
+            const dx = mx - pRect.x;
+            const dy = my - pRect.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len > 30) {
+                const ux = dx / len, uy = dy / len;
+                const a = canFire ? 0.55 : 0.25;
+                const lineGrad = ctx.createLinearGradient(pRect.x, pRect.y, mx, my);
+                const col = canFire ? '124,255,149' : '255,140,140';
+                lineGrad.addColorStop(0, `rgba(${col},0)`);
+                lineGrad.addColorStop(0.7, `rgba(${col},${a * 0.4})`);
+                lineGrad.addColorStop(1, `rgba(${col},${a})`);
+                ctx.strokeStyle = lineGrad;
+                ctx.lineWidth = canFire ? 1.6 : 1.2;
+                ctx.setLineDash(canFire ? [] : [5, 5]);
                 ctx.beginPath();
-                ctx.arc(mx, my, 6, 0, Math.PI * 2);
+                ctx.moveTo(pRect.x + ux * 28, pRect.y + uy * 28);
+                ctx.lineTo(mx - ux * 8, my - uy * 8);
                 ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Crosshair: outer ring + inner dot + tick marks
+            const ringR = canFire ? 9 : 6;
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = canFire ? `rgba(124,255,149,${pulse})` : `rgba(255,140,140,${pulse * 0.6})`;
+            ctx.beginPath();
+            ctx.arc(mx, my, ringR, 0, Math.PI * 2);
+            ctx.stroke();
+            // Inner dot
+            ctx.fillStyle = canFire ? `rgba(255,255,255,${pulse})` : `rgba(255,180,180,0.5)`;
+            ctx.beginPath();
+            ctx.arc(mx, my, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            // Tick marks
+            if (canFire) {
                 ctx.beginPath();
-                ctx.moveTo(mx - 10, my);
-                ctx.lineTo(mx + 10, my);
-                ctx.moveTo(mx, my - 10);
-                ctx.lineTo(mx, my + 10);
+                ctx.moveTo(mx - 14, my); ctx.lineTo(mx - 11, my);
+                ctx.moveTo(mx + 11, my); ctx.lineTo(mx + 14, my);
+                ctx.moveTo(mx, my - 14); ctx.lineTo(mx, my - 11);
+                ctx.moveTo(mx, my + 11); ctx.lineTo(mx, my + 14);
                 ctx.stroke();
             }
-            ctx.setLineDash([]);
         }
 
         // Pooled particles
@@ -1045,18 +1072,63 @@ class Game {
         // Visual effects
         for (let i = 0; i < this.visualEffects.length; i++) this.visualEffects[i].draw(ctx, cam);
 
-        // Hookshot line
+        // Hookshot line — energy ribbon with crackle when connected
         if (this.hookTarget) {
             const pRect = cam.getScreenRect(this.player.x + 20, this.player.y + 20, 0, 0);
             const tRect = cam.getScreenRect(this.hookTarget.x, this.hookTarget.y, 0, 0);
-            ctx.strokeStyle = this.hookTarget.hit ? 'rgba(0,255,255,0.7)' : 'rgba(128,128,128,0.4)';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            ctx.moveTo(pRect.x, pRect.y);
-            ctx.lineTo(tRect.x, tRect.y);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            const hit = this.hookTarget.hit;
+
+            ctx.save();
+            if (hit) {
+                ctx.globalCompositeOperation = 'lighter';
+                // Outer halo line
+                ctx.strokeStyle = 'rgba(120,220,255,0.35)';
+                ctx.lineWidth = 7;
+                ctx.beginPath();
+                ctx.moveTo(pRect.x, pRect.y);
+                ctx.lineTo(tRect.x, tRect.y);
+                ctx.stroke();
+                // Bright core
+                ctx.strokeStyle = 'rgba(220,250,255,0.95)';
+                ctx.lineWidth = 1.6;
+                ctx.beginPath();
+                ctx.moveTo(pRect.x, pRect.y);
+                ctx.lineTo(tRect.x, tRect.y);
+                ctx.stroke();
+                // Crackle: a few jittered short segments
+                const segs = 3;
+                for (let s = 0; s < segs; s++) {
+                    const t1 = (s / segs) + Math.random() * 0.1;
+                    const t2 = t1 + 0.04;
+                    const jitter = (Math.random() - 0.5) * 6;
+                    const x1 = pRect.x + (tRect.x - pRect.x) * t1;
+                    const y1 = pRect.y + (tRect.y - pRect.y) * t1 + jitter;
+                    const x2 = pRect.x + (tRect.x - pRect.x) * t2;
+                    const y2 = pRect.y + (tRect.y - pRect.y) * t2 + (Math.random() - 0.5) * 6;
+                    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                }
+                // Anchor pulse
+                const ap = 0.5 + Math.sin(Date.now() * 0.02) * 0.3;
+                ctx.fillStyle = `rgba(180,240,255,${ap})`;
+                ctx.beginPath();
+                ctx.arc(tRect.x, tRect.y, 6 + ap * 4, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.strokeStyle = 'rgba(160,160,180,0.45)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([6, 6]);
+                ctx.beginPath();
+                ctx.moveTo(pRect.x, pRect.y);
+                ctx.lineTo(tRect.x, tRect.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            ctx.restore();
         }
 
         // Silksong-style foreground layer: trees & grass that overlap entities
@@ -1075,6 +1147,10 @@ class Game {
         for (let i = 0; i < this.leaves.length; i++) { if (this.leaves[i].layer !== 'bg') this.leaves[i].draw(ctx, cam); }
         for (let i = 0; i < this.snowflakes.length; i++) { if (this.snowflakes[i].layer !== 'bg') this.snowflakes[i].draw(ctx, cam); }
 
+        // Silksong-style true foreground: cloud bank, fog, motes drift in
+        // front of the player layer for atmospheric depth.
+        this.world.drawForeground(ctx);
+
         ctx.restore(); // End zoom + rotation
 
         // Darkness overlay (unscaled)
@@ -1085,21 +1161,30 @@ class Game {
             ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
-        // Vignette overlay
+        // Cinematic vignette — oval shape, deeper corners
         const vGrad = ctx.createRadialGradient(
+            this.canvas.width * 0.5, this.canvas.height * 0.55,
+            this.canvas.width * 0.18,
             this.canvas.width * 0.5, this.canvas.height * 0.5,
-            this.canvas.width * 0.25,
-            this.canvas.width * 0.5, this.canvas.height * 0.5,
-            this.canvas.width * 0.75
+            this.canvas.width * 0.85
         );
         vGrad.addColorStop(0, 'rgba(0,0,0,0)');
-        vGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
+        vGrad.addColorStop(0.7, 'rgba(0,0,0,0.18)');
+        vGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
         ctx.fillStyle = vGrad;
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Time dilation indicator
+        // Time dilation chromatic + warm cast
         if (this.world.camera.timeDilation < 0.7) {
-            ctx.fillStyle = `rgba(255,200,50,${(1 - this.world.camera.timeDilation) * 0.08})`;
+            const td = (1 - this.world.camera.timeDilation);
+            ctx.fillStyle = `rgba(255,180,80,${td * 0.10})`;
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        // Impact white-flash (cleaner than CSS invert filter)
+        if (isImpact) {
+            const a = Math.min(1, this.impactFrameTimer / 0.15);
+            ctx.fillStyle = `rgba(255,255,255,${a * 0.85})`;
             ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         }
 
