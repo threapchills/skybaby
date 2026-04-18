@@ -163,7 +163,10 @@ class ParallaxLayer {
     }
 }
 
-// Painted-sky variant (full-canvas, very slow parallax)
+// Painted-sky variant (full-canvas, very slow parallax).
+// The painted skies aren't designed to tile, so alternate tiles get
+// horizontally mirror-flipped — adjoining edges then match perfectly,
+// producing seamless infinite scrolling.
 class SkyVariant {
     constructor(path, mood) {
         this.image = new Image();
@@ -177,34 +180,45 @@ class SkyVariant {
         if (!this.loaded) return;
         const ih = this.image.height;
         const iw = this.image.width;
-        // Scale so the painted sky comfortably covers the viewport plus headroom.
         const scale = (camera.effectiveH * 1.15) / ih;
         const sw = iw * scale;
         const sh = ih * scale;
         const yPos = -sh * 0.05;
         const speed = 0.03;
-        const totalX = -(camera.x * speed);
-        const xPos = ((totalX % sw) + sw) % sw - sw;
+
+        const shift = -(camera.x * speed);
+        // Index of the leftmost (partly off-screen) tile.
+        const firstTileIdx = Math.floor(-shift / sw);
+        // Screen-x of that leftmost tile (≤ 0).
+        const firstTileX = firstTileIdx * sw + shift;
         const needed = Math.ceil(camera.effectiveW / sw) + 2;
 
         const prev = ctx.globalAlpha;
         ctx.globalAlpha = prev * (alpha !== undefined ? alpha : 1);
         for (let i = 0; i < needed; i++) {
-            ctx.drawImage(this.image, xPos + sw * i, yPos, sw, sh);
+            const tileIdx = firstTileIdx + i;
+            const tileX = firstTileX + i * sw;
+            const flip = (((tileIdx % 2) + 2) % 2) === 1;
+            if (flip) {
+                ctx.save();
+                ctx.translate(tileX + sw, yPos);
+                ctx.scale(-1, 1);
+                ctx.drawImage(this.image, 0, 0, sw, sh);
+                ctx.restore();
+            } else {
+                ctx.drawImage(this.image, tileX, yPos, sw, sh);
+            }
         }
         ctx.globalAlpha = prev;
     }
 }
 
+// Curated milieu set — castles, ruins, and industrial silhouettes removed
+// so the sky reads as pure mythic skybound landscape.
 const SKY_VARIANTS = [
-    { path: 'assets/backgrounds/sky_aurora_variance_1775766450789_resized.png',  mood: 'aurora',  tint: { r: 30,  g: 50,  b: 90  }, name: 'AURORA' },
-    { path: 'assets/backgrounds/sky_crimson_variance_1775766465664_resized.png', mood: 'crimson', tint: { r: 90,  g: 30,  b: 30  }, name: 'CRIMSON' },
     { path: 'assets/backgrounds/sky_foggy_variance_1775766531966_resized.png',   mood: 'foggy',   tint: { r: 80,  g: 90,  b: 100 }, name: 'MISTHAVEN' },
     { path: 'assets/backgrounds/sky_pastel_variance_1775766480395_resized.png',  mood: 'pastel',  tint: { r: 200, g: 160, b: 180 }, name: 'PASTEL DAWN' },
-    { path: 'assets/backgrounds/sky_starry_variance_1775766496425_resized.png',  mood: 'starry',  tint: { r: 20,  g: 30,  b: 70  }, name: 'STARFALL' },
-    { path: 'assets/backgrounds/sky_storm_variance_1775766174444_resized.png',   mood: 'storm',   tint: { r: 40,  g: 40,  b: 70  }, name: 'TEMPEST' },
-    { path: 'assets/backgrounds/sky_sunset_variance_1775766189071_resized.png',  mood: 'sunset',  tint: { r: 200, g: 100, b: 70  }, name: 'EMBERSKY' },
-    { path: 'assets/backgrounds/sky_toxic_variance_1775766518363_resized.png',   mood: 'toxic',   tint: { r: 60,  g: 130, b: 50  }, name: 'VENOMSKY' }
+    { path: 'assets/backgrounds/sky_sunset_variance_1775766189071_resized.png',  mood: 'sunset',  tint: { r: 200, g: 100, b: 70  }, name: 'EMBERSKY' }
 ];
 
 export class World {

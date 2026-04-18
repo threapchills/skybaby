@@ -1121,6 +1121,9 @@ export class Warrior extends Villager {
         this.patrolTargetX = null;
         this.patrolTimer = 0;
         this.roleTimer = 5 + Math.random() * 10;
+        // Set externally by spawn logic to scale enemy aggression dynamically.
+        // 1.0 = baseline; >1 means faster attacks and harder hits.
+        this.difficultyScale = 1.0;
     }
 
     draw(ctx, camera) {
@@ -1203,11 +1206,16 @@ export class Warrior extends Villager {
             if (Math.abs(targetEnemy.x - this.x) < 400) this.vx *= 0.8;
 
             if (this.attackCooldown <= 0) {
-                this.attackCooldown = 1.5 + Math.random();
+                // Difficulty-scaled cooldown and damage. Default scale is 1.0
+                // for player units; enemy units get a multiplier from the
+                // dynamic difficulty manager when spawned.
+                const scale = this.difficultyScale || 1.0;
+                this.attackCooldown = (1.5 + Math.random()) / scale;
                 const dx = targetEnemy.x - this.x;
                 const dy = (targetEnemy.y - 20) - this.y;
                 const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.25;
-                spawnProjectile(this.x, this.y, angle, this.team, 10);
+                const dmg = Math.round(10 * (0.6 + 0.4 * scale));
+                spawnProjectile(this.x, this.y, angle, this.team, dmg);
             }
 
             if (warState === 'BUILD') {
