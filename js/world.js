@@ -8,7 +8,7 @@
      - Solid rock/soil cross-section at the world's bottom (topology v3)
 */
 
-import { getWorldGroundY, getWorldGroundThickness, WORLD_CEILING_Y } from './entities.js?v=8';
+import { getWorldGroundY, getWorldGroundThickness, WORLD_CEILING_Y } from './entities.js?v=9';
 
 export class Camera {
     constructor(viewportWidth, viewportHeight, worldWidth, worldHeight) {
@@ -92,6 +92,24 @@ export class Camera {
         };
     }
 
+    // Warp the camera straight to the target's centre. Used on game start
+    // so the player isn't briefly framed in the top-left while the follow
+    // lerp catches up.
+    snapTo(target) {
+        const ew = this.effectiveW;
+        const eh = this.effectiveH;
+        let tx = target.x - ew / 2;
+        let ty = target.y - eh / 2;
+        if (ty < -600) ty = -600;
+        if (ty + eh > this.worldH + 200) ty = this.worldH + 200 - eh;
+        this.x = tx;
+        this.y = ty;
+        while (this.x < 0) this.x += this.worldW;
+        while (this.x >= this.worldW) this.x -= this.worldW;
+        this.lookAheadX = 0;
+        this.lookAheadY = 0;
+    }
+
     follow(target, realDt) {
         this.timeDilation += (this.targetTimeDilation - this.timeDilation) * this.dilationLerpSpeed * realDt;
         this.zoom += (this.targetZoom - this.zoom) * 3.0 * realDt;
@@ -134,7 +152,10 @@ export class Camera {
     }
 }
 
-// Tiled parallax layer (used for mid + foreground cloud bands)
+// Tiled parallax layer (used for mid + foreground cloud bands).
+// Top and bottom edges of the source image are feathered into transparency
+// in an offscreen canvas so adjoining tiles never produce a visible seam,
+// regardless of viewport size.
 class ParallaxLayer {
     constructor(imagePath, speed, yOffset, autoScrollSpeed, alpha) {
         this.image = _bgImageCache[imagePath] || new Image();
@@ -144,27 +165,57 @@ class ParallaxLayer {
         this.yOffset = yOffset || 0;
         this.alpha = alpha !== undefined ? alpha : 1.0;
         this.loaded = this.image.complete && this.image.naturalWidth > 0;
-        if (!this.loaded) {
-            const onload = () => { this.loaded = true; };
+        this._feathered = null;
+        if (this.loaded) {
+            this._buildFeathered();
+        } else {
+            const onload = () => { this.loaded = true; this._buildFeathered(); };
             if (this.image.addEventListener) this.image.addEventListener('load', onload);
             else this.image.onload = onload;
         }
     }
 
+    // Build a feathered copy: same image with its top/bottom edges erased
+    // along a soft gradient so horizontal seams never read as straight lines.
+    _buildFeathered() {
+        const w = this.image.naturalWidth || this.image.width;
+        const h = this.image.naturalHeight || this.image.height;
+        if (!w || !h) return;
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const cx = c.getContext('2d');
+        cx.drawImage(this.image, 0, 0);
+        // Feather distance scales with image height — about 12% top and bottom.
+        const feather = Math.max(24, Math.round(h * 0.12));
+        cx.globalCompositeOperation = 'destination-out';
+        const top = cx.createLinearGradient(0, 0, 0, feather);
+        top.addColorStop(0, 'rgba(0,0,0,1)');
+        top.addColorStop(1, 'rgba(0,0,0,0)');
+        cx.fillStyle = top;
+        cx.fillRect(0, 0, w, feather);
+        const bot = cx.createLinearGradient(0, h - feather, 0, h);
+        bot.addColorStop(0, 'rgba(0,0,0,0)');
+        bot.addColorStop(1, 'rgba(0,0,0,1)');
+        cx.fillStyle = bot;
+        cx.fillRect(0, h - feather, w, feather);
+        this._feathered = c;
+    }
+
     draw(ctx, camera, alphaMul) {
-        if (!this.loaded) return;
+        if (!this.loaded || !this._feathered) return;
         const prevAlpha = ctx.globalAlpha;
         const a = this.alpha * (alphaMul !== undefined ? alphaMul : 1);
         ctx.globalAlpha = prevAlpha * a;
 
         const windOffset = (Date.now() / 1000) * this.autoScrollSpeed;
         const totalX = -(camera.x * this.speed) - windOffset;
-        const imgW = this.image.width;
+        const imgW = this._feathered.width;
         const xPos = ((totalX % imgW) + imgW) % imgW - imgW;
 
         const needed = Math.ceil(camera.effectiveW / imgW) + 2;
         for (let i = 0; i < needed; i++) {
-            ctx.drawImage(this.image, xPos + imgW * i, this.yOffset);
+            ctx.drawImage(this._feathered, xPos + imgW * i, this.yOffset);
         }
         ctx.globalAlpha = prevAlpha;
     }
@@ -397,47 +448,39 @@ export class World {
     }
 
     // === FOREGROUND PASS: drawn AFTER entities for true depth ===
+    // Mike's brief: anything in front of the foreground must be PARTICLES,
+    // not full-bleed bands. So this pass paints the rock crust (which is
+    // a true world feature, not a parallax band) and then only emits
+    // bright atmospheric motes — no scrim, no fog wash, no cloud bank.
     drawForeground(ctx) {
         const cam = this.camera;
-        const ew = cam.effectiveW;
-        const eh = cam.effectiveH;
 
-        // Rock/soil cross-section — the planet's crust. Painted before the
-        // front cloud bank so atmospheric scrim still drifts across its top.
+        // Rock/soil cross-section — the planet's crust. Solid, full opacity.
         this._drawGround(ctx, cam);
 
-        // Drifting front cloud bank — this is the Silksong-style overlay that
-        // crosses in front of the player layer. Kept very transparent so it
-        // reads as soft atmospheric scrim, not occlusion.
-        this.fgCloudsFront.draw(ctx, cam, 1.0);
-
-        // Bottom volumetric fog — full-canvas gradient with stops positioned
-        // so the fog only appears in the lower portion. No hard rect edges.
-        const time = Date.now() / 1000;
-        const tint = this.skyMeta.tint;
-        const fogGrad = ctx.createLinearGradient(0, 0, 0, eh);
-        fogGrad.addColorStop(0.00, 'rgba(0,0,0,0)');
-        fogGrad.addColorStop(0.70, 'rgba(0,0,0,0)');
-        fogGrad.addColorStop(0.85, `rgba(${tint.r},${tint.g},${tint.b},0.18)`);
-        fogGrad.addColorStop(1.00, `rgba(${Math.floor(tint.r*0.6)},${Math.floor(tint.g*0.6)},${Math.floor(tint.b*0.7)},0.32)`);
-        ctx.fillStyle = fogGrad;
-        ctx.fillRect(0, 0, ew, eh);
-
-        // Atmospheric motes — drifting dust/embers in front of action
+        // Atmospheric motes — drifting dust/embers in front of action.
+        // Full-opacity additive sparks; no large translucent rectangles.
+        ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         for (let i = 0; i < this.motes.length; i++) {
             const m = this.motes[i];
             const sway = Math.sin(m.phase) * 6;
             const x = m.x + sway;
             const y = m.y + Math.cos(m.phase * 0.7) * 4;
-            const a = 0.18 + Math.sin(m.phase) * 0.12;
+            const flicker = 0.55 + Math.sin(m.phase) * 0.4;
             const sz = m.size * m.z;
-            ctx.fillStyle = `rgba(255,240,200,${Math.max(0.04, a) * m.z})`;
+            // Bright additive core
+            ctx.fillStyle = `rgba(255,240,200,${flicker})`;
             ctx.beginPath();
-            ctx.arc(x, y, sz, 0, Math.PI * 2);
+            ctx.arc(x, y, sz * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+            // Soft halo
+            ctx.fillStyle = `rgba(255,225,170,${flicker * 0.4})`;
+            ctx.beginPath();
+            ctx.arc(x, y, sz * 1.8, 0, Math.PI * 2);
             ctx.fill();
         }
-        ctx.globalCompositeOperation = 'source-over';
+        ctx.restore();
     }
 
     // Draw the solid rock/soil cross-section that closes the bottom of the

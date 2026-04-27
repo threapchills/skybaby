@@ -9,7 +9,7 @@
     <meta http-equiv="Expires" content="0">
     <title>SOAR: Mystik Skies</title>
     <link rel="icon" type="image/png" href="assets/sprites/player_green.png">
-    <link rel="stylesheet" href="style.css?v=8">
+    <link rel="stylesheet" href="style.css?v=9">
 </head>
 
 <body>
@@ -18,44 +18,59 @@
 
         <div id="ui-layer">
             <div id="top-bar">
-                <div id="player-stats" class="stats-box green">
-                    <div class="portrait green-portrait"></div>
-                    <div class="info">
-                        <div class="label">PLAYER TRIBE</div>
-                        <div class="value" id="p-pop">0</div>
-                        <div class="sub-value" id="p-tents">Tents: 0</div>
+                <div id="tribe-strip" aria-label="Tribal standings">
+                    <div class="tribe-pip" data-team="green" id="pip-green">
+                        <div class="pip-flag"></div>
+                        <div class="pip-stats">
+                            <div class="pip-name">GREEN</div>
+                            <div class="pip-numbers">
+                                <span class="pip-pop">0</span>
+                                <span class="pip-sep">·</span>
+                                <span class="pip-tents">0</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="health-bar-container">
-                        <div class="health-bar" id="p-health"></div>
+                    <div class="tribe-pip" data-team="blue" id="pip-blue">
+                        <div class="pip-flag"></div>
+                        <div class="pip-stats">
+                            <div class="pip-name">BLUE</div>
+                            <div class="pip-numbers">
+                                <span class="pip-pop">0</span>
+                                <span class="pip-sep">·</span>
+                                <span class="pip-tents">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tribe-pip" data-team="yellow" id="pip-yellow">
+                        <div class="pip-flag"></div>
+                        <div class="pip-stats">
+                            <div class="pip-name">YELLOW</div>
+                            <div class="pip-numbers">
+                                <span class="pip-pop">0</span>
+                                <span class="pip-sep">·</span>
+                                <span class="pip-tents">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tribe-pip" data-team="red" id="pip-red">
+                        <div class="pip-flag"></div>
+                        <div class="pip-stats">
+                            <div class="pip-name">RED</div>
+                            <div class="pip-numbers">
+                                <span class="pip-pop">0</span>
+                                <span class="pip-sep">·</span>
+                                <span class="pip-tents">0</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div id="score-display">VS</div>
-
-                <div id="enemy-stats" class="stats-box blue">
-                    <div class="health-bar-container">
-                        <div class="health-bar" id="e-health"></div>
-                    </div>
-                    <div class="info">
-                        <div class="label">RIVAL TRIBES</div>
-                        <div class="value" id="e-pop">0</div>
-                        <div class="sub-value" id="e-tents">Tents: 0</div>
-                    </div>
-                    <div class="portrait blue-portrait"></div>
+                <div id="player-hp">
+                    <div id="player-hp-fill"></div>
                 </div>
             </div>
 
             <div id="bottom-bar">
-                <div id="resources-container">
-                    <div class="resource-row">
-                        <div class="res-icon mana-icon">M</div>
-                        <div class="res-bar-track">
-                            <div class="res-bar-fill mana" id="bar-mana"></div>
-                        </div>
-                        <div class="mana-label">MANA</div>
-                    </div>
-                </div>
-
                 <div id="spells-container">
                     <div class="spell-slot" id="spell-0">
                         <div class="key">1</div>
@@ -81,13 +96,13 @@
             </div>
 
             <div id="message-area"></div>
-            <div id="controls-hint">WASD: Fly | L-Click: Shoot | R-Click: Spell | Scroll: Switch Spell</div>
+            <div id="controls-hint">WASD: Fly · L-Click: Shoot · R-Click: Spell · Scroll: Switch</div>
         </div>
 
         <div id="loading-text">Loading...</div>
     </div>
 
-    <script type="module" src="js/main.js?v=8"></script>
+    <script type="module" src="js/main.js?v=9"></script>
 </body>
 
 </html>

@@ -3,9 +3,9 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js?v=8';
-import { ResourceManager } from './resources.js?v=8';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=8';
+import { InputHandler } from './input.js?v=9';
+import { ResourceManager } from './resources.js?v=9';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=9';
 import {
     Player, Island, Villager, Warrior, Priest, Tokobu, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
@@ -14,8 +14,8 @@ import {
     getAssetProgress,
     WORLD_CEILING_Y, getWorldGroundY,
     TEAMS, TEAM_PALETTE, teamColor
-} from './entities.js?v=8';
-import { AudioManager } from './audio.js?v=8';
+} from './entities.js?v=9';
+import { AudioManager } from './audio.js?v=9';
 
 /* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
    Design constraints learnt the hard way:
@@ -212,6 +212,10 @@ class Game {
         this._generateWorld();
         this.islands.forEach(island => island.setSeason(this.season === 'winter'));
 
+        // Pre-warm the camera on the player so the very first frame is
+        // already framed centrally — no top-left flash on game start.
+        this.world.camera.snapTo(this.player);
+
         this.lastTime = 0;
         this.spawnTimer = 0;
         this.hookTarget = null;
@@ -276,6 +280,10 @@ class Game {
             this.uiState = 'PLAYING';
             const lt = document.getElementById('loading-text');
             if (lt) lt.style.display = 'none';
+            // Snap the camera onto the player so the first PLAYING frame
+            // frames them centrally (no top-left flash while the follow lerp
+            // catches up).
+            this.world.camera.snapTo(this.player);
         }
     }
 

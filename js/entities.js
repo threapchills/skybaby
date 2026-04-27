@@ -15,7 +15,12 @@
 // substantial whether the world is 3000 or 8000+ tall.
 export const WORLD_CEILING_Y = -300;
 const WORLD_GROUND_FRACTION = 0.115;  // ~12% of worldH = visible rock band
-const WORLD_HASTEN_FRACTION = 0.07;   // ~7% above the crust = hasten-home zone
+// Hasten band tightened so the visible top of the rock crust IS the place
+// where collision starts pushing units back up. Previously the band was
+// 7% (~560px on an 8000-tall world), which looked like a phantom ceiling
+// hundreds of pixels above the painted rock. Now it kicks in right at the
+// surface so players feel the floor where they see the floor.
+const WORLD_HASTEN_FRACTION = 0.012;
 export function getWorldGroundThickness(worldHeight) { return Math.round(worldHeight * WORLD_GROUND_FRACTION); }
 export function getWorldHastenBand(worldHeight)      { return Math.round(worldHeight * WORLD_HASTEN_FRACTION); }
 export function getWorldGroundY(worldHeight)         { return worldHeight - getWorldGroundThickness(worldHeight); }
@@ -23,31 +28,58 @@ export function getWorldHastenY(worldHeight)         { return getWorldGroundY(wo
 
 // Apply a hasten-home upward impulse + steer toward the nearest island above.
 // Used by every freely-moving unit when it sinks toward the rock floor.
+//
+// For non-player units the mode is STICKY: once a unit enters the hasten
+// band, it stays in hasten-home mode until it actually lands on an island
+// (onGround/isGrounded becomes true) OR climbs well clear of the band.
+// Without stickiness, the tight hasten band only nudged a unit up briefly
+// and gravity dragged it right back down — units clumped on the rock floor.
+//
+// Player chiefs are non-sticky so the player can fly low intentionally.
 function _hastenHome(entity, islands, dt, worldHeight) {
     const groundY = getWorldGroundY(worldHeight);
     const hastenY = getWorldHastenY(worldHeight);
-    if (entity.y <= hastenY) return;
+    const isPlayer = entity instanceof Player;
+    const grounded = entity.onGround || entity.isGrounded;
 
-    // Strong upward acceleration that scales with how deep the unit is.
-    const depth = (entity.y - hastenY) / Math.max(1, (groundY - hastenY));
+    if (isPlayer) {
+        // Players only get the impulse while actually inside the band.
+        if (entity.y <= hastenY) return;
+    } else {
+        // Sticky mode: latch on entering the band, latch off only on a real
+        // island landing or a clear escape above the band.
+        if (entity.y > hastenY) entity._hasteningHome = true;
+        if (grounded || entity.y < hastenY - 800) entity._hasteningHome = false;
+        if (!entity._hasteningHome) return;
+    }
+
+    // Strong upward acceleration. Once latched, even units that have climbed
+    // above the band still get gentle lift so they keep pushing toward an
+    // island instead of stalling and falling back.
+    const inBand = entity.y > hastenY;
+    const depth = inBand
+        ? (entity.y - hastenY) / Math.max(1, (groundY - hastenY))
+        : 0.15;
     const upward = -1400 * Math.min(1.5, 0.4 + depth * 1.6);
     entity.vy = Math.min(entity.vy, upward);
 
     // Steer horizontally toward the nearest island above, picking the shortest
-    // wrap-aware horizontal distance.
+    // wrap-aware horizontal distance. (Generous threshold so units mid-climb
+    // still have a target to aim for.)
     if (islands && islands.length) {
         let best = null, bestD = Infinity;
         for (let i = 0; i < islands.length; i++) {
             const isl = islands[i];
-            if (isl.y > entity.y) continue; // only target islands above us
+            if (isl.y > entity.y - 30) continue;
             const dx = isl.x + isl.w * 0.5 - entity.x;
             const d = Math.abs(dx);
             if (d < bestD) { bestD = d; best = isl; }
         }
         if (best) {
             const tx = best.x + best.w * 0.5;
-            if (entity.x < tx - 10) entity.vx = Math.min(entity.speed || 250, (entity.vx || 0) + 800 * dt);
-            else if (entity.x > tx + 10) entity.vx = Math.max(-(entity.speed || 250), (entity.vx || 0) - 800 * dt);
+            const speedCap = entity.speed || 280;
+            if (entity.x < tx - 10) entity.vx = Math.min(speedCap, (entity.vx || 0) + 900 * dt);
+            else if (entity.x > tx + 10) entity.vx = Math.max(-speedCap, (entity.vx || 0) - 900 * dt);
         }
     }
 
@@ -887,23 +919,19 @@ export class Island extends Entity {
         const sx = rect.x;
         const sy = rect.y;
 
-        // Helper: compute alpha based on distance to player
-        const fadeRadius = 160; // px from player center where fg fades
-        const minAlpha = 0.08;  // nearly invisible right on player
-        const maxAlpha = 0.85;  // very visible when away from player
-
-        function getFgAlpha(elScreenX, elScreenY) {
+        // Solids must read SOLID. Instead of permanently translucent
+        // foreground props, draw them at full opacity but skip the ones
+        // close enough to the player that they'd occlude. The result is
+        // crisp tree silhouettes that simply move out of the way when the
+        // player passes through their footprint.
+        const occludeRadius = 110; // px on screen — props within this skip
+        function shouldDraw(elScreenX, elScreenY) {
             const dx = elScreenX - playerSX;
             const dy = elScreenY - playerSY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < fadeRadius) {
-                const t = dist / fadeRadius;
-                return minAlpha + (maxAlpha - minAlpha) * (t * t);
-            }
-            return maxAlpha;
+            return (dx * dx + dy * dy) > occludeRadius * occludeRadius;
         }
 
-        // Foreground trees — kept restrained so the player remains the focal point.
+        // Foreground trees — opaque at distance, vanish near the player.
         if (imgReady(this.activeTree)) {
             const TREE_PLANT_OVERLAP = 6;
             for (let i = 0; i < this.trees.length; i++) {
@@ -917,17 +945,21 @@ export class Island extends Entity {
                 const treeCX = treeX + tw * 0.4;
                 const treeCY = treeY + th * 0.5;
 
-                const alpha = getFgAlpha(treeCX, treeCY);
-                if (alpha < 0.02) continue;
+                if (!shouldDraw(treeCX, treeCY)) continue;
 
-                // Lower max opacity so FG trees feel like a soft scrim, not occlusion.
-                ctx.globalAlpha = tree.burnt ? alpha * 0.15 : alpha * 0.42;
-                ctx.drawImage(this.activeTree, treeX, treeY, tw, th);
-                ctx.globalAlpha = 1;
+                if (tree.burnt) {
+                    // Burnt is the only allowed FG transparency — reads as a
+                    // ghostly scorched silhouette, deliberately not solid.
+                    ctx.globalAlpha = 0.4;
+                    ctx.drawImage(this.activeTree, treeX, treeY, tw, th);
+                    ctx.globalAlpha = 1;
+                } else {
+                    ctx.drawImage(this.activeTree, treeX, treeY, tw, th);
+                }
             }
         }
 
-        // Foreground tall grass tufts (big, lush)
+        // Foreground tall grass tufts — opaque at distance, vanish near player.
         if (imgReady(Assets.grass)) {
             for (let i = 0; i < this.fgGrass.length; i++) {
                 const g = this.fgGrass[i];
@@ -938,10 +970,8 @@ export class Island extends Entity {
                 const gcx = gx + gw * 0.5;
                 const gcy = gy + gh * 0.5;
 
-                const alpha = getFgAlpha(gcx, gcy) * 0.6;
-                if (alpha < 0.02) continue;
+                if (!shouldDraw(gcx, gcy)) continue;
 
-                ctx.globalAlpha = alpha;
                 if (g.flip) {
                     ctx.save();
                     ctx.translate(gx + gw, gy);
@@ -951,7 +981,6 @@ export class Island extends Entity {
                 } else {
                     ctx.drawImage(Assets.grass, gx, gy, gw, gh);
                 }
-                ctx.globalAlpha = 1;
             }
         }
     }
