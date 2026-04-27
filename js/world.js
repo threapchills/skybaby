@@ -8,7 +8,7 @@
      - Solid rock/soil cross-section at the world's bottom (topology v3)
 */
 
-import { getWorldGroundY, getWorldGroundThickness, WORLD_CEILING_Y } from './entities.js?v=7';
+import { getWorldGroundY, getWorldGroundThickness, WORLD_CEILING_Y } from './entities.js?v=8';
 
 export class Camera {
     constructor(viewportWidth, viewportHeight, worldWidth, worldHeight) {

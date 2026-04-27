@@ -3,19 +3,19 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js?v=7';
-import { ResourceManager } from './resources.js?v=7';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=7';
+import { InputHandler } from './input.js?v=8';
+import { ResourceManager } from './resources.js?v=8';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=8';
 import {
-    Player, Island, Villager, Warrior, Projectile,
+    Player, Island, Villager, Warrior, Priest, Tokobu, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
     RainCloud, VisualEffect, Totem,
     spawnBlood, spawnParticle, updateParticles, drawParticles,
     getAssetProgress,
     WORLD_CEILING_Y, getWorldGroundY,
     TEAMS, TEAM_PALETTE, teamColor
-} from './entities.js?v=7';
-import { AudioManager } from './audio.js?v=7';
+} from './entities.js?v=8';
+import { AudioManager } from './audio.js?v=8';
 
 /* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
    Design constraints learnt the hard way:
@@ -217,6 +217,13 @@ class Game {
         this.hookTarget = null;
         this.gameOver = false;
         this.impactFrameTimer = 0;
+
+        // Shared spawn callbacks handed to Warriors and Tokobus. Stored once
+        // so the per-frame dispatch isn't allocating fresh arrow functions.
+        this._unitSpawn = {
+            projectile: (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
+            fireball:   (x, y, a, t, src) => this.fireballs.push(new Fireball(x, y, a, t, src)),
+        };
 
         // Day/night cycle
         this.dayCycleTimer = 0;
@@ -458,18 +465,26 @@ class Game {
         };
 
         // Villagers
+        // Dispatch tree:
+        //   Tokobu (extends Warrior)  → updateLogic with melee override
+        //   Warrior                   → updateLogic with ranged behaviour
+        //   Priest (extends Villager) → standard update + applyConversion
+        //   Villager / Peasant        → standard update
         for (let i = 0; i < this.villagers.length; i++) {
             const v = this.villagers[i];
             if (v.dead) continue;
             if (v instanceof Warrior) {
                 v.updateLogic(dt, this.islands, enemiesSnapshot,
-                    (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
+                    this._unitSpawn,
                     this.worldWidth, this.worldHeight, this.audio,
                     chiefByTeam[v.team] || this.player,
                     this.villagers, this.walls, this.warState
                 );
             } else {
                 v.update(dt, this.islands, this.worldWidth, this.worldHeight, this.pigs, this.walls, this.warState);
+                if (v instanceof Priest) {
+                    v.applyConversion(dt, this.villagers);
+                }
             }
         }
 
@@ -488,6 +503,7 @@ class Game {
         if (this.spawnTimer > 3) {
             this._spawnVillagers();
             this._spawnPigs();
+            this._spawnSpecialUnits();
             this.spawnTimer = 0;
         }
 
@@ -1005,9 +1021,11 @@ class Game {
                 }
             }
 
-            // Hit villagers
+            // Hit villagers — Warriors cannot harm Priests or Tokobus per the
+            // step 4 combat triangle. Spells (fireball / quake) still can.
             for (let j = 0; j < this.villagers.length; j++) {
                 const v = this.villagers[j];
+                if (v instanceof Priest || v instanceof Tokobu) continue;
                 if (v.team !== p.team && !v.dead && this._checkHit(p, v)) {
                     spawnBlood(v.x, v.y);
                     v.hp -= p.damage;
@@ -1060,10 +1078,14 @@ class Game {
                 }
             }
 
-            // Insta-kill villagers
+            // Insta-kill villagers — player spells override the combat
+            // triangle (kill anything). Tokobu-thrown fireballs respect it
+            // (cannot kill Priests or other Tokobus).
+            const tokoFire = f.source === 'tokobu';
             for (let j = 0; j < this.villagers.length; j++) {
                 const v = this.villagers[j];
                 if (!v.dead && v.team !== f.team && this._checkHit(f, v)) {
+                    if (tokoFire && (v instanceof Priest || v instanceof Tokobu)) continue;
                     v.dead = true;
                     spawnBlood(v.x, v.y, '#FF4500', 15);
                     if (f.team === this.player.team) {
@@ -1181,6 +1203,62 @@ class Game {
                 if (this.villagers.length >= 800) break;
             }
         }
+    }
+
+    // Step 4 — Priests + Tokobus.
+    // Priests cap at 1 per ~50 humans per tribe (a small mystic chorus).
+    // Tokobus cap at 1 per 100 humans per tribe AND only after pop ≥ 100, so
+    // they appear as a late-game heavyweight rather than dominating early.
+    _spawnSpecialUnits() {
+        if (this.villagers.length >= 800) return;
+
+        const humans = {};
+        const priests = {};
+        const tokobus = {};
+        for (const t of TEAMS) { humans[t] = 0; priests[t] = 0; tokobus[t] = 0; }
+
+        for (let i = 0; i < this.villagers.length; i++) {
+            const v = this.villagers[i];
+            if (v.dead || !(v.team in humans)) continue;
+            if (v instanceof Tokobu)        tokobus[v.team]++;
+            else if (v instanceof Priest)   priests[v.team]++;
+            else                            humans[v.team]++;  // Villager + Warrior
+        }
+
+        for (const team of TEAMS) {
+            const pop = humans[team];
+            const targetPriests = pop >= 50  ? Math.floor(pop / 50)  : 0;
+            const targetTokobus = pop >= 100 ? Math.floor(pop / 100) : 0;
+
+            if (priests[team] < targetPriests) {
+                const island = this._pickHomeIsland(team);
+                if (island) {
+                    const x = island.x + 30 + Math.random() * (island.w - 60);
+                    const p = new Priest(x, island.y - 50, team);
+                    p.homeIsland = island;
+                    this.villagers.push(p);
+                }
+            }
+            if (this.villagers.length >= 800) return;
+            if (tokobus[team] < targetTokobus) {
+                const island = this._pickHomeIsland(team);
+                if (island) {
+                    const x = island.x + 60 + Math.random() * (island.w - 120);
+                    // Spawn well above the surface — Tokobus are 128px tall
+                    // and the landing check needs prevBottom < island.y.
+                    const t = new Tokobu(x, island.y - 150, team);
+                    t.homeIsland = island;
+                    this.villagers.push(t);
+                }
+            }
+            if (this.villagers.length >= 800) return;
+        }
+    }
+
+    _pickHomeIsland(team) {
+        const candidates = this.islands.filter(i => i.team === team && i.hasTeepee);
+        if (candidates.length === 0) return null;
+        return candidates[Math.floor(Math.random() * candidates.length)];
     }
 
     _spawnPigs() {
@@ -1761,14 +1839,34 @@ class Game {
             ctx.fill();
         }
 
-        // Units — tiny pixels coloured by team.
+        // Units — tiny pixels coloured by team. Priests get a soft halo to
+        // hint at conversion auras; Tokobus get a slightly larger square to
+        // read as heavies on the radial map.
         ctx.globalAlpha = 0.85;
         for (let i = 0; i < this.villagers.length; i++) {
             const v = this.villagers[i];
             if (v.dead) continue;
             const p = this._projectMinimap(v.x, v.y, cx, cy, radius);
-            ctx.fillStyle = teamColor(v.team, 'light');
-            ctx.fillRect(p.x - 0.7, p.y - 0.7, 1.6, 1.6);
+            const teamLight = teamColor(v.team, 'light');
+            if (v instanceof Tokobu) {
+                ctx.fillStyle = teamLight;
+                ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+                ctx.fillStyle = 'rgba(0,0,0,0.55)';
+                ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 1);
+            } else if (v instanceof Priest) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.fillStyle = `rgba(${teamColor(v.team, 'aura')},0.55)`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                ctx.fillStyle = teamLight;
+                ctx.fillRect(p.x - 0.7, p.y - 0.7, 1.6, 1.6);
+            } else {
+                ctx.fillStyle = teamLight;
+                ctx.fillRect(p.x - 0.7, p.y - 0.7, 1.6, 1.6);
+            }
         }
         ctx.globalAlpha = 1;
 

@@ -78,6 +78,10 @@ export const Assets = {
     villagerGreen: [], villagerBlue: [],
     warriorGreen: new Image(), warriorBlue: new Image(),
     projectile: new Image(), totem: new Image(),
+    // Step 4 — Priests + Tokobus only ship a green source. Every other team's
+    // version is derived at runtime by hue rotation (see PRIEST_TOKOBU_HUE).
+    priestGreen: new Image(),
+    tokobuGreen: [],
     heads: []  // populated below from the player-heads-to-randomly-select folder
 };
 
@@ -97,12 +101,19 @@ Assets.pig.src = 'assets/sprites/pig.png';
 Assets.warriorGreen.src = 'assets/sprites/warrior_green.png';
 Assets.warriorBlue.src = 'assets/sprites/warrior_blue.png';
 Assets.projectile.src = 'assets/sprites/projectile_arrow.png';
+Assets.priestGreen.src = 'assets/sprites/hooded_mystic.png';
 
 for (let i = 1; i <= 4; i++) {
     let vG = new Image(); vG.src = `assets/sprites/villager_green_${i}.png`;
     Assets.villagerGreen.push(vG);
     let vB = new Image(); vB.src = `assets/sprites/villager_blue_${i}.png`;
     Assets.villagerBlue.push(vB);
+}
+
+for (let i = 1; i <= 2; i++) {
+    const t = new Image();
+    t.src = `assets/sprites/Tokobu-green-${i}.png`;
+    Assets.tokobuGreen.push(t);
 }
 
 // === FOUR-TEAM PALETTE ===
@@ -125,11 +136,15 @@ const TEAM_HUE_FROM = {
 
 // Per-team sprite map. The two source teams point at the existing assets;
 // derived teams get filled in once their source images decode.
+//
+// Priest + Tokobu slots: green is the only native source for these. Every
+// other team's variant is hue-rotated from the green source (see
+// PRIEST_TOKOBU_HUE below) so the four tribes still read distinctly.
 Assets.byTeam = {
-    green:  { player: Assets.playerGreen, warrior: Assets.warriorGreen, villagers: Assets.villagerGreen, teepee: Assets.teepeeGreen },
-    blue:   { player: Assets.playerBlue,  warrior: Assets.warriorBlue,  villagers: Assets.villagerBlue,  teepee: Assets.teepeeBlue  },
-    yellow: { player: null, warrior: null, villagers: [null, null, null, null], teepee: null },
-    red:    { player: null, warrior: null, villagers: [null, null, null, null], teepee: null },
+    green:  { player: Assets.playerGreen, warrior: Assets.warriorGreen, villagers: Assets.villagerGreen, teepee: Assets.teepeeGreen, priest: Assets.priestGreen, tokobu: Assets.tokobuGreen },
+    blue:   { player: Assets.playerBlue,  warrior: Assets.warriorBlue,  villagers: Assets.villagerBlue,  teepee: Assets.teepeeBlue,  priest: null,               tokobu: [null, null] },
+    yellow: { player: null, warrior: null, villagers: [null, null, null, null], teepee: null, priest: null, tokobu: [null, null] },
+    red:    { player: null, warrior: null, villagers: [null, null, null, null], teepee: null, priest: null, tokobu: [null, null] },
 };
 
 function _tintImage(srcImg, hueDeg) {
@@ -164,10 +179,32 @@ for (const team of ['yellow', 'red']) {
     });
 }
 
+// Priest + Tokobu hue rotations applied to the GREEN source for every other
+// team. Blue gets a fresh angle (no native blue art exists for these units);
+// yellow and red mirror the villager rotations so the four tribes feel
+// chromatically consistent across all unit types.
+const PRIEST_TOKOBU_HUE = {
+    blue:   180,
+    yellow: -55,
+    red:    130,
+};
+for (const team of ['blue', 'yellow', 'red']) {
+    const deg = PRIEST_TOKOBU_HUE[team];
+    _onSourceLoad(Assets.priestGreen, () => {
+        Assets.byTeam[team].priest = _tintImage(Assets.priestGreen, deg);
+    });
+    Assets.tokobuGreen.forEach((tImg, idx) => {
+        _onSourceLoad(tImg, () => {
+            Assets.byTeam[team].tokobu[idx] = _tintImage(tImg, deg);
+        });
+    });
+}
+
 export function teamSprite(slot, team, variantIdx) {
     const bucket = Assets.byTeam[team];
     if (!bucket) return null;
     if (slot === 'villagers') return bucket.villagers[variantIdx % bucket.villagers.length] || bucket.villagers[0];
+    if (slot === 'tokobu')    return bucket.tokobu ? (bucket.tokobu[variantIdx % bucket.tokobu.length] || bucket.tokobu[0]) : null;
     return bucket[slot];
 }
 
@@ -214,8 +251,10 @@ export function getAssetProgress() {
     check(Assets.pig);
     check(Assets.warriorGreen);  check(Assets.warriorBlue);
     check(Assets.projectile);
+    check(Assets.priestGreen);
     Assets.villagerGreen.forEach(check);
     Assets.villagerBlue.forEach(check);
+    Assets.tokobuGreen.forEach(check);
     Assets.heads.forEach(check);
     return { ready, total };
 }
@@ -1376,7 +1415,7 @@ export class Warrior extends Villager {
         }
     }
 
-    updateLogic(dt, islands, enemies, spawnProjectile, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls, warState) {
+    updateLogic(dt, islands, enemies, spawn, worldWidth, worldHeight, audio, friendlyLeader, allVillagers, walls, warState) {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
         this.attackCooldown -= dt;
@@ -1419,17 +1458,23 @@ export class Warrior extends Villager {
         // Target selection — baseline range, no difficulty scaling.
         // (Earlier versions scaled this with DDA and it compounded into runaway
         // enemy advantage. Held flat now.)
+        //
+        // Combat triangle (step 4): Warriors cannot harm Priests or Tokobus.
+        // Skip them entirely so arrows ignore those silhouettes.
         let bestScore = -Infinity;
         const detectionRange = forcedAggro ? 800 : (enemies.length < 5 ? 10000 : 600);
 
         for (let i = 0; i < enemies.length; i++) {
             const e = enemies[i];
             if (e.team === this.team || e.dead) continue;
+            if (e instanceof Priest || e instanceof Tokobu) continue;
             const dx = e.x - this.x;
             const dy = e.y - this.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < detectionRange) {
                 let score = 10000 - dist;
+                // Tokobu extends Warrior, but the guard above already
+                // excludes them — only "real" warriors get the score boost.
                 if (e instanceof Warrior) score += 500;
                 else if (e instanceof Player) score += 1000;
                 if (score > bestScore) { bestScore = score; targetEnemy = e; }
@@ -1446,7 +1491,7 @@ export class Warrior extends Villager {
                 const dx = targetEnemy.x - this.x;
                 const dy = (targetEnemy.y - 20) - this.y;
                 const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.25;
-                spawnProjectile(this.x, this.y, angle, this.team, 10);
+                spawn.projectile(this.x, this.y, angle, this.team, 10);
             }
 
             if (warState === 'BUILD') {
@@ -1557,6 +1602,361 @@ export class Warrior extends Villager {
         if (this.x < 0) this.x = worldWidth;
         _clampCeiling(this);
         _hastenHome(this, islands, dt, worldHeight);
+    }
+}
+
+// --- TOKOBU ---
+// Tanky monster unit. Inherent triangle: kills Warriors and Peasants on
+// contact; immune to Warrior arrows; cannot be killed by other Tokobus.
+// Only Priests can neutralise a Tokobu (by conversion). Player spells
+// (fireball / quake) still damage them.
+//
+// Extends Warrior so the existing dispatch in main.js (instanceof Warrior →
+// updateLogic) flows through unchanged. updateLogic is overridden completely
+// with melee-on-contact behaviour.
+export class Tokobu extends Warrior {
+    constructor(x, y, team) {
+        super(x, y, team);
+        // MASSIVE — Tokobus tower over warriors (32) and chiefs (40), reading
+        // unmistakably as battlefield monsters.
+        this.w = 128; this.h = 128;
+        this.hp = 280; this.maxHp = 280;
+        this.attackCooldown = 1.4 + Math.random() * 0.8;
+        this.maxFallSpeed = 1000;
+        this.variantIndex = Math.floor(Math.random() * 2);
+        this.target = null;
+        this._retargetTimer = 0;
+        this._fireballRange = 800;       // hurl from a distance
+        this._fireballCooldown = 2.6;
+        this.conversionTimer = 0;
+        this.isBeingConverted = false;
+        this._wasGrounded = false;
+    }
+
+    updateLogic(dt, islands, enemies, spawn, worldWidth, worldHeight, _audio, friendlyLeader, allVillagers, walls, warState) {
+        this.vy += 500 * dt;
+        if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
+        this.attackCooldown -= dt;
+
+        // Separation from nearby allies / corpses — generous radius because
+        // the silhouette is so large.
+        if (allVillagers) {
+            for (let i = 0; i < allVillagers.length; i++) {
+                const v = allVillagers[i];
+                if (v === this || v.dead) continue;
+                const dx = this.x - v.x;
+                const dy = this.y - v.y;
+                const distSq = dx * dx + dy * dy;
+                if (distSq < 1600 && distSq > 0) {
+                    const dist = Math.sqrt(distSq);
+                    const push = (40 - dist) * 6;
+                    this.vx += (dx / dist) * push * 3;
+                }
+            }
+        }
+
+        // Re-pick target periodically — only valid prey are Warriors and
+        // Peasants (Villagers). Skip Priests, other Tokobus, and chiefs.
+        this._retargetTimer -= dt;
+        const targetGone = !this.target || this.target.dead || this.target.team === this.team;
+        if (targetGone || this._retargetTimer <= 0) {
+            this._retargetTimer = 0.6;
+            this.target = null;
+            let bestSq = this._fireballRange * this._fireballRange;
+            for (let i = 0; i < enemies.length; i++) {
+                const e = enemies[i];
+                if (!e || e === this || e.dead || e.team === this.team) continue;
+                if (e instanceof Player) continue;          // chiefs are above the triangle
+                if (e instanceof Priest) continue;          // cannot harm priests
+                if (e instanceof Tokobu) continue;          // cannot harm other tokobus
+                const dx = e.x - this.x, dy = e.y - this.y;
+                const d = dx * dx + dy * dy;
+                if (d < bestSq) { bestSq = d; this.target = e; }
+            }
+        }
+
+        // Default to gathering near friendly chief if nothing to hunt.
+        let moveTargetX = null, moveTargetY = null;
+        if (this.target && !this.target.dead) {
+            // Hold position at lobbing range — keeps targets in firing arc.
+            const dx = this.target.x - this.x;
+            const dy = this.target.y - this.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const idealRange = 420;
+            if (dist > idealRange + 80) {
+                moveTargetX = this.target.x;
+                moveTargetY = this.target.y;
+            } else if (dist < idealRange - 120) {
+                moveTargetX = this.x - dx;       // back off slightly
+                moveTargetY = this.y;
+            }
+        } else if (friendlyLeader && !friendlyLeader.dead) {
+            moveTargetX = friendlyLeader.x + (Math.random() - 0.5) * 240;
+            moveTargetY = friendlyLeader.y;
+        }
+
+        if (moveTargetX !== null) {
+            const dx = moveTargetX - this.x;
+            if (Math.abs(dx) > 16) this.vx += Math.sign(dx) * 900 * dt;
+            else this.vx *= 0.85;
+        } else {
+            this.vx *= 0.9;
+        }
+        if (moveTargetY !== null) {
+            const dy = moveTargetY - this.y;
+            if (Math.abs(dy) > 80) this.vy += Math.sign(dy) * 900 * dt;
+        }
+
+        // Speed cap — slower than warriors so they read as ponderous heavies.
+        const maxSpeed = 200;
+        if (this.vx > maxSpeed) this.vx = maxSpeed;
+        if (this.vx < -maxSpeed) this.vx = -maxSpeed;
+        if (this.vy > maxSpeed * 1.6) this.vy = maxSpeed * 1.6;
+        if (this.vy < -maxSpeed * 1.2) this.vy = -maxSpeed * 1.2;
+
+        // Hurl a fireball if a valid target is in range.
+        if (this.target && !this.target.dead && this.attackCooldown <= 0 && spawn && spawn.fireball) {
+            const dx = this.target.x - this.x;
+            const dy = this.target.y - this.y;
+            const r = this._fireballRange;
+            if (dx * dx + dy * dy < r * r) {
+                this.attackCooldown = this._fireballCooldown + Math.random() * 0.6;
+                const angle = Math.atan2((this.target.y + 20) - (this.y + this.h * 0.4),
+                                         this.target.x - (this.x + this.w * 0.5))
+                              + (Math.random() - 0.5) * 0.18;
+                spawn.fireball(
+                    this.x + this.w * 0.5,
+                    this.y + this.h * 0.4,
+                    angle,
+                    this.team,
+                    'tokobu'
+                );
+                // Muzzle flash particles
+                for (let k = 0; k < 6; k++) {
+                    spawnParticle(
+                        this.x + this.w * 0.5 + Math.cos(angle) * 30 + (Math.random() - 0.5) * 12,
+                        this.y + this.h * 0.4 + Math.sin(angle) * 30 + (Math.random() - 0.5) * 12,
+                        '#FFB060', 60, 0.4 + Math.random() * 0.3, 4 + Math.random() * 3, 'glow'
+                    );
+                }
+            }
+        }
+
+        // Position update.
+        const prevBottom = this.y + this.h;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        this.onGround = false;
+        if (this.vy >= 0) {
+            const newBottom = this.y + this.h;
+            for (let i = 0; i < islands.length; i++) {
+                const island = islands[i];
+                if (this.x + this.w > island.x && this.x < island.x + island.w) {
+                    if ((prevBottom <= island.y + 5 && newBottom >= island.y - 5) ||
+                        (newBottom >= island.y - 5 && newBottom <= island.y + 40)) {
+                        this.y = island.y - this.h;
+                        this.vy = 0;
+                        this.onGround = true;
+                        this.homeIsland = island;
+                        this.x += island.vx * dt;
+                    }
+                }
+            }
+        }
+
+        // Stomp dust on hard landing — wider plume to match the heavy frame.
+        if (this.onGround && !this._wasGrounded) {
+            for (let i = 0; i < 12; i++) {
+                spawnParticle(
+                    this.x + this.w * 0.5 + (Math.random() - 0.5) * 90,
+                    this.y + this.h,
+                    '#7a5b3a', 100 + Math.random() * 60, 0.5 + Math.random() * 0.3,
+                    4 + Math.random() * 4, 'normal'
+                );
+            }
+        }
+        this._wasGrounded = this.onGround;
+
+        // Inter-island leap occasionally.
+        if (this.onGround) {
+            if (Math.random() < 0.003) { this.vy = -700; this.onGround = false; }
+            if (moveTargetX !== null && Math.abs(moveTargetX - this.x) > 200 && Math.random() < 0.018) {
+                this.vy = -700; this.onGround = false;
+            }
+        }
+
+        // Bounds — wrap horizontally, clamp vertically, hasten home if falling.
+        if (this.x > worldWidth) this.x = 0;
+        if (this.x < 0) this.x = worldWidth;
+        _clampCeiling(this);
+        _hastenHome(this, islands, dt, worldHeight);
+    }
+
+    draw(ctx, camera) {
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const sx = Math.floor(rect.x);
+        const sy = Math.floor(rect.y);
+
+        // Heavier shadow than a regular warrior.
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.beginPath();
+        ctx.ellipse(sx + this.w * 0.5, sy + this.h, this.w * 0.55, 7, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        const img = teamSprite('tokobu', this.team, this.variantIndex);
+        if (img && (img.complete !== false) && (img.naturalWidth || img.width)) {
+            ctx.drawImage(img, sx, sy, this.w, this.h);
+        } else {
+            ctx.fillStyle = teamColor(this.team, 'hex');
+            ctx.fillRect(sx, sy, this.w, this.h);
+        }
+
+        // Faint menacing under-glow in the team colour.
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(${teamColor(this.team, 'aura')},0.06)`;
+        ctx.beginPath();
+        ctx.ellipse(sx + this.w * 0.5, sy + this.h * 0.95, this.w * 0.45, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Conversion glow when a hostile priest is working on it.
+        if (this.isBeingConverted) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = 'rgba(255,235,140,0.18)';
+            ctx.beginPath();
+            ctx.arc(sx + this.w * 0.5, sy + this.h * 0.5, this.w * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Slim HP bar — Tokobus are tanks, but spells can chip them down.
+        if (this.hp < this.maxHp) {
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(sx, sy - 8, this.w, 4);
+            const pct = Math.max(0, this.hp / this.maxHp);
+            ctx.fillStyle = pct > 0.5 ? '#7CFF95' : pct > 0.25 ? '#FFD24A' : '#FF5A5A';
+            ctx.fillRect(sx + 1, sy - 7, (this.w - 2) * pct, 2);
+        }
+    }
+}
+
+// --- PRIEST ---
+// Conversion specialist. Inherent triangle: cannot be killed by Warriors or
+// Tokobus; can convert Warriors and Tokobus by holding them in its aura.
+// Cannot convert Peasants. Player spells still damage Priests.
+//
+// Extends Villager so the standard wandering update applies. Conversion is
+// applied separately each frame via applyConversion(dt, allUnits) — main.js
+// dispatches that call right after v.update().
+export class Priest extends Villager {
+    constructor(x, y, team) {
+        super(x, y, team);
+        this.w = 30; this.h = 36;
+        this.hp = 60; this.maxHp = 60;
+        this.maxFallSpeed = 700;
+        this.conversionRange = 240;
+        this.conversionTime  = 4.5;   // seconds of continuous exposure to flip
+        this.conversionTargets = new Map();
+        this._auraPhase = Math.random() * Math.PI * 2;
+    }
+
+    // Sweep nearby Warriors and Tokobus and advance per-target timers. Each
+    // priest tracks its own targets, so multiple priests stacking on a target
+    // means the first to finish wins — overwhelming priestly presence still
+    // accelerates conversion by raising the chance of close range.
+    applyConversion(dt, allUnits) {
+        const range2 = this.conversionRange * this.conversionRange;
+        // Drop stale references (targets that died or already flipped).
+        for (const [u] of this.conversionTargets) {
+            if (u.dead || u.team === this.team) {
+                this.conversionTargets.delete(u);
+                u.isBeingConverted = false;
+            }
+        }
+
+        for (let i = 0; i < allUnits.length; i++) {
+            const u = allUnits[i];
+            if (!u || u === this || u.dead || u.team === this.team) continue;
+            // Tokobu extends Warrior, so this single check captures both.
+            if (!(u instanceof Warrior)) continue;
+
+            const dx = u.x - this.x, dy = u.y - this.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < range2) {
+                const t = (this.conversionTargets.get(u) || 0) + dt;
+                if (t >= this.conversionTime) {
+                    u.team = this.team;
+                    u.isBeingConverted = false;
+                    this.conversionTargets.delete(u);
+                    // Sparkle pop on flip.
+                    for (let k = 0; k < 8; k++) {
+                        spawnParticle(
+                            u.x + (Math.random() - 0.5) * 20,
+                            u.y + (Math.random() - 0.5) * 20,
+                            teamColor(this.team, 'particle'),
+                            60 + Math.random() * 60, 0.5 + Math.random() * 0.4,
+                            3 + Math.random() * 2, 'glow'
+                        );
+                    }
+                } else {
+                    this.conversionTargets.set(u, t);
+                    u.isBeingConverted = true;
+                }
+            } else if (this.conversionTargets.has(u)) {
+                this.conversionTargets.delete(u);
+                // Don't force-clear the flag; another priest may still be
+                // converting this unit and will re-set it on its own pass.
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
+        if (!rect.onScreen) return;
+        const sx = Math.floor(rect.x);
+        const sy = Math.floor(rect.y);
+
+        drawShadow(ctx, sx, sy + this.h, this.w);
+
+        // Aura halo — soft radial wash in the team colour. Pulses gently.
+        this._auraPhase += 0.04;
+        const pulse = 0.55 + Math.sin(this._auraPhase) * 0.25;
+        const auraR = this.conversionRange * 0.55;
+        const cx = sx + this.w * 0.5;
+        const cy = sy + this.h * 0.5;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const ag = ctx.createRadialGradient(cx, cy, 0, cx, cy, auraR);
+        ag.addColorStop(0.00, `rgba(${teamColor(this.team, 'aura')},${0.10 * pulse})`);
+        ag.addColorStop(0.60, `rgba(${teamColor(this.team, 'aura')},${0.04 * pulse})`);
+        ag.addColorStop(1.00, `rgba(${teamColor(this.team, 'aura')},0)`);
+        ctx.fillStyle = ag;
+        ctx.beginPath();
+        ctx.arc(cx, cy, auraR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Sprite (hooded mystic, hue-tinted by team).
+        const img = teamSprite('priest', this.team);
+        if (img && (img.complete !== false) && (img.naturalWidth || img.width)) {
+            ctx.drawImage(img, sx, sy, this.w, this.h);
+        } else {
+            ctx.fillStyle = teamColor(this.team, 'hex');
+            ctx.fillRect(sx, sy, this.w, this.h);
+        }
+
+        // Tiny wisp above the head — reads at distance as "this is a caster".
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(${teamColor(this.team, 'aura')},${0.6 * pulse})`;
+        ctx.beginPath();
+        ctx.arc(cx, sy - 4, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
     }
 }
 
@@ -1705,11 +2105,16 @@ export class Projectile extends Entity {
 }
 
 // --- FIREBALL ---
+// `source` distinguishes player-cast fireballs (default 'spell') from
+// Tokobu-thrown fireballs ('tokobu'). Player spells override the combat
+// triangle and can kill anything; Tokobu fireballs respect it (no harm to
+// Priests or other Tokobus).
 export class Fireball extends Entity {
-    constructor(x, y, angle, team) {
+    constructor(x, y, angle, team, source) {
         super(x, y, 60, 60);
         this.team = team;
-        const speed = 400;
+        this.source = source || 'spell';
+        const speed = source === 'tokobu' ? 320 : 400;
         this.vx = Math.cos(angle) * speed;
         this.vy = Math.sin(angle) * speed;
         this.angle = angle;

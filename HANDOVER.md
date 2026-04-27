@@ -2,58 +2,62 @@
 
 Snapshot for the next session. Update at the end of every working session.
 
-**Last updated:** 2026-04-27 (steps 1, 2, 3 complete)
+**Last updated:** 2026-04-27 (steps 1, 2, 3, 4 complete)
 
 ## Current focus
 
-Steps 1, 2, 3 all complete and pushed. Step 4 (Priests + Tokobus combat triangle) is next.
+Step 4 (Priests + Tokobus combat triangle) complete and pushed. Roadmap proper is now closed; the live backlog is **graphics + UX polish** (see "Polish backlog" below).
 
 ## Recent context
 
-- Step 1 (cylinder world + minimap) and step 2 (~8x area) both pushed 2026-04-27.
-- World dims now 18000 × 8000 (was 6000 × 3000). Aspect 2.25:1, area 144M (8x). Per-axis: 3x wider, ~2.67x taller.
-- Topology: vertical wrap removed; invisible ceiling at y=-300; rock cross-section at the bottom whose thickness scales with worldH (≈12% of height); hasten-band above ground (≈7%) where units gain upward impulse and steer to the nearest island above. Stone walls crumble at the rock floor.
-- Helpers in `entities.js`: `WORLD_CEILING_Y`, `getWorldGroundThickness`, `getWorldHastenBand`, `getWorldGroundY`, `getWorldHastenY`. World drawing in `world.js` imports these.
-- Procedural islands: 120 (was 30) distributed in x ∈ [2400, 15600], y ∈ [1200, 5800]. Home green at (600, 2700) and home blue at (15900, 2700). Tribe affiliation by horizontal proximity (green if x<4500, blue if x>13500).
-- Starting populations: 60 villagers + 30 warriors per tribe (was 20 + 10). Pigs: 18-32 (was 5-11). Steady-state cap 500 villagers / 50 pigs unchanged.
-- Player and enemy chiefs spawn just above their home islands (y=2200) so the camera frames a populated archipelago immediately.
-- Godstone-style radial polar minimap (bottom-right of HUD): rock crust at centre, ozone halo at rim, horizontal wrap → angular position, rotates so the player is always at "up". Concentric atmosphere bands plus team-coloured dots for islands and tiny pixels for units.
-- Trees now plant by sprite bottom with a fixed 6px overlap so large trees no longer poke through island undersides regardless of scale.
-- Restored `villager_green_1.png` / `villager_blue_1.png` from HEAD (their absence was stalling the loader).
-- Cache-bust query strings now `?v=6` across `index.html` and module imports.
+- Step 4 ships the full combat triangle: Priests, Tokobus, and the matrix that binds them.
+- **Priest** (`hooded_mystic.png`): conversion specialist; aura range 240, ~4.5s of continuous exposure flips a Warrior or Tokobu. Cannot convert Peasants. Per-priest conversion timer map (multiple priests stack as separate timers — first to finish wins).
+- **Tokobu** (`Tokobu-green-{1,2}.png`): MASSIVE 128×128 fireball-throwing heavy. Range 800, holds at ~420 idealRange, 2.6s cooldown. Cannot harm Priests or other Tokobus. Spawned with `source: 'tokobu'` on the Fireball, which `_handleCombat` checks so triangle-protected units are skipped.
+- **Combat triangle in code:**
+  - Warrior projectiles skip Priests/Tokobus (in `Warrior.updateLogic` targeting and in `_handleCombat` collision).
+  - Player Fireballs (default `source: 'spell'`) override the triangle and kill anything.
+  - Tokobu Fireballs (`source: 'tokobu'`) skip Priests and other Tokobus.
+  - Quake (`spell === 2`) still hits all non-friendly: Priest hp 60 dies in one quake; Tokobu hp 280 takes ~6 quakes. Spells remain the player's god-mode override.
+- **Population gating** in `_spawnSpecialUnits` (called every spawn cycle, alongside `_spawnVillagers`):
+  - Priests: 1 per 50 humans per tribe, ramps in once pop ≥ 50.
+  - Tokobus: 1 per 100 humans per tribe, gated above pop ≥ 100.
+- Tokobu spawn position is `island.y - 150` so the 128px sprite has room to fall and trigger the landing check.
+- **Hue shifts** for derived team variants (`PRIEST_TOKOBU_HUE`): blue +180°, yellow -55°, red +130°. Single green source for both unit types; everything else is tinted at runtime.
+- **Sprite dispatch:** Tokobu extends Warrior so the existing `instanceof Warrior` dispatch in `main.js` flows unchanged; its `updateLogic` is a complete override. Priest extends Villager and gets a separate `applyConversion(dt, allUnits)` call right after `update()`.
+- **Spawn callbacks:** changed warrior/tokobu signature from `spawnProjectile` to a `spawn` object with `{ projectile, fireball }`. `Game._unitSpawn` is built once in the constructor so per-frame dispatch isn't allocating arrow functions.
+- **Minimap:** Tokobus render as a 3×3 square with a black notch (heavies); Priests render with a soft additive halo.
+- Cache-bust now `?v=8` across `index.html`, `js/main.js` imports, and `js/world.js`.
 
-## Next action
+## Polish backlog (Mike's 2026-04-27 feedback — next sprint)
 
-Begin step 4: Priests and Tokobus.
+Recorded mid-session and saved here so they survive into the fresh chat.
 
-**Combat triangle (per Mike's brief):**
-- Priests can convert Warriors and Tokobus. Cannot convert Peasants.
-- Tokobus can kill Warriors and Peasants. Cannot harm Priests or other Tokobus.
-- Warriors can shoot Peasants and other Warriors. Cannot harm Tokobus or Priests.
-- Peasants are non-combatant.
+### Graphics bugs
 
-**Tokobu population gating:** roughly 1 Tokobu per 100 humans per tribe, only above population ≥ 100.
+- **Solid objects look glassy.** Tents, islands, trees, and units are rendering with too much transparency — they should be fully opaque. Audit anywhere `globalAlpha` or low-alpha fills are stacked on entity/island draws.
+- **Foreground parallax should be particle-only.** Anything drawn in front of the foreground layer must be sparse particles (motes, dust), not full-bleed cloud bands. Whatever is full-bleed should also be at full opacity.
+- **Ground visible too low.** The painted rock cross-section sits below where the rock-bottom collision actually engages. Raise the visible crust to match `getWorldGroundY(worldHeight)` so the floor reads as solid where it acts solid.
+- **Sky seams.** Some sky backgrounds show straight horizontal seams. Make every sky layer either seamless tiles or full-bleed at any resolution; no visible joins.
+- **Player off-centre on start.** Sometimes the player spawns locked to the top-left of the camera instead of being framed centrally. Investigate the camera initialisation timing (probably one frame of camera lag before first `world.update`).
 
-**Sprite assets staged in `assets/sprites/`:** `Tokobu-green-1.png`, `Tokobu-green-2.png`, `hooded_mystic.png`, etc. Hue-shift the green Tokobu variants for yellow + red just like step 3 did with villagers.
+### HUD / UX
 
-## Step 3 notes
+- **Ditch the mana bar.** Mana is infinite by design — the bar is dead weight. Remove the mana row in `#bottom-bar` (and any code that updates it).
+- **HUD shrink + four-tribe standings.** The current top bar only shows GREEN vs the lumped-rivals "RIVAL TRIBES" stat. We need a smaller, more elegant readout that surfaces all four tribes' standings (e.g. four compact pips with team colour, pop, tents). Lean into Mike's afrofuturist palette and minimal typography; treat the existing big stat boxes as a draft to replace, not extend.
 
-- Yellow is hue-rotated -55° from green; red is hue-rotated +130° from blue. Empirical, can be tuned in `entities.js` `TEAM_HUE_FROM`.
-- AI chiefs (blue, yellow, red) all run the same wandering pickup-and-target AI; only the blue chief gets aim-and-fire shooting (in `_updateEnemyAI`). Yellow and red are passive contributors for now — bumping them to active shooting is a follow-up.
-- HUD aggregates blue+yellow+red into the existing "RIVAL TRIBES" stat box; the minimap is the place to read the four-tribe picture at a glance.
-- Cache-bust now `?v=7`.
+## Step 4 notes
 
-## Performance follow-up (mostly addressed in step 3)
-
-- ✅ Per-frame `enemiesSnapshot` array now built once per tick rather than per warrior.
-- Still O(n²) inside warrior separation/targeting; bucket spatial grid is the next lever if we see jank at 400+ units.
-- 120 islands × per-island grass/tree/render cost. Camera culling already skips off-screen islands.
+- Priest conversion uses a per-priest `Map<unit, seconds>`; cleaning up handled by a sweep at the top of `applyConversion` (drops dead/already-converted entries).
+- Tokobu's `idealRange` lets them retreat from a target that closes too tight — keeps them in fireball arc rather than locking into a wrestling match they can't perform.
+- Tokobu HP 280 with the spell-only kill rule means the player can chip them down with Quake (≈6 hits) or land 3 Fireballs to drop them. They're meant to be intimidating without being unkillable.
+- Stomp dust is doubled (12 particles, 90px spread) on Tokobu landings to sell the weight.
 
 ## Performance follow-up (deferred, watch for jank)
 
 - `Warrior.updateLogic` allocates `[player, enemyChief, ...villagers]` every frame for each warrior. With 90+ warriors this is ~hundreds of thousands of array elements per second. Replace with a single shared snapshot per frame.
 - Separation and target-selection inside that loop are O(n²). At 250+ units expect frame-time pressure. A bucketed spatial grid (cell size ~600) keyed by world X would cut this to near-O(n).
 - 120 islands × per-island grass/tree/render cost. Camera culling via `getScreenRect` already works, but verify drawing is short-circuited for off-screen islands.
+- Step 4 now adds Priest aura passes and Tokobu fireballs — Priest's `applyConversion` is O(priests × villagers). At 4 tribes × ~10 priests × 800 villagers, that's 32k checks per frame. Bucketed grid would cover this too.
 
 ## Decisions locked 2026-04-27
 
@@ -61,6 +65,8 @@ Begin step 4: Priests and Tokobus.
 - **Ground floor:** simple, elegant rock or soil cross-section; reads as solid. No villages on the ground; any unit that reaches the rock base hastens back up to the islands.
 - **Top of world:** invisible hard ceiling. Looks like endless sky; clamped by a flat ceiling line, set high enough to leave a decent amount of sky above the highest islands.
 - **Minimap projection:** simple radial polar mapping. Centre = rock base; outermost ring = sky ceiling (ozone/stratosphere band). Horizontal wrap maps to angular position; pivots so player is always "up" on screen.
+- **Combat triangle (step 4):** Warriors shoot Warriors+Peasants; Tokobus throw fireballs at Warriors+Peasants; Priests convert Warriors+Tokobus. Player spells override the triangle.
+- **Tokobu silhouette:** MASSIVE — 128×128 reads unmistakably at any zoom.
 
 ## Working agreements
 
