@@ -1631,12 +1631,35 @@ export class Tokobu extends Warrior {
         this.conversionTimer = 0;
         this.isBeingConverted = false;
         this._wasGrounded = false;
+        // Cosmetic state — drama dials. None of these touch combat/balance.
+        this._breathPhase = Math.random() * Math.PI * 2;
+        this._sigilPhase = Math.random() * Math.PI * 2;
+        this._emberTimer = Math.random() * 0.2;
+        this._fireRecoil = 0;            // 0..1 shudder right after hurling a fireball
+        this._smokeTimer = 0;
     }
 
     updateLogic(dt, islands, enemies, spawn, worldWidth, worldHeight, _audio, friendlyLeader, allVillagers, walls, warState) {
         this.vy += 500 * dt;
         if (this.vy > this.maxFallSpeed) this.vy = this.maxFallSpeed;
         this.attackCooldown -= dt;
+
+        // Drama — recoil decays after a fireball, charcoal smoke trails
+        // behind a moving Tokobu so they always feel like a furnace on legs.
+        this._fireRecoil = Math.max(0, this._fireRecoil - dt * 3);
+        const moveSpeed = Math.abs(this.vx) + Math.abs(this.vy);
+        if (moveSpeed > 30) {
+            this._smokeTimer -= dt;
+            if (this._smokeTimer <= 0) {
+                this._smokeTimer = 0.15;
+                spawnParticle(
+                    this.x + this.w * 0.5 + (Math.random() - 0.5) * 30,
+                    this.y + this.h * 0.85,
+                    '#3a2a22', 20 + Math.random() * 30, 0.7 + Math.random() * 0.5,
+                    5 + Math.random() * 4, 'normal'
+                );
+            }
+        }
 
         // Separation from nearby allies / corpses — generous radius because
         // the silhouette is so large.
@@ -1731,12 +1754,18 @@ export class Tokobu extends Warrior {
                     this.team,
                     'tokobu'
                 );
-                // Muzzle flash particles
-                for (let k = 0; k < 6; k++) {
+                this._fireRecoil = 1;
+                // Recoil knockback against the firing direction.
+                this.vx -= Math.cos(angle) * 60;
+                this.vy -= Math.sin(angle) * 30;
+                // Muzzle flash — bigger plume now, twin pass for hot core + halo.
+                for (let k = 0; k < 14; k++) {
                     spawnParticle(
-                        this.x + this.w * 0.5 + Math.cos(angle) * 30 + (Math.random() - 0.5) * 12,
-                        this.y + this.h * 0.4 + Math.sin(angle) * 30 + (Math.random() - 0.5) * 12,
-                        '#FFB060', 60, 0.4 + Math.random() * 0.3, 4 + Math.random() * 3, 'glow'
+                        this.x + this.w * 0.5 + Math.cos(angle) * 40 + (Math.random() - 0.5) * 18,
+                        this.y + this.h * 0.4 + Math.sin(angle) * 40 + (Math.random() - 0.5) * 18,
+                        k < 6 ? '#FFE7A0' : '#FF8030',
+                        80 + Math.random() * 60, 0.4 + Math.random() * 0.4,
+                        4 + Math.random() * 4, 'glow'
                     );
                 }
             }
@@ -1796,50 +1825,148 @@ export class Tokobu extends Warrior {
     draw(ctx, camera) {
         const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
         if (!rect.onScreen) return;
-        const sx = Math.floor(rect.x);
-        const sy = Math.floor(rect.y);
 
-        // Heavier shadow than a regular warrior.
-        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        // === DRAMA PASS ===
+        // Tokobus must read as battlefield monsters at any zoom: heavy
+        // bedded shadow, breathing silhouette, smouldering aura, infernal
+        // sigil burning at their feet.
+
+        this._breathPhase += 0.04;
+        this._sigilPhase  += 0.025;
+        this._emberTimer  -= 1 / 60;
+        const breath = 1 + Math.sin(this._breathPhase) * 0.025;
+        const recoilShake = this._fireRecoil > 0
+            ? (Math.sin(this._fireRecoil * 32) * this._fireRecoil * 4)
+            : 0;
+
+        const sx = Math.floor(rect.x + recoilShake);
+        const sy = Math.floor(rect.y);
+        const cx = sx + this.w * 0.5;
+        const cy = sy + this.h * 0.5;
+        const baseY = sy + this.h;
+
+        // 1. Massive bedded shadow — much darker and wider than a warrior's.
+        ctx.fillStyle = 'rgba(0,0,0,0.42)';
         ctx.beginPath();
-        ctx.ellipse(sx + this.w * 0.5, sy + this.h, this.w * 0.55, 7, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx, baseY - 2, this.w * 0.62, 13, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.beginPath();
+        ctx.ellipse(cx, baseY - 2, this.w * 0.78, 18, 0, 0, Math.PI * 2);
         ctx.fill();
 
+        // 2. Infernal sigil at its feet — a slowly-rotating rune glyph in
+        // the team colour. Reads from far away, even when the silhouette
+        // is half off-screen.
+        ctx.save();
+        ctx.translate(cx, baseY - 4);
+        ctx.rotate(this._sigilPhase);
+        ctx.globalCompositeOperation = 'lighter';
+        const sigilR = this.w * 0.42;
+        const sigilGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, sigilR);
+        sigilGrad.addColorStop(0, `rgba(${teamColor(this.team, 'aura')},0.30)`);
+        sigilGrad.addColorStop(0.7, `rgba(${teamColor(this.team, 'aura')},0.10)`);
+        sigilGrad.addColorStop(1, `rgba(${teamColor(this.team, 'aura')},0)`);
+        ctx.fillStyle = sigilGrad;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, sigilR, sigilR * 0.45, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Three notch-marks for an actual rune feel.
+        ctx.strokeStyle = `rgba(${teamColor(this.team, 'aura')},0.55)`;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 3; i++) {
+            const a = (i / 3) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * sigilR * 0.55, Math.sin(a) * sigilR * 0.25);
+            ctx.lineTo(Math.cos(a) * sigilR * 0.95, Math.sin(a) * sigilR * 0.43);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // 3. Body — drawn with a vertical breath squash, slightly anchored
+        // to the feet. globalAlpha stays at 1 so the silhouette is solid.
+        const bodyW = this.w * (2 - breath);
+        const bodyH = this.h * breath;
+        const bodyX = sx + (this.w - bodyW) * 0.5;
+        const bodyY = sy + (this.h - bodyH);
         const img = teamSprite('tokobu', this.team, this.variantIndex);
         if (img && (img.complete !== false) && (img.naturalWidth || img.width)) {
-            ctx.drawImage(img, sx, sy, this.w, this.h);
+            ctx.drawImage(img, bodyX, bodyY, bodyW, bodyH);
         } else {
             ctx.fillStyle = teamColor(this.team, 'hex');
-            ctx.fillRect(sx, sy, this.w, this.h);
+            ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
         }
 
-        // Faint menacing under-glow in the team colour.
+        // 4. Heat haze under the feet — tinted ember layer.
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = `rgba(${teamColor(this.team, 'aura')},0.06)`;
+        ctx.fillStyle = `rgba(${teamColor(this.team, 'aura')},0.18)`;
         ctx.beginPath();
-        ctx.ellipse(sx + this.w * 0.5, sy + this.h * 0.95, this.w * 0.45, 8, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx, baseY - 4, this.w * 0.40, 10, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
-        // Conversion glow when a hostile priest is working on it.
+        // 5. Cylindrical menacing aura — fattest when firing.
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const auraR = this.w * (0.55 + this._fireRecoil * 0.20);
+        const aura = ctx.createRadialGradient(cx, cy, this.w * 0.18, cx, cy, auraR);
+        aura.addColorStop(0, `rgba(${teamColor(this.team, 'aura')},${0.04 + this._fireRecoil * 0.18})`);
+        aura.addColorStop(1, `rgba(${teamColor(this.team, 'aura')},0)`);
+        ctx.fillStyle = aura;
+        ctx.beginPath();
+        ctx.arc(cx, cy, auraR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 6. Glowing eye-spark — twin embers on the upper third of the body.
+        const eyeY = sy + this.h * 0.32;
+        const eyeFlick = 0.7 + Math.sin(this._breathPhase * 4) * 0.3;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(255,180,80,${0.85 * eyeFlick})`;
+        ctx.beginPath();
+        ctx.arc(cx - this.w * 0.13, eyeY, 2.4, 0, Math.PI * 2);
+        ctx.arc(cx + this.w * 0.13, eyeY, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255,80,30,${0.55 * eyeFlick})`;
+        ctx.beginPath();
+        ctx.arc(cx - this.w * 0.13, eyeY, 5.6, 0, Math.PI * 2);
+        ctx.arc(cx + this.w * 0.13, eyeY, 5.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 7. Constant slow ember emission — tiny upward sparks.
+        if (this._emberTimer <= 0) {
+            this._emberTimer = 0.18 + Math.random() * 0.15;
+            spawnParticle(
+                this.x + this.w * 0.5 + (Math.random() - 0.5) * this.w * 0.6,
+                this.y + this.h * (0.4 + Math.random() * 0.5),
+                Math.random() < 0.5 ? '#FFB060' : '#FF7030',
+                30 + Math.random() * 30, 0.7 + Math.random() * 0.5,
+                1.8 + Math.random() * 2, 'glow'
+            );
+        }
+
+        // 8. Conversion overlay — golden bath that grows as the priest
+        // closes in on flipping them.
         if (this.isBeingConverted) {
             ctx.save();
             ctx.globalCompositeOperation = 'lighter';
-            ctx.fillStyle = 'rgba(255,235,140,0.18)';
+            ctx.fillStyle = 'rgba(255,235,140,0.22)';
             ctx.beginPath();
-            ctx.arc(sx + this.w * 0.5, sy + this.h * 0.5, this.w * 0.7, 0, Math.PI * 2);
+            ctx.arc(cx, cy, this.w * 0.7, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
         }
 
-        // Slim HP bar — Tokobus are tanks, but spells can chip them down.
+        // 9. HP bar — slim, only shown when wounded. Wider than a warrior's.
         if (this.hp < this.maxHp) {
-            ctx.fillStyle = 'rgba(0,0,0,0.55)';
-            ctx.fillRect(sx, sy - 8, this.w, 4);
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(sx, sy - 10, this.w, 5);
             const pct = Math.max(0, this.hp / this.maxHp);
             ctx.fillStyle = pct > 0.5 ? '#7CFF95' : pct > 0.25 ? '#FFD24A' : '#FF5A5A';
-            ctx.fillRect(sx + 1, sy - 7, (this.w - 2) * pct, 2);
+            ctx.fillRect(sx + 1, sy - 9, (this.w - 2) * pct, 3);
         }
     }
 }
@@ -1855,13 +1982,18 @@ export class Tokobu extends Warrior {
 export class Priest extends Villager {
     constructor(x, y, team) {
         super(x, y, team);
-        this.w = 30; this.h = 36;
+        // Bumped silhouette so the hooded mystic actually reads as a caster
+        // alongside warriors (32) and chiefs (40). Combat values unchanged.
+        this.w = 40; this.h = 48;
         this.hp = 60; this.maxHp = 60;
         this.maxFallSpeed = 700;
         this.conversionRange = 240;
         this.conversionTime  = 4.5;   // seconds of continuous exposure to flip
         this.conversionTargets = new Map();
-        this._auraPhase = Math.random() * Math.PI * 2;
+        // Cosmetic state — drama dials. None of these touch combat/balance.
+        this._auraPhase  = Math.random() * Math.PI * 2;
+        this._hoverPhase = Math.random() * Math.PI * 2;
+        this._runePhase  = Math.random() * Math.PI * 2;
     }
 
     // Sweep nearby Warriors and Tokobus and advance per-target timers. Each
@@ -1917,22 +2049,67 @@ export class Priest extends Villager {
     draw(ctx, camera) {
         const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
         if (!rect.onScreen) return;
-        const sx = Math.floor(rect.x);
-        const sy = Math.floor(rect.y);
 
-        drawShadow(ctx, sx, sy + this.h, this.w);
+        // === PRIESTLY PASS ===
+        // The Priest is the rarest unit in the field. Read at any distance
+        // means a slowly-rotating ground rune, a breathing halo, a hover
+        // bob, and a wisp curling off the hood.
 
-        // Aura halo — soft radial wash in the team colour. Pulses gently.
-        this._auraPhase += 0.04;
+        this._auraPhase  += 0.045;
+        this._hoverPhase += 0.05;
+        this._runePhase  += 0.012;
+
         const pulse = 0.55 + Math.sin(this._auraPhase) * 0.25;
-        const auraR = this.conversionRange * 0.55;
+        const hoverDY = Math.sin(this._hoverPhase) * 1.2;
+
+        const sx = Math.floor(rect.x);
+        const sy = Math.floor(rect.y + hoverDY);
         const cx = sx + this.w * 0.5;
         const cy = sy + this.h * 0.5;
+        const baseY = Math.floor(rect.y) + this.h;   // rune sits on ground, not the bob
+
+        // 1. Shadow on the actual ground (separate from the floating body).
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.beginPath();
+        ctx.ellipse(cx, baseY, this.w * 0.45, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. Sigil ring on the ground — slowly rotating glyph in the team's
+        // aura colour. Reads from far away as "magic happens here".
+        ctx.save();
+        ctx.translate(cx, baseY - 1);
+        ctx.rotate(this._runePhase);
+        ctx.globalCompositeOperation = 'lighter';
+        const ringR = this.w * 0.85;
+        ctx.strokeStyle = `rgba(${teamColor(this.team, 'aura')},${0.45 * pulse})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, ringR, ringR * 0.32, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        // Inner faint ring
+        ctx.strokeStyle = `rgba(${teamColor(this.team, 'aura')},${0.20 * pulse})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, ringR * 0.65, ringR * 0.22, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        // Six tick marks around the outer ring — reads as runic.
+        ctx.strokeStyle = `rgba(${teamColor(this.team, 'aura')},${0.55 * pulse})`;
+        for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * ringR * 0.85, Math.sin(a) * ringR * 0.27);
+            ctx.lineTo(Math.cos(a) * ringR * 1.05, Math.sin(a) * ringR * 0.34);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // 3. Aura halo — soft radial wash in the team colour. The conversion
+        // range is gameplay-meaningful so the visible halo nudges close to it.
+        const auraR = this.conversionRange * 0.55;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         const ag = ctx.createRadialGradient(cx, cy, 0, cx, cy, auraR);
-        ag.addColorStop(0.00, `rgba(${teamColor(this.team, 'aura')},${0.10 * pulse})`);
-        ag.addColorStop(0.60, `rgba(${teamColor(this.team, 'aura')},${0.04 * pulse})`);
+        ag.addColorStop(0.00, `rgba(${teamColor(this.team, 'aura')},${0.12 * pulse})`);
+        ag.addColorStop(0.60, `rgba(${teamColor(this.team, 'aura')},${0.05 * pulse})`);
         ag.addColorStop(1.00, `rgba(${teamColor(this.team, 'aura')},0)`);
         ctx.fillStyle = ag;
         ctx.beginPath();
@@ -1940,7 +2117,7 @@ export class Priest extends Villager {
         ctx.fill();
         ctx.restore();
 
-        // Sprite (hooded mystic, hue-tinted by team).
+        // 4. Sprite (hooded mystic, hue-tinted by team). Solid — no alpha.
         const img = teamSprite('priest', this.team);
         if (img && (img.complete !== false) && (img.naturalWidth || img.width)) {
             ctx.drawImage(img, sx, sy, this.w, this.h);
@@ -1949,14 +2126,43 @@ export class Priest extends Villager {
             ctx.fillRect(sx, sy, this.w, this.h);
         }
 
-        // Tiny wisp above the head — reads at distance as "this is a caster".
+        // 5. Halo arc behind the head — a thin crescent, sells "spiritual".
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = `rgba(${teamColor(this.team, 'aura')},${0.6 * pulse})`;
+        ctx.strokeStyle = `rgba(${teamColor(this.team, 'aura')},${0.55 * pulse})`;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(cx, sy - 4, 2.4, 0, Math.PI * 2);
+        ctx.arc(cx, sy + this.h * 0.18, this.w * 0.42, Math.PI * 1.05, Math.PI * 1.95);
+        ctx.stroke();
+        ctx.restore();
+
+        // 6. Wisp curling off the hood — bigger, brighter, with a trail.
+        const wispY = sy - 6;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const wispGrad = ctx.createRadialGradient(cx, wispY, 0, cx, wispY, 8);
+        wispGrad.addColorStop(0, `rgba(${teamColor(this.team, 'aura')},${0.85 * pulse})`);
+        wispGrad.addColorStop(1, `rgba(${teamColor(this.team, 'aura')},0)`);
+        ctx.fillStyle = wispGrad;
+        ctx.beginPath();
+        ctx.arc(cx, wispY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(cx, wispY, 1.6, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+
+        // 7. Sparse spark trail — emit ~3x/s when active.
+        if (Math.random() < 0.05) {
+            spawnParticle(
+                cx + (Math.random() - 0.5) * 10,
+                wispY - 4,
+                teamColor(this.team, 'particle'),
+                10, 0.6 + Math.random() * 0.4,
+                1.2 + Math.random() * 1.6, 'glow'
+            );
+        }
     }
 }
 
