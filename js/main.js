@@ -3,17 +3,18 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js?v=4';
-import { ResourceManager } from './resources.js?v=4';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=4';
+import { InputHandler } from './input.js?v=5';
+import { ResourceManager } from './resources.js?v=5';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=5';
 import {
     Player, Island, Villager, Warrior, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
     RainCloud, VisualEffect, Totem,
     spawnBlood, spawnParticle, updateParticles, drawParticles,
-    getAssetProgress
-} from './entities.js?v=4';
-import { AudioManager } from './audio.js?v=4';
+    getAssetProgress,
+    WORLD_CEILING_Y, getWorldGroundY
+} from './entities.js?v=5';
+import { AudioManager } from './audio.js?v=5';
 
 /* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
    Design constraints learnt the hard way:
@@ -1589,6 +1590,11 @@ class Game {
             ctx.fillText(`RESPAWNING IN ${Math.ceil(this.player.respawnTimer)}...`, this.canvas.width * 0.5, this.canvas.height * 0.5);
         }
 
+        // Godstone-style radial polar minimap — flat world projected as a
+        // rounded planet. Player sits at the top of the disc, world rotates
+        // around them; rock crust at the centre, ozone band at the rim.
+        this._drawMinimap(ctx);
+
         // FPS / debug strip — kept minimal; difficulty intentionally hidden.
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.font = '11px monospace';
@@ -1597,6 +1603,132 @@ class Game {
             `${this.fps} FPS | ${this.villagers.length} units | TD ${this.world.camera.timeDilation.toFixed(2)}`,
             8, this.canvas.height - 8
         );
+    }
+
+    // Project a world coordinate onto the minimap disc.
+    // Vertical axis: ceilingY → outer rim (sky), groundY → centre (rock).
+    // Horizontal axis: angular position around the disc, with the player
+    // always at the top (-PI/2), east going clockwise to the right.
+    _projectMinimap(worldX, worldY, cx, cy, radius) {
+        const ceilingY = WORLD_CEILING_Y;
+        const groundY = getWorldGroundY(this.worldHeight);
+        let t = (worldY - ceilingY) / (groundY - ceilingY);
+        if (t < 0) t = 0; else if (t > 1) t = 1;
+        const r = radius * (1 - t);
+
+        let dx = worldX - this.player.x;
+        const half = this.worldWidth / 2;
+        if (dx > half) dx -= this.worldWidth;
+        if (dx < -half) dx += this.worldWidth;
+        const angle = -Math.PI * 0.5 + (dx / this.worldWidth) * Math.PI * 2;
+
+        return { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r };
+    }
+
+    _drawMinimap(ctx) {
+        if (this.uiState !== 'PLAYING') return;
+
+        // Anchor: bottom-right corner. Sized to read well on phones too.
+        const margin = 18;
+        const radius = Math.max(82, Math.min(140, this.canvas.width * 0.085));
+        const cx = this.canvas.width - margin - radius;
+        const cy = this.canvas.height - margin - radius;
+
+        ctx.save();
+
+        // Outer halo — soft ozone bloom that hints at atmosphere.
+        const haloR = radius + 12;
+        const halo = ctx.createRadialGradient(cx, cy, radius * 0.85, cx, cy, haloR);
+        halo.addColorStop(0, 'rgba(140, 200, 255, 0.18)');
+        halo.addColorStop(1, 'rgba(140, 200, 255, 0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Disc gradient — rock at centre fading up through atmosphere to ozone.
+        const disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        disc.addColorStop(0.00, '#3a2418');   // crust core
+        disc.addColorStop(0.14, '#5a3a26');   // upper crust
+        disc.addColorStop(0.18, '#3e2c20');   // lithosphere shadow
+        disc.addColorStop(0.28, '#1a1830');   // troposphere base
+        disc.addColorStop(0.55, '#22305a');   // mid sky
+        disc.addColorStop(0.82, '#345070');   // stratosphere
+        disc.addColorStop(0.96, '#5e88b8');   // ozone band
+        disc.addColorStop(1.00, '#0a0a18');   // void rim
+        ctx.fillStyle = disc;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Rim stroke
+        ctx.strokeStyle = 'rgba(180, 210, 255, 0.45)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Clip everything below to the disc
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius - 0.5, 0, Math.PI * 2);
+        ctx.clip();
+
+        // Islands — small dots at their canonical altitude.
+        for (let i = 0; i < this.islands.length; i++) {
+            const island = this.islands[i];
+            const p = this._projectMinimap(island.x + island.w * 0.5, island.y, cx, cy, radius);
+            const teamColor =
+                island.team === 'green' ? 'rgba(120, 220, 130, 0.95)' :
+                island.team === 'blue'  ? 'rgba(120, 180, 230, 0.95)' :
+                                          'rgba(180, 180, 190, 0.75)';
+            ctx.fillStyle = teamColor;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Units — tiny pixels coloured by team.
+        ctx.globalAlpha = 0.85;
+        for (let i = 0; i < this.villagers.length; i++) {
+            const v = this.villagers[i];
+            if (v.dead) continue;
+            const p = this._projectMinimap(v.x, v.y, cx, cy, radius);
+            ctx.fillStyle = v.team === 'green' ? '#9ce088' : '#9cc8ee';
+            ctx.fillRect(p.x - 0.7, p.y - 0.7, 1.6, 1.6);
+        }
+        ctx.globalAlpha = 1;
+
+        // Enemy chief — small but distinct ruby pip.
+        if (this.enemyChief && !this.enemyChief.dead) {
+            const ep = this._projectMinimap(this.enemyChief.x, this.enemyChief.y, cx, cy, radius);
+            ctx.fillStyle = '#ff6868';
+            ctx.beginPath();
+            ctx.arc(ep.x, ep.y, 3.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        // Player — bright golden sun, always at the top.
+        const pp = this._projectMinimap(this.player.x, this.player.y, cx, cy, radius);
+        // soft halo
+        const pHalo = ctx.createRadialGradient(pp.x, pp.y, 1, pp.x, pp.y, 9);
+        pHalo.addColorStop(0, 'rgba(255, 240, 150, 0.85)');
+        pHalo.addColorStop(1, 'rgba(255, 200, 80, 0)');
+        ctx.fillStyle = pHalo;
+        ctx.beginPath();
+        ctx.arc(pp.x, pp.y, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff5cc';
+        ctx.beginPath();
+        ctx.arc(pp.x, pp.y, 3.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(40, 30, 0, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.restore();
     }
 }
 

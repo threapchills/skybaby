@@ -5,7 +5,10 @@
      - Parallax mid-clouds + drifting fg cloud bank that overlays entities
      - Volumetric god-ray pass for that golden-hour feel
      - Horizon haze and high-altitude fog for depth
+     - Solid rock/soil cross-section at the world's bottom (topology v3)
 */
+
+import { getWorldGroundY, WORLD_GROUND_THICKNESS, WORLD_CEILING_Y } from './entities.js?v=5';
 
 export class Camera {
     constructor(viewportWidth, viewportHeight, worldWidth, worldHeight) {
@@ -399,6 +402,10 @@ export class World {
         const ew = cam.effectiveW;
         const eh = cam.effectiveH;
 
+        // Rock/soil cross-section — the planet's crust. Painted before the
+        // front cloud bank so atmospheric scrim still drifts across its top.
+        this._drawGround(ctx, cam);
+
         // Drifting front cloud bank — this is the Silksong-style overlay that
         // crosses in front of the player layer. Kept very transparent so it
         // reads as soft atmospheric scrim, not occlusion.
@@ -431,6 +438,100 @@ export class World {
             ctx.fill();
         }
         ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // Draw the solid rock/soil cross-section that closes the bottom of the
+    // world. The crust reads as warm earth on top fading into deep mineral
+    // grey below, with a subtle stratification pattern that drifts with the
+    // camera so it doesn't feel pasted on. Strata anchor in WORLD coordinates
+    // so they slide past as the player moves left/right (horizontal wrap is
+    // preserved by the modulo in the X projection).
+    _drawGround(ctx, cam) {
+        const ew = cam.effectiveW;
+        const eh = cam.effectiveH;
+        const groundY = getWorldGroundY(this.height);
+        const screenTop = groundY - cam.y;
+        if (screenTop >= eh) return; // ground entirely off-screen below
+
+        const drawTop = Math.max(0, screenTop);
+        const drawH = eh - drawTop;
+        if (drawH <= 0) return;
+
+        // Earth gradient: lichen-stained crust at the lip, warm soil mid,
+        // deep stone at the base. Mike's brief: solid, elegant, beautiful.
+        const grad = ctx.createLinearGradient(0, screenTop, 0, eh);
+        grad.addColorStop(0.00, '#5d4434');
+        grad.addColorStop(0.05, '#6b4a37');
+        grad.addColorStop(0.30, '#3e2a1f');
+        grad.addColorStop(0.70, '#241813');
+        grad.addColorStop(1.00, '#100a08');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, drawTop, ew, drawH);
+
+        // A bright moss/grass lip kissing the top of the crust — the line
+        // where the islands' world ends and the crust begins.
+        const lipH = 6;
+        const lipGrad = ctx.createLinearGradient(0, screenTop - 2, 0, screenTop + lipH);
+        lipGrad.addColorStop(0.00, 'rgba(120, 160, 80, 0.0)');
+        lipGrad.addColorStop(0.40, 'rgba(120, 160, 80, 0.55)');
+        lipGrad.addColorStop(1.00, 'rgba(60, 80, 40, 0.0)');
+        ctx.fillStyle = lipGrad;
+        ctx.fillRect(0, screenTop - 2, ew, lipH + 2);
+
+        // Stratified rock layers — drifting bands that anchor in world space.
+        // Periodicity wraps with the world width so horizontal cylinder still
+        // reads as a continuous crust.
+        const layerCount = 5;
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        for (let i = 0; i < layerCount; i++) {
+            const t = (i + 1) / (layerCount + 1);
+            const layerY = screenTop + drawH * t;
+            const thickness = 2 + (i % 2);
+            // Phase based on world X so strata "move" as you travel.
+            const phase = (cam.x * 0.6 + i * 137) % 240;
+            const dashLen = 60;
+            const gapLen = 30;
+            ctx.fillStyle = i % 2 === 0
+                ? 'rgba(255, 220, 180, 0.18)'
+                : 'rgba(60, 30, 20, 0.55)';
+            for (let x = -dashLen + ((-phase) % (dashLen + gapLen)); x < ew; x += dashLen + gapLen) {
+                ctx.fillRect(x, layerY, dashLen, thickness);
+            }
+        }
+        ctx.restore();
+
+        // Embedded boulders — sparse rounded stones poking out of the crust
+        // for material variety. Position seeded on world X so they stay put.
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        const stoneSpacing = 320;
+        const camWorldX = cam.x;
+        const startWorldX = Math.floor(camWorldX / stoneSpacing) * stoneSpacing - stoneSpacing;
+        for (let wx = startWorldX; wx < camWorldX + ew + stoneSpacing; wx += stoneSpacing) {
+            // Cheap deterministic hash from world X
+            const seed = Math.sin(wx * 12.9898) * 43758.5453;
+            const frac = seed - Math.floor(seed);
+            const sx = (wx - camWorldX) + frac * 60;
+            const sy = screenTop + 18 + frac * (drawH * 0.35);
+            const r = 14 + frac * 22;
+            const stoneGrad = ctx.createRadialGradient(sx - r * 0.3, sy - r * 0.4, r * 0.2, sx, sy, r);
+            stoneGrad.addColorStop(0, '#7a6555');
+            stoneGrad.addColorStop(1, '#2c1f17');
+            ctx.fillStyle = stoneGrad;
+            ctx.beginPath();
+            ctx.ellipse(sx, sy, r, r * 0.78, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Soft inner shadow at the lip so the rock reads as massive depth
+        // rather than a flat band.
+        const shadow = ctx.createLinearGradient(0, screenTop, 0, screenTop + 80);
+        shadow.addColorStop(0, 'rgba(0,0,0,0.45)');
+        shadow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = shadow;
+        ctx.fillRect(0, screenTop, ew, Math.min(80, drawH));
     }
 
     _drawGodRays(ctx, cam, intensity) {

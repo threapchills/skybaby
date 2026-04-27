@@ -4,6 +4,63 @@
    object pooling for particles.
 */
 
+// === World vertical bounds (no vertical wraparound) ===
+// World is a horizontal cylinder: it wraps left-right, but top and bottom are hard.
+// CEILING_Y is an invisible ceiling set well above the highest islands.
+// Rock cross-section is rendered from GROUND_TOP downward; units begin to
+// "hasten home" once they sink below HASTEN_TRIGGER (a soft band above the rock)
+// and are clamped at GROUND_TOP so they cannot penetrate the floor.
+export const WORLD_CEILING_Y = -300;
+export const WORLD_GROUND_THICKNESS = 350;     // pixel thickness of the visible rock band
+export const WORLD_HASTEN_BAND       = 200;     // pixels of soft "uh-oh, head home" zone above ground
+export function getWorldGroundY(worldHeight) { return worldHeight - WORLD_GROUND_THICKNESS; }
+export function getWorldHastenY(worldHeight) { return getWorldGroundY(worldHeight) - WORLD_HASTEN_BAND; }
+
+// Apply a hasten-home upward impulse + steer toward the nearest island above.
+// Used by every freely-moving unit when it sinks toward the rock floor.
+function _hastenHome(entity, islands, dt, worldHeight) {
+    const groundY = getWorldGroundY(worldHeight);
+    const hastenY = getWorldHastenY(worldHeight);
+    if (entity.y <= hastenY) return;
+
+    // Strong upward acceleration that scales with how deep the unit is.
+    const depth = (entity.y - hastenY) / Math.max(1, (groundY - hastenY));
+    const upward = -1400 * Math.min(1.5, 0.4 + depth * 1.6);
+    entity.vy = Math.min(entity.vy, upward);
+
+    // Steer horizontally toward the nearest island above, picking the shortest
+    // wrap-aware horizontal distance.
+    if (islands && islands.length) {
+        let best = null, bestD = Infinity;
+        for (let i = 0; i < islands.length; i++) {
+            const isl = islands[i];
+            if (isl.y > entity.y) continue; // only target islands above us
+            const dx = isl.x + isl.w * 0.5 - entity.x;
+            const d = Math.abs(dx);
+            if (d < bestD) { bestD = d; best = isl; }
+        }
+        if (best) {
+            const tx = best.x + best.w * 0.5;
+            if (entity.x < tx - 10) entity.vx = Math.min(entity.speed || 250, (entity.vx || 0) + 800 * dt);
+            else if (entity.x > tx + 10) entity.vx = Math.max(-(entity.speed || 250), (entity.vx || 0) - 800 * dt);
+        }
+    }
+
+    // Hard clamp at the rock surface so nothing tunnels through.
+    if (entity.y + (entity.h || 0) > groundY) {
+        entity.y = groundY - (entity.h || 0);
+        if (entity.vy > 0) entity.vy = 0;
+    }
+}
+
+// Clamp upward motion at the invisible ceiling.
+function _clampCeiling(entity) {
+    if (entity.y < WORLD_CEILING_Y) {
+        entity.y = WORLD_CEILING_Y;
+        if (entity.vy < 0) entity.vy = 0;
+    }
+}
+
 // --- GLOBAL ASSET LOADER ---
 export const Assets = {
     tilesetNormal: new Image(), tilesetWinter: new Image(),
@@ -579,14 +636,19 @@ export class Island extends Entity {
         }
 
         // 5. Background trees only (foreground trees rendered later via drawForeground)
+        // Trees anchor by the bottom of their sprite so the trunk meets the
+        // island surface no matter how large the tree is scaled. A tiny fixed
+        // overlap plants the root flare into the grass without poking through
+        // the island's underside.
         if (imgReady(this.activeTree)) {
+            const TREE_PLANT_OVERLAP = 6;
             for (let i = 0; i < this.trees.length; i++) {
                 const tree = this.trees[i];
                 if (tree.layer === 'fg') continue;
 
                 const tw = 200 * tree.scale;
                 const th = 260 * tree.scale;
-                const treeY = sy - (210 * tree.scale);
+                const treeY = sy + TREE_PLANT_OVERLAP - th;
 
                 if (tree.burnt) {
                     ctx.globalAlpha = 0.4;
@@ -730,6 +792,7 @@ export class Island extends Entity {
 
         // Foreground trees — kept restrained so the player remains the focal point.
         if (imgReady(this.activeTree)) {
+            const TREE_PLANT_OVERLAP = 6;
             for (let i = 0; i < this.trees.length; i++) {
                 const tree = this.trees[i];
                 if (tree.layer !== 'fg') continue;
@@ -737,7 +800,7 @@ export class Island extends Entity {
                 const tw = 200 * tree.scale;
                 const th = 260 * tree.scale;
                 const treeX = sx + tree.x;
-                const treeY = sy - (210 * tree.scale);
+                const treeY = sy + TREE_PLANT_OVERLAP - th;
                 const treeCX = treeX + tw * 0.4;
                 const treeCY = treeY + th * 0.5;
 
@@ -915,11 +978,15 @@ export class Player extends Entity {
             }
         }
 
-        // World wrap
-        if (this.y > worldHeight + 100) this.y = -100;
-        if (this.y < -200) this.y = worldHeight;
+        // Horizontal wrap — preserved (world is a cylinder).
         if (this.x > worldWidth) this.x = 0;
         if (this.x < -this.w) this.x = worldWidth;
+
+        // Vertical bounds — invisible ceiling above, rock floor below with
+        // hasten-home impulse so a Player who slips off the islands gets
+        // shepherded back up rather than wrapping or dying.
+        _clampCeiling(this);
+        _hastenHome(this, islands, dt, worldHeight);
 
         return Math.abs(this.vx) > 0.1 || Math.abs(this.vy) > 0.1;
     }
@@ -1157,9 +1224,11 @@ export class Villager extends Entity {
             }
         }
 
-        if (this.y > worldHeight) this.dead = true;
+        // Horizontal wrap, vertical clamp + hasten-home (no longer dies on fall).
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
+        _clampCeiling(this);
+        _hastenHome(this, islands, dt, worldHeight);
     }
 
     draw(ctx, camera) {
@@ -1402,10 +1471,11 @@ export class Warrior extends Villager {
             }
         }
 
-        // World wrap
-        if (this.y > worldHeight) this.dead = true;
+        // Horizontal wrap, vertical clamp + hasten-home (no longer dies on fall).
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
+        _clampCeiling(this);
+        _hastenHome(this, islands, dt, worldHeight);
     }
 }
 
@@ -1455,9 +1525,11 @@ export class Pig extends Entity {
             }
         }
 
-        if (this.y > worldHeight) this.y = -50;
+        // Horizontal wrap, vertical clamp + hasten-home (pigs head back up too).
         if (this.x > worldWidth) this.x = 0;
         if (this.x < 0) this.x = worldWidth;
+        _clampCeiling(this);
+        _hastenHome(this, islands, dt, worldHeight);
     }
 
     draw(ctx, camera) {
@@ -1667,7 +1739,9 @@ export class StoneWall extends Entity {
             }
         }
 
-        if (this.y > worldHeight) this.dead = true;
+        // Walls that reach the rock floor crumble into oblivion (no village
+        // worth defending lives down there).
+        if (this.y > getWorldGroundY(worldHeight)) this.dead = true;
         if (this.hp <= 0) this.dead = true;
     }
 
