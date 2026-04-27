@@ -1476,10 +1476,25 @@ export class Warrior extends Villager {
             moveTargetX = friendlyLeader.x + (Math.random() * 200 - 100);
             moveTargetY = friendlyLeader.y;
         } else if (warState === 'ATTACK') {
-            const enemyChief = enemies.find(e => e instanceof Player && e.team !== this.team);
-            if (enemyChief && !enemyChief.dead) {
-                moveTargetX = enemyChief.x;
-                moveTargetY = enemyChief.y;
+            // Pick the CLOSEST hostile chief — not the first one in the
+            // enemies array. The old `.find` always returned the player chief
+            // for blue/yellow/red warriors (since the player sits at index 0
+            // of the enemies snapshot), causing every rival tribe to gang up
+            // on green. Now yellow may attack red, blue may attack yellow,
+            // etc. — a real four-way melee with no allies.
+            let closest = null;
+            let bestSq = Infinity;
+            for (let i = 0; i < enemies.length; i++) {
+                const e = enemies[i];
+                if (!(e instanceof Player) || e.team === this.team || e.dead) continue;
+                const dx = e.x - this.x;
+                const dy = e.y - this.y;
+                const d = dx * dx + dy * dy;
+                if (d < bestSq) { bestSq = d; closest = e; }
+            }
+            if (closest) {
+                moveTargetX = closest.x;
+                moveTargetY = closest.y;
                 forcedAggro = true;
             }
         }

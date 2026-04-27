@@ -3,9 +3,9 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js?v=9';
-import { ResourceManager } from './resources.js?v=9';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=9';
+import { InputHandler } from './input.js?v=10';
+import { ResourceManager } from './resources.js?v=10';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=10';
 import {
     Player, Island, Villager, Warrior, Priest, Tokobu, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
@@ -14,32 +14,36 @@ import {
     getAssetProgress,
     WORLD_CEILING_Y, getWorldGroundY,
     TEAMS, TEAM_PALETTE, teamColor
-} from './entities.js?v=9';
-import { AudioManager } from './audio.js?v=9';
+} from './entities.js?v=10';
+import { AudioManager } from './audio.js?v=10';
 
-/* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
-   Design constraints learnt the hard way:
-     1. Adjustments must be invisible to the player. No toasts, no auras,
-        no tier label. The system breathes silently.
-     2. Default is a wide DEADBAND around equilibrium where nothing happens.
-        Tent delta within ±2 → no modulation at all.
-     3. Modulation only HELPS the underdog. The dominant side gets a tiny
-        nudge at most. We never compound buffs that create runaway loops.
-     4. Hard cap on every lever (±15% from baseline). Multiple subtle levers
-        beat one big lever, but each one stays gentle.
-     5. Single primary signal (tent delta) — the cleanest, slowest-moving
-        measure of "who is winning". Avoids twitchy reactions to fight RNG.
+/* DYNAMIC DIFFICULTY MANAGER (v4 — four-team aware, no allies)
+   Design constraints carried over from v3:
+     1. Adjustments must be invisible to the player.
+     2. Wide DEADBAND around equilibrium where nothing happens.
+     3. Modulation HELPS the underdog. The dominant side gets a tiny nudge.
+     4. Hard cap on every lever (±15–20% from baseline).
+     5. Single primary signal (tent delta).
+   v4 changes:
+     - The player's opposition is the strongest CURRENT rival, not blue
+       specifically. Score = green tents - max(blue, yellow, red) tents.
+       This recovers the v3 calibration: in two-team play blue WAS the
+       max rival; nothing changes there. In four-team play, the system
+       now reacts to whichever rival tribe is leading.
+     - Tent-flip momentum tracks gains against the leading rival, losses
+       to whichever rival is currently advancing.
+     - Boost levers cascade to all rivals equally (no allies, every tribe
+       gets the same lift when the player is dominating).
 */
 class DifficultyManager {
     constructor() {
-        // score in [-1, +1]: negative = player struggling, positive = dominating.
         this.score = 0;
         this.targetScore = 0;
 
         this._t = 0;
         this._evalTimer = 0;
         this._evalInterval = 3.0;
-        this._lastTents = { green: -1, blue: -1 };
+        this._lastTents = { green: -1, blue: -1, yellow: -1, red: -1 };
         this.captureEvents = [];
         this.lossEvents = [];
         this.deathEvents = [];
@@ -50,21 +54,33 @@ class DifficultyManager {
         this.fullSwingTents = 6; // |tent delta| of 6 → |score| of 1.0
     }
 
-    notePlayerKill()  { /* noise — not used in v3 */ }
+    notePlayerKill()  { /* noise — not used */ }
     notePlayerDeath() { this.deathEvents.push(this._t); }
 
-    update(dt, greenTents, blueTents, _playerHp) {
+    update(dt, greenTents, teamTents, greenPop, teamPops, _playerHp) {
         this._t += dt;
 
-        // Track tent transitions for momentum (small influence only)
+        const tt = teamTents || {};
+        const blue   = tt.blue   || 0;
+        const yellow = tt.yellow || 0;
+        const red    = tt.red    || 0;
+        const maxRivalTents = Math.max(blue, yellow, red);
+
+        const tp = teamPops || {};
+        const maxRivalPop = Math.max(tp.blue || 0, tp.yellow || 0, tp.red || 0);
+
+        // Tent-flip momentum vs the strongest rival.
         if (this._lastTents.green >= 0) {
+            const lastMaxRival = Math.max(this._lastTents.blue, this._lastTents.yellow, this._lastTents.red);
             const dG = greenTents - this._lastTents.green;
-            const dB = blueTents - this._lastTents.blue;
+            const dR = maxRivalTents - lastMaxRival;
             if (dG > 0) for (let i = 0; i < dG; i++) this.captureEvents.push(this._t);
-            if (dG < 0 && dB > 0) for (let i = 0; i < dB; i++) this.lossEvents.push(this._t);
+            if (dG < 0 && dR > 0) for (let i = 0; i < dR; i++) this.lossEvents.push(this._t);
         }
-        this._lastTents.green = greenTents;
-        this._lastTents.blue = blueTents;
+        this._lastTents.green  = greenTents;
+        this._lastTents.blue   = blue;
+        this._lastTents.yellow = yellow;
+        this._lastTents.red    = red;
 
         const cutoff = this._t - this.windowSec;
         this.captureEvents = this.captureEvents.filter(t => t > cutoff);
@@ -74,35 +90,42 @@ class DifficultyManager {
         this._evalTimer += dt;
         if (this._evalTimer >= this._evalInterval) {
             this._evalTimer = 0;
-            this._recomputeTarget(greenTents, blueTents);
+            this._recomputeTarget(greenTents, maxRivalTents, greenPop || 0, maxRivalPop);
         }
 
-        // Slow lerp — score traverses its band over ~5s
         this.score += (this.targetScore - this.score) * 0.20 * dt;
     }
 
-    _recomputeTarget(greenTents, blueTents) {
-        const tentDelta = greenTents - blueTents;
-        const absDelta = Math.abs(tentDelta);
+    _recomputeTarget(greenTents, maxRivalTents, greenPop, maxRivalPop) {
+        // Tent signal — slow, territorial.
+        const tentDelta = greenTents - maxRivalTents;
+        const absTentDelta = Math.abs(tentDelta);
 
-        // DEADBAND: well-balanced game → fully neutral
-        if (absDelta <= this.deadbandTents) {
-            // Slight pull from death events (let recently-dying player breathe)
-            this.targetScore = -Math.min(0.4, this.deathEvents.length * 0.18);
-            return;
+        // Population signal — fast ground-truth. Normalised so a 2x lead
+        // saturates around ±0.7. Prevents the runaway boost loop where
+        // green has 5x more units but is briefly behind on tents (the v3
+        // "I did nothing and won massively" failure mode).
+        const denomPop = Math.max(20, maxRivalPop);
+        const popRatio = greenPop / denomPop;
+        const popContribution = Math.max(-1, Math.min(1, (popRatio - 1) * 0.7));
+
+        let s;
+        if (absTentDelta <= this.deadbandTents) {
+            // Tents balanced — let pop drive the score, but lightly.
+            s = popContribution * 0.6;
+            // Death events still pull toward "ease up" if they're piling up.
+            s -= Math.min(0.4, this.deathEvents.length * 0.18);
+        } else {
+            const past = absTentDelta - this.deadbandTents;
+            const range = this.fullSwingTents - this.deadbandTents;
+            const tentMag = Math.min(1, past / range);
+            const tentScore = Math.sign(tentDelta) * tentMag;
+            // Blend: 60% tent (slow reliable), 40% population (sanity check).
+            s = 0.6 * tentScore + 0.4 * popContribution;
         }
 
-        // Outside deadband: scale by how far we are past it
-        const past = absDelta - this.deadbandTents;
-        const range = this.fullSwingTents - this.deadbandTents;
-        const mag = Math.min(1, past / range);
-        let s = Math.sign(tentDelta) * mag;
-
-        // Tiny momentum adjustment from recent flips (10% influence max)
         const flipMomentum = (this.captureEvents.length - this.lossEvents.length) * 0.04;
         s += flipMomentum;
-
-        // Recent player deaths bias the system toward easing up
         s -= this.deathEvents.length * 0.12;
 
         if (s > 1) s = 1;
@@ -516,13 +539,15 @@ class Game {
         }
 
         // Rival chiefs (blue, yellow, red) all run the same wandering AI inside
-        // Player.update(); we only need to call update + per-chief enemy AI here.
+        // Player.update(); each chief now also runs the active shooting AI
+        // independently, so all three are fully aggressive (no allies — every
+        // rival is a peer threat).
         for (const chief of [this.enemyChief, this.yellowChief, this.redChief]) {
             if (!chief.dead) {
                 chief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls);
+                this._updateChiefAI(dt, chief);
             }
         }
-        if (!this.enemyChief.dead) this._updateEnemyAI(dt);
 
         // War Director
         this._updateWarDirector(dt);
@@ -553,7 +578,11 @@ class Game {
 
         // Dynamic difficulty — invisible to the player. Updates only the
         // tent-tracking state; effect functions are queried where needed.
-        this.difficulty.update(dt, greenTents, blueTents, this.player.hp);
+        // v4: pass the full team-tents AND team-pops dicts so scoring tracks
+        // the strongest rival on both axes (territory + raw numbers). Pure
+        // tent scoring let the player runaway when their pop ballooned but
+        // tent capture lagged.
+        this.difficulty.update(dt, greenTents, teamTents, greenCount, teamCounts, this.player.hp);
 
         // Invisible support heal — when the system reads "player struggling",
         // gently top up the chief's HP. Capped, slow, never visible as a
@@ -872,14 +901,11 @@ class Game {
         }
     }
 
-    _updateEnemyAI(dt) {
-        const dx = this.player.x - this.enemyChief.x;
-        const dy = this.player.y - this.enemyChief.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        // Baselines are the original game values. The only difficulty lever
-        // here is enemyAggression(), which can shorten the chief's shoot
-        // cooldown by up to 15% when the player is clearly dominating.
+    // Run the active shooting AI for one rival chief. Each chief picks the
+    // closest hostile target (player or another rival chief) within range
+    // and engages independently. No allies — every chief sees every other
+    // chief of a different team as a threat.
+    _updateChiefAI(dt, chief) {
         const aggro = this.difficulty.enemyAggression();      // 1.00 .. 1.15
         const detectRange = 800;
         const shootCD = 1.5 / aggro;
@@ -887,16 +913,34 @@ class Game {
         const fireballChance = 0.01;
         const projDmg = 15;
 
-        if (dist < detectRange && this.enemyChief.fireCooldown <= 0) {
-            this.enemyChief.fireCooldown = shootCD;
+        // Pick closest hostile chief or player.
+        let target = null;
+        let bestSq = detectRange * detectRange;
+        for (const other of this._allChiefs) {
+            if (!other || other === chief || other.dead) continue;
+            if (other.team === chief.team) continue;
+            const dx = other.x - chief.x;
+            const dy = other.y - chief.y;
+            const d = dx * dx + dy * dy;
+            if (d < bestSq) { bestSq = d; target = other; }
+        }
+        if (!target) return;
+
+        const dx = target.x - chief.x;
+        const dy = target.y - chief.y;
+
+        if (chief.fireCooldown <= 0) {
+            chief.fireCooldown = shootCD;
             const angle = Math.atan2(dy, dx);
-            this.projectiles.push(new Projectile(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue', projDmg));
+            this.projectiles.push(new Projectile(chief.x + 20, chief.y + 20, angle, chief.team, projDmg));
         }
 
-        if (this.enemyChief.fireCooldown <= 0 && Math.random() < fireballChance) {
-            this.enemyChief.fireCooldown = burstCD;
+        if (chief.fireCooldown <= 0 && Math.random() < fireballChance) {
+            chief.fireCooldown = burstCD;
             const angle = Math.atan2(dy, dx);
-            this.fireballs.push(new Fireball(this.enemyChief.x + 20, this.enemyChief.y + 20, angle, 'blue'));
+            // Source 'spell' so the fireball has its full chief-spell power
+            // (kills anything, like the player's own fireball).
+            this.fireballs.push(new Fireball(chief.x + 20, chief.y + 20, angle, chief.team, 'spell'));
         }
     }
 

@@ -2,11 +2,35 @@
 
 Snapshot for the next session. Update at the end of every working session.
 
-**Last updated:** 2026-04-27 (steps 1–4 + polish sprint complete)
+**Last updated:** 2026-04-27 (steps 1–4 + polish + balance sprint complete)
 
 ## Current focus
 
-The full roadmap (steps 1–4) is closed. A polish sprint just landed addressing every item Mike flagged on 2026-04-27. Cache-bust is now `?v=9`. Live repo is in sync.
+The full roadmap (steps 1–4) is closed. Two follow-up sprints have landed: a graphics/UX polish pass and a four-team balance pass. Cache-bust is now `?v=10`. Live repo is in sync.
+
+## Balance sprint (DifficultyManager v4 + four-team AI)
+
+Symptom Mike reported: "I literally did nothing, just stood there and ended up winning massively." Pip standings showed green at 655 pop while blue/yellow/red sat at 69/2/68.
+
+Three root causes, all fixed:
+
+### 1. DifficultyManager only watched green vs blue
+- v3 scored `tentDelta = greenTents - blueTents` and ignored yellow + red entirely. When a rival tribe other than blue was leading, the system saw "blue is even with green" and concluded the game was balanced.
+- v4 scores against the **strongest current rival**: `tentDelta = greenTents - max(blueTents, yellowTents, redTents)`. In two-team play this is identical to v3 (blue WAS the max rival), so the original calibration is preserved.
+- v4 also blends in a **population signal** (60% tents, 40% pop). When a tribe's pop is wildly out of sync with their tent count (the failure mode Mike caught), the score reflects ground truth instead of stale territory data.
+- `update(dt, greenTents, teamTents, greenPop, teamPops, ...)` — full team dictionaries passed in.
+
+### 2. Yellow + red chiefs were passive
+- v3 only ran active shooting AI for the blue chief. Yellow + red wandered but never engaged. Their tribes were missing 75% of their chief-level offensive presence.
+- New `Game._updateChiefAI(dt, chief)` runs the full shooting AI for any chief. Each rival picks the **closest hostile chief** (player or another rival) within range, fires arrows at the v3 cooldown, and fireballs at the same probability. Each chief has its own independent `fireCooldown`.
+- Projectile and Fireball team is `chief.team` (not hardcoded `'blue'`), so every projectile carries the right colour and triggers the right team's spawn-on-hit logic.
+
+### 3. Every rival warrior was ganging up on green
+- In ATTACK phase, warriors picked their target via `enemies.find(e => e instanceof Player && e.team !== this.team)`. Because the player chief sits at index 0 of the enemies snapshot, `.find` returned the player FIRST for every rival warrior. Yellow warriors hunted green; red warriors hunted green; blue warriors hunted green. Rivals never fought each other, so green absorbed all the attention while rival populations bled out.
+- Now warriors pick the **closest** non-friendly chief — could be the player or another rival. A red warrior near a yellow village will attack yellow, not trek across the map to attack green. Real four-way melee with no allies.
+
+### Verification
+After 30s of idle play under v4 (player did nothing): blue 342/14, green 256/9, red 93/7, yellow 81/6. Blue was leading the player on both pop and tents. The "stand there and win" failure mode is gone.
 
 ## What changed in the polish sprint
 
