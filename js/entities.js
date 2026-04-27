@@ -10,11 +10,16 @@
 // Rock cross-section is rendered from GROUND_TOP downward; units begin to
 // "hasten home" once they sink below HASTEN_TRIGGER (a soft band above the rock)
 // and are clamped at GROUND_TOP so they cannot penetrate the floor.
+//
+// Ground thickness and hasten band scale with world height so the crust feels
+// substantial whether the world is 3000 or 8000+ tall.
 export const WORLD_CEILING_Y = -300;
-export const WORLD_GROUND_THICKNESS = 350;     // pixel thickness of the visible rock band
-export const WORLD_HASTEN_BAND       = 200;     // pixels of soft "uh-oh, head home" zone above ground
-export function getWorldGroundY(worldHeight) { return worldHeight - WORLD_GROUND_THICKNESS; }
-export function getWorldHastenY(worldHeight) { return getWorldGroundY(worldHeight) - WORLD_HASTEN_BAND; }
+const WORLD_GROUND_FRACTION = 0.115;  // ~12% of worldH = visible rock band
+const WORLD_HASTEN_FRACTION = 0.07;   // ~7% above the crust = hasten-home zone
+export function getWorldGroundThickness(worldHeight) { return Math.round(worldHeight * WORLD_GROUND_FRACTION); }
+export function getWorldHastenBand(worldHeight)      { return Math.round(worldHeight * WORLD_HASTEN_FRACTION); }
+export function getWorldGroundY(worldHeight)         { return worldHeight - getWorldGroundThickness(worldHeight); }
+export function getWorldHastenY(worldHeight)         { return getWorldGroundY(worldHeight) - getWorldHastenBand(worldHeight); }
 
 // Apply a hasten-home upward impulse + steer toward the nearest island above.
 // Used by every freely-moving unit when it sinks toward the rock floor.

@@ -2,24 +2,40 @@
 
 Snapshot for the next session. Update at the end of every working session.
 
-**Last updated:** 2026-04-27 (step 1 complete)
+**Last updated:** 2026-04-27 (steps 1 & 2 complete)
 
 ## Current focus
 
-Step 1 (world topology + minimap) is complete and pushed. Step 2 (~8x area scaling) is next.
+Steps 1 & 2 complete and pushed. Step 3 (four teams via hue-shift) is next.
 
 ## Recent context
 
-- Step 1 done 2026-04-27. World is now a horizontal cylinder: vertical wrap removed, invisible ceiling at y=-300, rock cross-section at the world bottom (y = worldH-350 down). Units that sink toward the floor get a hasten-home upward impulse and steer to the nearest island above. Stone walls crumble at the rock floor. New `WORLD_CEILING_Y`, `WORLD_GROUND_THICKNESS`, `WORLD_HASTEN_BAND` constants exported from `entities.js`.
-- Godstone-style minimap added (bottom-right of HUD): radial polar projection, rock at centre, ozone halo at the rim, player always at "up", concentric atmosphere bands and tiny team-coloured dots for islands and units.
-- Trees now plant by their sprite bottom plus a fixed 6px overlap so they sit cleanly on the island surface regardless of scale; previously large trees poked roots through the island underside.
-- Restored deleted `villager_green_1.png` / `villager_blue_1.png` from HEAD so the loading screen can finish.
-- Cache-bust query strings bumped from `?v=4` to `?v=5` across `index.html` and module imports.
-- Difficulty system v3, painted skies, foreground parallax, fire glow remain.
+- Step 1 (cylinder world + minimap) and step 2 (~8x area) both pushed 2026-04-27.
+- World dims now 18000 × 8000 (was 6000 × 3000). Aspect 2.25:1, area 144M (8x). Per-axis: 3x wider, ~2.67x taller.
+- Topology: vertical wrap removed; invisible ceiling at y=-300; rock cross-section at the bottom whose thickness scales with worldH (≈12% of height); hasten-band above ground (≈7%) where units gain upward impulse and steer to the nearest island above. Stone walls crumble at the rock floor.
+- Helpers in `entities.js`: `WORLD_CEILING_Y`, `getWorldGroundThickness`, `getWorldHastenBand`, `getWorldGroundY`, `getWorldHastenY`. World drawing in `world.js` imports these.
+- Procedural islands: 120 (was 30) distributed in x ∈ [2400, 15600], y ∈ [1200, 5800]. Home green at (600, 2700) and home blue at (15900, 2700). Tribe affiliation by horizontal proximity (green if x<4500, blue if x>13500).
+- Starting populations: 60 villagers + 30 warriors per tribe (was 20 + 10). Pigs: 18-32 (was 5-11). Steady-state cap 500 villagers / 50 pigs unchanged.
+- Player and enemy chiefs spawn just above their home islands (y=2200) so the camera frames a populated archipelago immediately.
+- Godstone-style radial polar minimap (bottom-right of HUD): rock crust at centre, ozone halo at rim, horizontal wrap → angular position, rotates so the player is always at "up". Concentric atmosphere bands plus team-coloured dots for islands and tiny pixels for units.
+- Trees now plant by sprite bottom with a fixed 6px overlap so large trees no longer poke through island undersides regardless of scale.
+- Restored `villager_green_1.png` / `villager_blue_1.png` from HEAD (their absence was stalling the loader).
+- Cache-bust query strings now `?v=6` across `index.html` and module imports.
 
 ## Next action
 
-Begin step 2: scale world to ~8x area. Likely involves: bumping `worldWidth` / `worldHeight` in `main.js` (currently 6000 × 3000); generalising spawn density in `_generateWorld` and `_spawnInitialUnits`; checking projectile lifetimes and AI travel times against the larger space; and adding spatial partitioning where needed for performance. The minimap and rock floor scale with `this.height` automatically; verify nothing else is hard-coded against the small world.
+Begin step 3: four teams via hue-shift. Add Yellow and Red alongside Blue and Green. Tasks:
+1. Generalise team IDs and the alliance/enmity matrix for N teams (currently hard-coded `green`/`blue`/`neutral` — search for `team === 'green'` and `team === 'blue'` to find every dependency).
+2. Hue-shift the existing `villager_green_*.png`, `warrior_green.png`, `player_green.png`, `teepee_green.png`, etc. into yellow + red variants at runtime via offscreen canvas (no new assets needed).
+3. Spawn allocation: split procedural islands across four tribes by quadrant or some other partition; add two more home islands for yellow + red.
+4. Update HUD (currently shows "Player Tribe" + "Enemy Tribe") for four-tribe view.
+5. Update minimap dot colours.
+
+## Performance follow-up (deferred, watch for jank)
+
+- `Warrior.updateLogic` allocates `[player, enemyChief, ...villagers]` every frame for each warrior. With 90+ warriors this is ~hundreds of thousands of array elements per second. Replace with a single shared snapshot per frame.
+- Separation and target-selection inside that loop are O(n²). At 250+ units expect frame-time pressure. A bucketed spatial grid (cell size ~600) keyed by world X would cut this to near-O(n).
+- 120 islands × per-island grass/tree/render cost. Camera culling via `getScreenRect` already works, but verify drawing is short-circuited for off-screen islands.
 
 ## Decisions locked 2026-04-27
 

@@ -3,9 +3,9 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js?v=5';
-import { ResourceManager } from './resources.js?v=5';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=5';
+import { InputHandler } from './input.js?v=6';
+import { ResourceManager } from './resources.js?v=6';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=6';
 import {
     Player, Island, Villager, Warrior, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
@@ -13,8 +13,8 @@ import {
     spawnBlood, spawnParticle, updateParticles, drawParticles,
     getAssetProgress,
     WORLD_CEILING_Y, getWorldGroundY
-} from './entities.js?v=5';
-import { AudioManager } from './audio.js?v=5';
+} from './entities.js?v=6';
+import { AudioManager } from './audio.js?v=6';
 
 /* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
    Design constraints learnt the hard way:
@@ -135,8 +135,11 @@ class Game {
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
 
-        this.worldWidth = 6000;
-        this.worldHeight = 3000;
+        // World scale v2 — ~8x area (was 6000 × 3000 = 18M; now 18000 × 8000 = 144M).
+        // Roughly 3x wider, 2.67x taller, aspect 2.25:1. Plenty of room for
+        // four-tribe warfare without breaking horizontal-cylinder semantics.
+        this.worldWidth = 18000;
+        this.worldHeight = 8000;
         this.uiState = 'LOADING';
 
         this.titleImg = new Image(); this.titleImg.src = 'assets/title.png';
@@ -178,8 +181,10 @@ class Game {
 
         this.input.onScroll((delta) => this.resources.cycleSpell(delta > 0 ? 1 : -1));
 
-        this.player = new Player(400, 200, 'green');
-        this.enemyChief = new Player(5500, 200, 'blue');
+        // Spawn the chiefs just above their home islands so the camera frames
+        // a populated archipelago from the very first frame.
+        this.player = new Player(1200, 2200, 'green');
+        this.enemyChief = new Player(16500, 2200, 'blue');
         this.enemyChief.mana = 100;
         this.enemyChief.maxMana = 100;
 
@@ -277,15 +282,24 @@ class Game {
     }
 
     _generateWorld() {
-        // Home islands (MASSIVE - people are tiny specks on these)
-        this.islands.push(new Island(200, 1000, 1000, 90, 'green'));
-        this.islands.push(new Island(5200, 1000, 1000, 90, 'blue'));
+        // Home islands — anchors of the green and blue tribes. Scaled larger to
+        // suit the wider world. People still look like specks against them.
+        this.islands.push(new Island(600, 2700, 1500, 100, 'green'));
+        this.islands.push(new Island(15900, 2700, 1500, 100, 'blue'));
 
-        // Generate world islands (big, dramatic floating rocks)
-        for (let i = 0; i < 30; i++) {
+        // Procedural archipelago. Target density: ~120 islands across the
+        // 18000-wide world (was 30 across 6000-wide, so similar per-pixel
+        // density). Procedural altitude band sits between the home islands'
+        // altitude and the rock floor's hasten-band.
+        const PROC_ISLAND_COUNT = 120;
+        const minX = 2400;
+        const maxX = 15600;
+        const minY = 1200;
+        const maxY = 5800;
+        for (let i = 0; i < PROC_ISLAND_COUNT; i++) {
             for (let attempt = 0; attempt < 80; attempt++) {
-                const rx = 800 + Math.random() * 4200;
-                const ry = 500 + Math.random() * 1500;
+                const rx = minX + Math.random() * (maxX - minX);
+                const ry = minY + Math.random() * (maxY - minY);
                 const rw = 600 + Math.random() * 600;
                 const rh = 90;
 
@@ -299,17 +313,19 @@ class Game {
                 }
 
                 if (ok) {
+                    // Tribe affiliation by horizontal proximity to a home island.
                     let team = 'neutral';
-                    if (rx < 1500) team = 'green';
-                    if (rx > 4500) team = 'blue';
+                    if (rx < 4500) team = 'green';
+                    else if (rx > 13500) team = 'blue';
                     this.islands.push(new Island(rx, ry, rw, rh, team));
                     break;
                 }
             }
         }
 
-        // Pigs
-        const pigCount = 5 + Math.floor(Math.random() * 6);
+        // Pigs — herds scattered among the islands. Density tracks the larger
+        // archipelago so wildlife still feels alive but never crowded.
+        const pigCount = 18 + Math.floor(Math.random() * 14);
         for (let i = 0; i < pigCount; i++) {
             const home = this.islands[Math.floor(Math.random() * this.islands.length)];
             const pig = new Pig(home.x + Math.random() * (home.w - 50), home.y - 60);
@@ -322,15 +338,20 @@ class Game {
     }
 
     _spawnInitialUnits() {
+        // Tripled starting populations to suit the 8x-area world. Each tribe
+        // begins with enough citizenry that the archipelago feels populated
+        // without trivialising the warrior cap.
+        const VILLAGERS_PER_TRIBE = 60;
+        const WARRIORS_PER_TRIBE  = 30;
         ['green', 'blue'].forEach(team => {
             const validIslands = this.islands.filter(i => i.team === team || i.team === 'neutral');
             let cV = 0, cW = 0;
-            while (cV < 20 || cW < 10) {
+            while (cV < VILLAGERS_PER_TRIBE || cW < WARRIORS_PER_TRIBE) {
                 const island = validIslands[Math.floor(Math.random() * validIslands.length)];
                 if (!island) continue;
                 const x = island.x + 30 + Math.random() * (island.w - 60);
                 const y = island.y - 50;
-                if (cV < 20) {
+                if (cV < VILLAGERS_PER_TRIBE) {
                     const v = new Villager(x, y, team);
                     v.homeIsland = island;
                     this.villagers.push(v);
