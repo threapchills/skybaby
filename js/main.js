@@ -3,18 +3,19 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js?v=6';
-import { ResourceManager } from './resources.js?v=6';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=6';
+import { InputHandler } from './input.js?v=7';
+import { ResourceManager } from './resources.js?v=7';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=7';
 import {
     Player, Island, Villager, Warrior, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
     RainCloud, VisualEffect, Totem,
     spawnBlood, spawnParticle, updateParticles, drawParticles,
     getAssetProgress,
-    WORLD_CEILING_Y, getWorldGroundY
-} from './entities.js?v=6';
-import { AudioManager } from './audio.js?v=6';
+    WORLD_CEILING_Y, getWorldGroundY,
+    TEAMS, TEAM_PALETTE, teamColor
+} from './entities.js?v=7';
+import { AudioManager } from './audio.js?v=7';
 
 /* DYNAMIC DIFFICULTY MANAGER (v3 — invisible)
    Design constraints learnt the hard way:
@@ -181,12 +182,19 @@ class Game {
 
         this.input.onScroll((delta) => this.resources.cycleSpell(delta > 0 ? 1 : -1));
 
-        // Spawn the chiefs just above their home islands so the camera frames
-        // a populated archipelago from the very first frame.
-        this.player = new Player(1200, 2200, 'green');
-        this.enemyChief = new Player(16500, 2200, 'blue');
-        this.enemyChief.mana = 100;
-        this.enemyChief.maxMana = 100;
+        // Four chiefs: the player (green) plus three rival AI chiefs (blue,
+        // yellow, red). Positioned above each tribe's home island, one per
+        // quadrant of the 18000 x 8000 world.
+        this.player      = new Player(1200,  2200, 'green');
+        this.enemyChief  = new Player(16500, 2200, 'blue');
+        this.yellowChief = new Player(1200,  5000, 'yellow');
+        this.redChief    = new Player(16500, 5000, 'red');
+        for (const c of [this.enemyChief, this.yellowChief, this.redChief]) {
+            c.mana = 100; c.maxMana = 100;
+        }
+        // Shared chief list so islands can iterate during territory conversion.
+        this._allChiefs = [this.player, this.enemyChief, this.yellowChief, this.redChief];
+        this.player._allChiefs = this._allChiefs;
 
         this.islands = [];
         this.villagers = [];
@@ -282,20 +290,23 @@ class Game {
     }
 
     _generateWorld() {
-        // Home islands — anchors of the green and blue tribes. Scaled larger to
-        // suit the wider world. People still look like specks against them.
-        this.islands.push(new Island(600, 2700, 1500, 100, 'green'));
+        // Four home islands, one per quadrant of the world. Green top-left,
+        // blue top-right, yellow bottom-left, red bottom-right.
+        this.islands.push(new Island(600,   2700, 1500, 100, 'green'));
         this.islands.push(new Island(15900, 2700, 1500, 100, 'blue'));
+        this.islands.push(new Island(600,   5500, 1500, 100, 'yellow'));
+        this.islands.push(new Island(15900, 5500, 1500, 100, 'red'));
 
-        // Procedural archipelago. Target density: ~120 islands across the
-        // 18000-wide world (was 30 across 6000-wide, so similar per-pixel
-        // density). Procedural altitude band sits between the home islands'
-        // altitude and the rock floor's hasten-band.
+        // Procedural archipelago across the full world. Tribe affiliation is
+        // assigned by proximity to the nearest home island — anything outside
+        // a tribe's "halo" radius is neutral (contested territory).
         const PROC_ISLAND_COUNT = 120;
         const minX = 2400;
         const maxX = 15600;
         const minY = 1200;
         const maxY = 5800;
+        const HALO = 4500; // distance from home island within which an island claims that team
+        const homes = this.islands.slice(0, 4); // the four homes we just pushed
         for (let i = 0; i < PROC_ISLAND_COUNT; i++) {
             for (let attempt = 0; attempt < 80; attempt++) {
                 const rx = minX + Math.random() * (maxX - minX);
@@ -313,10 +324,14 @@ class Game {
                 }
 
                 if (ok) {
-                    // Tribe affiliation by horizontal proximity to a home island.
                     let team = 'neutral';
-                    if (rx < 4500) team = 'green';
-                    else if (rx > 13500) team = 'blue';
+                    let bestD = HALO;
+                    for (const h of homes) {
+                        const dx = (h.x + h.w * 0.5) - (rx + rw * 0.5);
+                        const dy = (h.y + h.h * 0.5) - (ry + rh * 0.5);
+                        const d = Math.sqrt(dx * dx + dy * dy);
+                        if (d < bestD) { bestD = d; team = h.team; }
+                    }
                     this.islands.push(new Island(rx, ry, rw, rh, team));
                     break;
                 }
@@ -338,15 +353,16 @@ class Game {
     }
 
     _spawnInitialUnits() {
-        // Tripled starting populations to suit the 8x-area world. Each tribe
-        // begins with enough citizenry that the archipelago feels populated
-        // without trivialising the warrior cap.
-        const VILLAGERS_PER_TRIBE = 60;
-        const WARRIORS_PER_TRIBE  = 30;
-        ['green', 'blue'].forEach(team => {
+        // Four tribes, each with a healthy starting population so the
+        // archipelago hums from the first frame.
+        const VILLAGERS_PER_TRIBE = 45;
+        const WARRIORS_PER_TRIBE  = 22;
+        TEAMS.forEach(team => {
             const validIslands = this.islands.filter(i => i.team === team || i.team === 'neutral');
+            if (validIslands.length === 0) return;
             let cV = 0, cW = 0;
-            while (cV < VILLAGERS_PER_TRIBE || cW < WARRIORS_PER_TRIBE) {
+            let safety = 0;
+            while ((cV < VILLAGERS_PER_TRIBE || cW < WARRIORS_PER_TRIBE) && safety++ < 5000) {
                 const island = validIslands[Math.floor(Math.random() * validIslands.length)];
                 if (!island) continue;
                 const x = island.x + 30 + Math.random() * (island.w - 60);
@@ -431,15 +447,25 @@ class Game {
         // Weather
         this._updateWeather(dt);
 
+        // Per-frame snapshot used by warriors for separation + targeting.
+        // Built once and re-used so we don't allocate a fresh array per warrior.
+        const enemiesSnapshot = [this.player, this.enemyChief, this.yellowChief, this.redChief, ...this.villagers];
+        const chiefByTeam = {
+            green:  this.player,
+            blue:   this.enemyChief,
+            yellow: this.yellowChief,
+            red:    this.redChief,
+        };
+
         // Villagers
         for (let i = 0; i < this.villagers.length; i++) {
             const v = this.villagers[i];
             if (v.dead) continue;
             if (v instanceof Warrior) {
-                v.updateLogic(dt, this.islands, [this.player, this.enemyChief, ...this.villagers],
+                v.updateLogic(dt, this.islands, enemiesSnapshot,
                     (x, y, a, t, d) => this.projectiles.push(new Projectile(x, y, a, t, d)),
                     this.worldWidth, this.worldHeight, this.audio,
-                    v.team === 'green' ? this.player : this.enemyChief,
+                    chiefByTeam[v.team] || this.player,
                     this.villagers, this.walls, this.warState
                 );
             } else {
@@ -465,11 +491,14 @@ class Game {
             this.spawnTimer = 0;
         }
 
-        // Enemy chief
-        if (!this.enemyChief.dead) {
-            this.enemyChief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls);
-            this._updateEnemyAI(dt);
+        // Rival chiefs (blue, yellow, red) all run the same wandering AI inside
+        // Player.update(); we only need to call update + per-chief enemy AI here.
+        for (const chief of [this.enemyChief, this.yellowChief, this.redChief]) {
+            if (!chief.dead) {
+                chief.update(dt, null, null, this.worldWidth, this.worldHeight, this.islands, null, this.player, this.walls);
+            }
         }
+        if (!this.enemyChief.dead) this._updateEnemyAI(dt);
 
         // War Director
         this._updateWarDirector(dt);
@@ -477,13 +506,25 @@ class Game {
         // Particles (pooled)
         updateParticles(dt);
 
-        // Stats
-        const greenCount = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
-        const blueCount = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
-        const greenTents = this.islands.filter(i => i.hasTeepee && i.team === 'green').length;
-        const blueTents = this.islands.filter(i => i.hasTeepee && i.team === 'blue').length;
+        // Stats — counts per tribe so the HUD and difficulty director can read
+        // the four-team picture in one call.
+        const teamCounts = {};
+        const teamTents  = {};
+        for (const t of TEAMS) { teamCounts[t] = 0; teamTents[t] = 0; }
+        for (let i = 0; i < this.villagers.length; i++) {
+            const v = this.villagers[i];
+            if (!v.dead && teamCounts[v.team] !== undefined) teamCounts[v.team]++;
+        }
+        for (let i = 0; i < this.islands.length; i++) {
+            const isl = this.islands[i];
+            if (isl.hasTeepee && teamTents[isl.team] !== undefined) teamTents[isl.team]++;
+        }
+        const greenCount = teamCounts.green;
+        const blueCount  = teamCounts.blue;
+        const greenTents = teamTents.green;
+        const blueTents  = teamTents.blue;
 
-        this.resources.updateStats(greenTents, greenCount, blueTents, blueCount);
+        this.resources.updateStats(greenTents, greenCount, blueTents, blueCount, teamTents, teamCounts);
         this.resources.updateUI(this.player.hp, this.player.maxHp, this.enemyChief.hp, this.enemyChief.maxHp, dt);
 
         // Dynamic difficulty — invisible to the player. Updates only the
@@ -520,6 +561,7 @@ class Game {
     }
 
     _checkWinConditions(greenCount, blueCount) {
+        // Player respawn / defeat
         if (this.player.dead) {
             if (greenCount > 0) {
                 this.player.respawnTimer -= 0.016;
@@ -537,29 +579,38 @@ class Game {
             }
         }
 
-        if (this.enemyChief.dead) {
-            if (blueCount > 0) {
-                this.enemyChief.respawnTimer -= 0.016;
-                if (this.enemyChief.respawnTimer <= 0) {
-                    this.enemyChief.dead = false;
-                    this.enemyChief.hp = 100;
-                    const lastIsland = this.islands[this.islands.length - 1];
-                    this.enemyChief.x = lastIsland.x;
-                    this.enemyChief.y = lastIsland.y - 100;
+        // Each rival chief respawns at one of their tribe's islands while they
+        // still have a population. Once every rival tribe is wiped out, you win.
+        const rivals = [this.enemyChief, this.yellowChief, this.redChief];
+        let totalRivalPop = 0;
+        for (const chief of rivals) {
+            const pop = this.villagers.filter(v => v.team === chief.team && !v.dead).length;
+            totalRivalPop += pop;
+            if (chief.dead) {
+                if (pop > 0) {
+                    chief.respawnTimer -= 0.016;
+                    if (chief.respawnTimer <= 0) {
+                        chief.dead = false;
+                        chief.hp = 100;
+                        const home = this.islands.find(isl => isl.team === chief.team) || this.islands[this.islands.length - 1];
+                        chief.x = home.x;
+                        chief.y = home.y - 100;
+                    }
                 }
-            } else {
-                this.gameOver = true;
-                this.resources.showMessage("VICTORY! You have conquered the skies!", "#FFD700");
-                setTimeout(() => location.reload(), 4000);
             }
+        }
+        if (totalRivalPop === 0 && rivals.every(c => c.dead) && !this.gameOver) {
+            this.gameOver = true;
+            this.resources.showMessage("VICTORY! You have conquered the skies!", "#FFD700");
+            setTimeout(() => location.reload(), 4000);
         }
     }
 
     _updateTotemLogic(dt) {
-        // Reset counts
+        // Reset per-team counts on every island ahead of this tick's census.
         for (let i = 0; i < this.islands.length; i++) {
-            this.islands[i].greenCount = 0;
-            this.islands[i].blueCount = 0;
+            const isl = this.islands[i];
+            for (const t of TEAMS) isl[t + 'Count'] = 0;
         }
 
         // Census
@@ -578,17 +629,17 @@ class Game {
             }
 
             if (v.homeIsland && this.islands.includes(v.homeIsland)) {
-                if (v.team === 'green') v.homeIsland.greenCount++;
-                else if (v.team === 'blue') v.homeIsland.blueCount++;
+                const key = v.team + 'Count';
+                if (key in v.homeIsland) v.homeIsland[key]++;
             }
         }
 
-        // Spawn totems
+        // Spawn totems — once a tribe's local population on an island passes
+        // the threshold, plant a totem to mark that territory.
         for (let i = 0; i < this.islands.length; i++) {
             const island = this.islands[i];
-            for (let t = 0; t < 2; t++) {
-                const team = t === 0 ? 'green' : 'blue';
-                const count = team === 'green' ? island.greenCount : island.blueCount;
+            for (const team of TEAMS) {
+                const count = island[team + 'Count'] || 0;
                 if (count > 10) {
                     const hasTotem = this.totems.some(tot =>
                         tot.team === team &&
@@ -603,7 +654,7 @@ class Game {
             }
         }
 
-        // Collapse totems
+        // Collapse totems whose tribe has been driven off the island.
         for (let i = this.totems.length - 1; i >= 0; i--) {
             const t = this.totems[i];
             const island = this.islands.find(isl =>
@@ -611,7 +662,7 @@ class Game {
                 t.y >= isl.y - 150 && t.y <= isl.y + isl.h + 50
             );
             if (island) {
-                const count = t.team === 'green' ? island.greenCount : island.blueCount;
+                const count = island[t.team + 'Count'] || 0;
                 if (count < 5) { t.active = false; this.totems.splice(i, 1); }
             } else {
                 this.totems.splice(i, 1);
@@ -761,10 +812,16 @@ class Game {
                 this.world.camera.setZoom(0.6);
             }
         } else if (this.warState === 'ATTACK') {
+            // End the attack phase if any tribe is reduced below a viable
+            // fighting strength — too many corpses, time to rebuild.
             const gc = this.villagers.filter(v => v.team === 'green' && !v.dead).length;
-            const bc = this.villagers.filter(v => v.team === 'blue' && !v.dead).length;
-
-            if (this.warTimer > 60 || gc < 3 || bc < 3) {
+            let weakestRival = Infinity;
+            for (const t of TEAMS) {
+                if (t === 'green') continue;
+                const c = this.villagers.filter(v => v.team === t && !v.dead).length;
+                if (c < weakestRival) weakestRival = c;
+            }
+            if (this.warTimer > 60 || gc < 3 || weakestRival < 3) {
                 this.warState = 'BUILD';
                 this.warTimer = 0;
                 this.resources.showMessage("RETREAT & REBUILD", "#00FF00");
@@ -861,7 +918,8 @@ class Game {
 
                 for (let i = 0; i < this.villagers.length; i++) {
                     const v = this.villagers[i];
-                    if (v.team !== 'green' && !v.dead && v.onGround) {
+                    // Quake hits anything that isn't on the player's team.
+                    if (v.team !== this.player.team && !v.dead && v.onGround) {
                         v.vy = -1000;
                         v.hp -= 50;
                         spawnBlood(v.x, v.y, '#8B4513', 8);
@@ -932,22 +990,19 @@ class Game {
             p.update(dt, this.walls);
             let hitSomething = false;
 
-            // Hit enemy chief
-            if (p.team === 'green' && !this.enemyChief.dead && this._checkHit(p, this.enemyChief)) {
-                spawnBlood(p.x, p.y);
-                this.enemyChief.hp -= p.damage;
-                hitSomething = true;
-                this.audio.play('hit', 0.4, 0.3);
-                if (this.enemyChief.hp <= 0) this._killChief(this.enemyChief);
-            }
-
-            // Hit player
-            if (p.team === 'blue' && !this.player.dead && this._checkHit(p, this.player)) {
-                spawnBlood(p.x, p.y);
-                this.player.hp -= p.damage;
-                hitSomething = true;
-                this.audio.play('hit', 0.4, 0.3);
-                if (this.player.hp <= 0) this._killChief(this.player);
+            // Any projectile can hit any rival chief — four-tribe warfare,
+            // free-for-all targeting.
+            for (const chief of this._allChiefs) {
+                if (!chief || chief.dead) continue;
+                if (chief.team === p.team) continue;
+                if (this._checkHit(p, chief)) {
+                    spawnBlood(p.x, p.y);
+                    chief.hp -= p.damage;
+                    hitSomething = true;
+                    this.audio.play('hit', 0.4, 0.3);
+                    if (chief.hp <= 0) this._killChief(chief);
+                    break;
+                }
             }
 
             // Hit villagers
@@ -961,7 +1016,7 @@ class Game {
                     if (v.hp <= 0) {
                         v.dead = true;
                         spawnBlood(v.x, v.y);
-                        if (p.team === 'green') this.difficulty.notePlayerKill();
+                        if (p.team === this.player.team) this.difficulty.notePlayerKill();
                     }
                 }
             }
@@ -997,12 +1052,12 @@ class Game {
                 }
             }
 
-            // Hit chiefs
-            if (f.team === 'green' && !this.enemyChief.dead && this._checkHit(f, this.enemyChief)) {
-                this.enemyChief.hp -= 40 * dt;
-            }
-            if (f.team === 'blue' && !this.player.dead && this._checkHit(f, this.player)) {
-                this.player.hp -= 40 * dt;
+            // Hit any rival chief — fireballs are equal-opportunity destroyers.
+            for (const chief of this._allChiefs) {
+                if (!chief || chief.dead || chief.team === f.team) continue;
+                if (this._checkHit(f, chief)) {
+                    chief.hp -= 40 * dt;
+                }
             }
 
             // Insta-kill villagers
@@ -1011,7 +1066,7 @@ class Game {
                 if (!v.dead && v.team !== f.team && this._checkHit(f, v)) {
                     v.dead = true;
                     spawnBlood(v.x, v.y, '#FF4500', 15);
-                    if (f.team === 'green') {
+                    if (f.team === this.player.team) {
                         this.resources.addSouls(5);
                         this.difficulty.notePlayerKill();
                     }
@@ -1039,15 +1094,16 @@ class Game {
         this.world.camera.setZoom(1.2);
         this.impactFrameTimer = 0.15;
 
-        if (chief === this.enemyChief) {
-            this.resources.replenishAll();
-            // Felling the chief is a strong dominance signal
-            this.difficulty.notePlayerKill();
-            this.difficulty.notePlayerKill();
-            this.difficulty.notePlayerKill();
-        } else {
+        if (chief === this.player) {
             // Player chief fell — bias the system toward easing up
             this.difficulty.notePlayerDeath();
+        } else {
+            // A rival chief fell — strong dominance signal for the difficulty
+            // director.
+            this.resources.replenishAll();
+            this.difficulty.notePlayerKill();
+            this.difficulty.notePlayerKill();
+            this.difficulty.notePlayerKill();
         }
     }
 
@@ -1100,21 +1156,21 @@ class Game {
     }
 
     _spawnVillagers() {
-        if (this.villagers.length >= 500) return;
-        // Spawn batch is at the original baseline. The only nudges are:
-        //   - +1 to PLAYER batch when the player is clearly struggling.
-        //   - +1 to ENEMY batch only when the player is clearly dominating.
-        // Both gated by deadband — equilibrium games are completely untouched.
+        // Cap raised modestly since the world is now 8x larger.
+        if (this.villagers.length >= 800) return;
+        // Spawn batch baseline. Difficulty director may add +1 to the player's
+        // batch when struggling, +1 to "the enemy" (aggregated rivals) when
+        // dominating. Other tribes spawn at the baseline rate.
         const helpPlayer = this.difficulty.shouldBoostPlayerSpawn();
         const helpEnemy  = this.difficulty.shouldBoostEnemySpawn();
 
         for (let i = 0; i < this.islands.length; i++) {
             const island = this.islands[i];
-            if (island.hasTeepee && (island.team === 'green' || island.team === 'blue') && Math.random() < 0.6) {
+            if (island.hasTeepee && TEAM_PALETTE[island.team] && Math.random() < 0.6) {
                 let batchSize = 3 + Math.floor(Math.random() * 3);
-                if (island.team === 'green' && helpPlayer) batchSize += 1;
-                if (island.team === 'blue'  && helpEnemy)  batchSize += 1;
-                for (let b = 0; b < batchSize && this.villagers.length < 500; b++) {
+                if (island.team === this.player.team && helpPlayer) batchSize += 1;
+                if (island.team !== this.player.team && helpEnemy)  batchSize += 1;
+                for (let b = 0; b < batchSize && this.villagers.length < 800; b++) {
                     const spawnX = island.x + 30 + Math.random() * (island.w - 60);
                     const unit = Math.random() < 0.4
                         ? new Warrior(spawnX, island.y - 40, island.team)
@@ -1122,7 +1178,7 @@ class Game {
                     unit.homeIsland = island;
                     this.villagers.push(unit);
                 }
-                if (this.villagers.length >= 500) break;
+                if (this.villagers.length >= 800) break;
             }
         }
     }
@@ -1694,15 +1750,12 @@ class Game {
         ctx.arc(cx, cy, radius - 0.5, 0, Math.PI * 2);
         ctx.clip();
 
-        // Islands — small dots at their canonical altitude.
+        // Islands — small dots at their canonical altitude, coloured by tribe.
         for (let i = 0; i < this.islands.length; i++) {
             const island = this.islands[i];
             const p = this._projectMinimap(island.x + island.w * 0.5, island.y, cx, cy, radius);
-            const teamColor =
-                island.team === 'green' ? 'rgba(120, 220, 130, 0.95)' :
-                island.team === 'blue'  ? 'rgba(120, 180, 230, 0.95)' :
-                                          'rgba(180, 180, 190, 0.75)';
-            ctx.fillStyle = teamColor;
+            const pal = TEAM_PALETTE[island.team];
+            ctx.fillStyle = pal ? pal.hex : 'rgba(180,180,190,0.7)';
             ctx.beginPath();
             ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
             ctx.fill();
@@ -1714,15 +1767,16 @@ class Game {
             const v = this.villagers[i];
             if (v.dead) continue;
             const p = this._projectMinimap(v.x, v.y, cx, cy, radius);
-            ctx.fillStyle = v.team === 'green' ? '#9ce088' : '#9cc8ee';
+            ctx.fillStyle = teamColor(v.team, 'light');
             ctx.fillRect(p.x - 0.7, p.y - 0.7, 1.6, 1.6);
         }
         ctx.globalAlpha = 1;
 
-        // Enemy chief — small but distinct ruby pip.
-        if (this.enemyChief && !this.enemyChief.dead) {
-            const ep = this._projectMinimap(this.enemyChief.x, this.enemyChief.y, cx, cy, radius);
-            ctx.fillStyle = '#ff6868';
+        // Rival chiefs — distinct pips in their tribe colour.
+        for (const chief of [this.enemyChief, this.yellowChief, this.redChief]) {
+            if (!chief || chief.dead) continue;
+            const ep = this._projectMinimap(chief.x, chief.y, cx, cy, radius);
+            ctx.fillStyle = teamColor(chief.team, 'hex');
             ctx.beginPath();
             ctx.arc(ep.x, ep.y, 3.2, 0, Math.PI * 2);
             ctx.fill();

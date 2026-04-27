@@ -105,6 +105,77 @@ for (let i = 1; i <= 4; i++) {
     Assets.villagerBlue.push(vB);
 }
 
+// === FOUR-TEAM PALETTE ===
+// The two source tribes (green, blue) ship as pre-painted sprites.
+// Yellow is derived from green at runtime via a hue rotation; red from blue.
+// This keeps the asset pipeline cheap while doubling the tribe count.
+export const TEAMS = ['green', 'blue', 'yellow', 'red'];
+export const TEAM_PALETTE = {
+    green:  { display: 'GREEN',  hex: '#5fc070', light: '#9ce088', particle: '#90EE90', aura: '80,255,120',  glowSoft: '0,255,0',   chiefIs: 'player' },
+    blue:   { display: 'BLUE',   hex: '#5fa0c0', light: '#9cc8ee', particle: '#ADD8E6', aura: '80,180,255',  glowSoft: '0,150,255', chiefIs: 'enemy'  },
+    yellow: { display: 'YELLOW', hex: '#e6c044', light: '#ffe080', particle: '#FFE39C', aura: '255,210,80',  glowSoft: '255,200,0', chiefIs: null     },
+    red:    { display: 'RED',    hex: '#c04444', light: '#ee8888', particle: '#FF8888', aura: '255,90,90',   glowSoft: '255,40,40', chiefIs: null     },
+};
+// Hue rotations (in degrees) applied to the GREEN sprite to get YELLOW
+// and to the BLUE sprite to get RED. Empirical values that read clearly.
+const TEAM_HUE_FROM = {
+    yellow: { source: 'green', deg: -55 },
+    red:    { source: 'blue',  deg: 130 },
+};
+
+// Per-team sprite map. The two source teams point at the existing assets;
+// derived teams get filled in once their source images decode.
+Assets.byTeam = {
+    green:  { player: Assets.playerGreen, warrior: Assets.warriorGreen, villagers: Assets.villagerGreen, teepee: Assets.teepeeGreen },
+    blue:   { player: Assets.playerBlue,  warrior: Assets.warriorBlue,  villagers: Assets.villagerBlue,  teepee: Assets.teepeeBlue  },
+    yellow: { player: null, warrior: null, villagers: [null, null, null, null], teepee: null },
+    red:    { player: null, warrior: null, villagers: [null, null, null, null], teepee: null },
+};
+
+function _tintImage(srcImg, hueDeg) {
+    if (!srcImg || !(srcImg.complete && srcImg.naturalWidth > 0)) return null;
+    const c = document.createElement('canvas');
+    c.width = srcImg.naturalWidth;
+    c.height = srcImg.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.filter = `hue-rotate(${hueDeg}deg) saturate(1.15)`;
+    ctx.drawImage(srcImg, 0, 0);
+    // Mark canvas as "complete" so imgReady-style checks pass — drawImage
+    // accepts canvases directly.
+    c.complete = true;
+    c.naturalWidth = c.width;
+    return c;
+}
+
+function _onSourceLoad(img, cb) {
+    if (img.complete && img.naturalWidth > 0) { cb(); return; }
+    img.addEventListener('load', cb);
+}
+
+// Wire up derived team sprites. Each fires once its source image is decoded.
+for (const team of ['yellow', 'red']) {
+    const meta = TEAM_HUE_FROM[team];
+    const src = Assets.byTeam[meta.source];
+    _onSourceLoad(src.player,  () => { Assets.byTeam[team].player  = _tintImage(src.player,  meta.deg); });
+    _onSourceLoad(src.warrior, () => { Assets.byTeam[team].warrior = _tintImage(src.warrior, meta.deg); });
+    _onSourceLoad(src.teepee,  () => { Assets.byTeam[team].teepee  = _tintImage(src.teepee,  meta.deg); });
+    src.villagers.forEach((vimg, idx) => {
+        _onSourceLoad(vimg, () => { Assets.byTeam[team].villagers[idx] = _tintImage(vimg, meta.deg); });
+    });
+}
+
+export function teamSprite(slot, team, variantIdx) {
+    const bucket = Assets.byTeam[team];
+    if (!bucket) return null;
+    if (slot === 'villagers') return bucket.villagers[variantIdx % bucket.villagers.length] || bucket.villagers[0];
+    return bucket[slot];
+}
+
+export function teamColor(team, channel) {
+    const p = TEAM_PALETTE[team] || TEAM_PALETTE.green;
+    return p[channel] || p.hex;
+}
+
 // Mystic head pool — every chief is crowned by a random spirit head.
 const HEAD_FILES = [
     'air_heads_3.png', 'air_heads_4.png', 'air_heads_5.png',
@@ -401,7 +472,9 @@ export class Island extends Entity {
         this.vx = 0; this.vy = 0;
         this.friction = 0.92;
         this.mass = w * h;
+        // Per-team population on this island (used by main.js totem logic).
         this.greenCount = 0; this.blueCount = 0;
+        this.yellowCount = 0; this.redCount = 0;
 
         // Pre-built underside path for rendering efficiency
         this._undersidePath = null;
@@ -432,28 +505,25 @@ export class Island extends Entity {
             return;
         }
 
-        // Territory conversion
+        // Territory conversion — any chief whose team isn't already this island's
+        // is close enough to its teepee will flip the island. Generalised across
+        // all four tribes via the chiefs array passed in by the game loop.
         if (this.hasTeepee) {
             const tentX = this.x + this.w * 0.5;
             const tentY = this.y - 30;
             const range = 150;
-
-            if (player && !player.dead) {
-                const dx = (player.x + 20) - tentX;
-                const dy = (player.y + 20) - tentY;
-                if (dx * dx + dy * dy < range * range && this.team !== 'green') {
-                    this.team = 'green';
+            const chiefs = (player && player._allChiefs) ? player._allChiefs : null;
+            const list = chiefs || [player, enemyChief].filter(Boolean);
+            for (let ci = 0; ci < list.length; ci++) {
+                const chief = list[ci];
+                if (!chief || chief.dead) continue;
+                const dx = (chief.x + 20) - tentX;
+                const dy = (chief.y + 20) - tentY;
+                if (dx * dx + dy * dy < range * range && this.team !== chief.team) {
+                    this.team = chief.team;
                     this.conversionTimer = 2.0;
                     if (audio) audio.play('teepee', 0.6, 0.1);
-                }
-            }
-            if (enemyChief && !enemyChief.dead) {
-                const dx = (enemyChief.x + 20) - tentX;
-                const dy = (enemyChief.y + 20) - tentY;
-                if (dx * dx + dy * dy < range * range && this.team !== 'blue') {
-                    this.team = 'blue';
-                    this.conversionTimer = 2.0;
-                    if (audio) audio.play('teepee', 0.6, 0.1);
+                    break;
                 }
             }
         }
@@ -617,16 +687,16 @@ export class Island extends Entity {
         // Top grass surface band — sits ON TOP of the tileset for that crisp
         // emerald edge, team-tinted.
         const topGrad = ctx.createLinearGradient(0, sy - 4, 0, sy + 6);
-        if (this.team === 'green') {
-            topGrad.addColorStop(0, '#4CAF50');
-            topGrad.addColorStop(1, '#2E7D32');
-        } else if (this.team === 'blue') {
-            topGrad.addColorStop(0, '#42A5F5');
-            topGrad.addColorStop(1, '#1565C0');
-        } else {
-            topGrad.addColorStop(0, '#66BB6A');
-            topGrad.addColorStop(1, '#558B2F');
-        }
+        const _grassTints = {
+            green:  ['#4CAF50', '#2E7D32'],
+            blue:   ['#42A5F5', '#1565C0'],
+            yellow: ['#F5C842', '#C09015'],
+            red:    ['#E5524C', '#A01F1F'],
+            neutral:['#66BB6A', '#558B2F'],
+        };
+        const _gt = _grassTints[this.team] || _grassTints.neutral;
+        topGrad.addColorStop(0, _gt[0]);
+        topGrad.addColorStop(1, _gt[1]);
         ctx.fillStyle = topGrad;
         ctx.fillRect(sx, sy - 3, w, 6);
 
@@ -671,7 +741,7 @@ export class Island extends Entity {
         }
 
         // 6. Teepee (massive structure - people look tiny next to it)
-        const teepeeImg = (this.team === 'green') ? Assets.teepeeGreen : Assets.teepeeBlue;
+        const teepeeImg = teamSprite('teepee', this.team);
         if (imgReady(teepeeImg)) {
             const tpW = 200;
             const tpH = 200;
@@ -709,10 +779,9 @@ export class Island extends Entity {
             this._fireWorldY = this.y - fireH + 36 + fireH * 0.4;
         }
 
-        // Territory border glow
-        if (this.team === 'green' || this.team === 'blue') {
-            const glowColor = this.team === 'green' ? 'rgba(0,255,0,0.08)' : 'rgba(0,150,255,0.08)';
-            ctx.fillStyle = glowColor;
+        // Territory border glow — every owned tribe shows a faint band of its colour.
+        if (TEAM_PALETTE[this.team]) {
+            ctx.fillStyle = `rgba(${TEAM_PALETTE[this.team].glowSoft},0.08)`;
             ctx.fillRect(sx - 2, sy - 5, w + 4, 10);
         }
     }
@@ -904,12 +973,15 @@ export class Player extends Entity {
             if (input.keys.d) { this.vx += this.acceleration * dt; moving = true; }
             if (input.keys.space || input.keys.w) wantJump = true;
             if (input.keys.s) this.vy += 2000 * dt;
-        } else if (this.team === 'blue') {
+        } else {
+            // Every non-player chief (blue, yellow, red) runs the same wandering
+            // AI: pick a non-friendly island and beeline toward it, then pick a
+            // new one when the timer expires.
             moving = true;
             this.aiStateTimer -= dt;
             if (!this.aiTargetIsland || this.aiStateTimer <= 0) {
                 this.aiStateTimer = 5 + Math.random() * 5;
-                const targets = islands.filter(i => i.team !== 'blue');
+                const targets = islands.filter(i => i.team !== this.team);
                 this.aiTargetIsland = targets.length > 0
                     ? targets[Math.floor(Math.random() * targets.length)]
                     : islands[Math.floor(Math.random() * islands.length)];
@@ -953,10 +1025,14 @@ export class Player extends Entity {
                 this.isGrounded = false;
                 if (audio) audio.play('jump', 0.4, 0.1);
             } else if (this.team === 'green') {
+                // Player flight — full lift.
                 this.vy -= 1500 * dt;
                 if (this.vy < this.flyForce) this.vy = this.flyForce;
             } else {
-                this.vy -= 100 * dt;
+                // AI chiefs glide with reduced lift so they can still cross
+                // the larger world without dominating airspace.
+                this.vy -= 900 * dt;
+                if (this.vy < this.flyForce * 0.7) this.vy = this.flyForce * 0.7;
             }
         }
 
@@ -1040,7 +1116,7 @@ export class Player extends Entity {
             else if (el === 'water') aurColor = `rgba(80,180,255,${k * aurPulse})`;
             else                     aurColor = `rgba(220,220,255,${k * aurPulse})`;
         } else {
-            aurColor = this.team === 'green' ? `rgba(80,255,120,${0.22 * aurPulse})` : `rgba(80,180,255,${0.22 * aurPulse})`;
+            aurColor = `rgba(${teamColor(this.team, 'aura')},${0.22 * aurPulse})`;
         }
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -1076,16 +1152,16 @@ export class Player extends Entity {
         }
 
         // === BODY SPRITE with squash/stretch ===
-        const img = this.team === 'green' ? Assets.playerGreen : Assets.playerBlue;
+        const img = teamSprite('player', this.team);
         const sq = this._squash;
         const bodyW = 48 * (2 - sq);   // squash horizontally, stretch when squashed
         const bodyH = 48 * sq;
         const bodyX = sx - 4 - (bodyW - 48) * 0.5;
         const bodyY = drawY - 4 + (48 - bodyH);
-        if (imgReady(img)) {
+        if (img && (img.complete !== false) && (img.naturalWidth || img.width)) {
             ctx.drawImage(img, bodyX, bodyY, bodyW, bodyH);
         } else {
-            ctx.fillStyle = this.team === 'green' ? '#0a0' : '#06f';
+            ctx.fillStyle = teamColor(this.team, 'hex');
             ctx.fillRect(sx, drawY, this.w, this.h);
         }
 
@@ -1117,7 +1193,7 @@ export class Player extends Entity {
             spawnParticle(
                 this.x + this.w * 0.5 + (Math.random() - 0.5) * 16,
                 this.y + this.h * 0.9,
-                this.team === 'green' ? '#7CFF95' : '#7CD0FF',
+                teamColor(this.team, 'light'),
                 10, 0.4, 4 + Math.random() * 3, 'glow'
             );
         }
@@ -1253,12 +1329,12 @@ export class Villager extends Entity {
             ctx.fill();
         }
 
-        const variants = this.team === 'green' ? Assets.villagerGreen : Assets.villagerBlue;
+        const variants = (Assets.byTeam[this.team] && Assets.byTeam[this.team].villagers) || Assets.villagerGreen;
         const img = variants[this.variantIndex];
-        if (imgReady(img)) {
+        if (img && (img.complete !== false) && (img.naturalWidth || img.width)) {
             ctx.drawImage(img, sx, sy, this.w, this.h);
         } else {
-            ctx.fillStyle = this.team === 'green' ? '#0a0' : '#06f';
+            ctx.fillStyle = teamColor(this.team, 'hex');
             ctx.fillRect(sx, sy, this.w, this.h);
         }
     }
@@ -1291,11 +1367,11 @@ export class Warrior extends Villager {
 
         drawShadow(ctx, sx, sy + this.h, this.w);
 
-        const img = this.team === 'green' ? Assets.warriorGreen : Assets.warriorBlue;
-        if (imgReady(img)) {
+        const img = teamSprite('warrior', this.team);
+        if (img && (img.complete !== false) && (img.naturalWidth || img.width)) {
             ctx.drawImage(img, sx, sy, this.w, this.h);
         } else {
-            ctx.fillStyle = this.team === 'green' ? '#0a0' : '#06f';
+            ctx.fillStyle = teamColor(this.team, 'hex');
             ctx.fillRect(sx, sy, this.w, this.h);
         }
     }
@@ -1578,7 +1654,7 @@ export class Projectile extends Entity {
         this.trailTimer -= dt;
         if (this.trailTimer <= 0) {
             this.trailTimer = 0.04;
-            spawnParticle(this.x, this.y, this.team === 'green' ? '#90EE90' : '#ADD8E6', 5, 0.3, 3, 'trail');
+            spawnParticle(this.x, this.y, teamColor(this.team, 'particle'), 5, 0.3, 3, 'trail');
         }
 
         // Wall collision
@@ -1601,7 +1677,7 @@ export class Projectile extends Entity {
         if (!rect.onScreen) return;
 
         // Motion-blur streak — short additive line behind the arrow
-        const trailColor = this.team === 'green' ? 'rgba(170,255,180,0.55)' : 'rgba(170,220,255,0.55)';
+        const trailColor = `rgba(${teamColor(this.team, 'aura')},0.55)`;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.strokeStyle = trailColor;
@@ -1621,7 +1697,7 @@ export class Projectile extends Entity {
         if (imgReady(Assets.projectile)) {
             ctx.drawImage(Assets.projectile, 0, 0, this.w, this.h);
         } else {
-            ctx.fillStyle = this.team === 'green' ? '#0f0' : '#0af';
+            ctx.fillStyle = teamColor(this.team, 'hex');
             ctx.fillRect(0, 0, this.w, this.h);
         }
         ctx.restore();
@@ -1812,7 +1888,7 @@ export class RainCloud extends Entity {
         const rect = camera.getScreenRect(this.x, this.y, this.w, this.h);
         if (!rect.onScreen) return;
 
-        const color = this.team === 'green' ? 'rgba(200,200,255,0.35)' : 'rgba(100,0,100,0.35)';
+        const color = `rgba(${teamColor(this.team, 'aura')},0.35)`;
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(rect.x, rect.y, 40, 0, Math.PI * 2);
@@ -1909,7 +1985,7 @@ export class Totem {
         const pulse = 0.5 + Math.sin(this._pulseTime) * 0.2;
 
         // Aura ring
-        const auraColor = this.team === 'green' ? `rgba(0,255,0,${pulse * 0.06})` : `rgba(0,150,255,${pulse * 0.06})`;
+        const auraColor = `rgba(${teamColor(this.team, 'glowSoft')},${pulse * 0.06})`;
         ctx.fillStyle = auraColor;
         ctx.beginPath();
         ctx.arc(sx, sy - 60, this.range * 0.3, 0, Math.PI * 2);
@@ -1919,13 +1995,13 @@ export class Totem {
         if (imgReady(Assets.totem)) {
             ctx.drawImage(Assets.totem, sx - 30, sy - 120, 60, 120);
         } else {
-            ctx.fillStyle = this.team === 'green' ? '#AAFF00' : '#00AAFF';
+            ctx.fillStyle = teamColor(this.team, 'light');
             ctx.fillRect(sx - 15, sy - 120, 30, 120);
         }
 
         // Top glow
         ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = this.team === 'green' ? `rgba(0,255,0,${pulse * 0.3})` : `rgba(0,150,255,${pulse * 0.3})`;
+        ctx.fillStyle = `rgba(${teamColor(this.team, 'glowSoft')},${pulse * 0.3})`;
         ctx.beginPath();
         ctx.arc(sx, sy - 115, 12, 0, Math.PI * 2);
         ctx.fill();

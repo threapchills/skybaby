@@ -84,11 +84,26 @@ export class ResourceManager {
 
     spendAir(dt) { return true; }
 
-    updateStats(gTents, gPop, bTents, bPop) {
+    updateStats(gTents, gPop, bTents, bPop, teamTents, teamPops) {
         this.greenTents = gTents;
         this.greenPop = gPop;
-        this.blueTents = bTents;
-        this.bluePop = bPop;
+        // The HUD has one "enemy" slot. Sum every non-player tribe's tents and
+        // population into it so the four-tribe world is legible at a glance.
+        if (teamTents && teamPops) {
+            let rTents = 0, rPop = 0;
+            for (const t of Object.keys(teamTents)) {
+                if (t === 'green') continue;
+                rTents += teamTents[t] || 0;
+                rPop  += teamPops[t]  || 0;
+            }
+            this.blueTents = rTents;
+            this.bluePop = rPop;
+            this.teamTents = teamTents;
+            this.teamPops = teamPops;
+        } else {
+            this.blueTents = bTents;
+            this.bluePop = bPop;
+        }
     }
 
     updateUI(playerHp, playerMaxHp, enemyHp, enemyMaxHp, dt) {

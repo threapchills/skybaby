@@ -2,11 +2,11 @@
 
 Snapshot for the next session. Update at the end of every working session.
 
-**Last updated:** 2026-04-27 (steps 1 & 2 complete)
+**Last updated:** 2026-04-27 (steps 1, 2, 3 complete)
 
 ## Current focus
 
-Steps 1 & 2 complete and pushed. Step 3 (four teams via hue-shift) is next.
+Steps 1, 2, 3 all complete and pushed. Step 4 (Priests + Tokobus combat triangle) is next.
 
 ## Recent context
 
@@ -24,12 +24,30 @@ Steps 1 & 2 complete and pushed. Step 3 (four teams via hue-shift) is next.
 
 ## Next action
 
-Begin step 3: four teams via hue-shift. Add Yellow and Red alongside Blue and Green. Tasks:
-1. Generalise team IDs and the alliance/enmity matrix for N teams (currently hard-coded `green`/`blue`/`neutral` — search for `team === 'green'` and `team === 'blue'` to find every dependency).
-2. Hue-shift the existing `villager_green_*.png`, `warrior_green.png`, `player_green.png`, `teepee_green.png`, etc. into yellow + red variants at runtime via offscreen canvas (no new assets needed).
-3. Spawn allocation: split procedural islands across four tribes by quadrant or some other partition; add two more home islands for yellow + red.
-4. Update HUD (currently shows "Player Tribe" + "Enemy Tribe") for four-tribe view.
-5. Update minimap dot colours.
+Begin step 4: Priests and Tokobus.
+
+**Combat triangle (per Mike's brief):**
+- Priests can convert Warriors and Tokobus. Cannot convert Peasants.
+- Tokobus can kill Warriors and Peasants. Cannot harm Priests or other Tokobus.
+- Warriors can shoot Peasants and other Warriors. Cannot harm Tokobus or Priests.
+- Peasants are non-combatant.
+
+**Tokobu population gating:** roughly 1 Tokobu per 100 humans per tribe, only above population ≥ 100.
+
+**Sprite assets staged in `assets/sprites/`:** `Tokobu-green-1.png`, `Tokobu-green-2.png`, `hooded_mystic.png`, etc. Hue-shift the green Tokobu variants for yellow + red just like step 3 did with villagers.
+
+## Step 3 notes
+
+- Yellow is hue-rotated -55° from green; red is hue-rotated +130° from blue. Empirical, can be tuned in `entities.js` `TEAM_HUE_FROM`.
+- AI chiefs (blue, yellow, red) all run the same wandering pickup-and-target AI; only the blue chief gets aim-and-fire shooting (in `_updateEnemyAI`). Yellow and red are passive contributors for now — bumping them to active shooting is a follow-up.
+- HUD aggregates blue+yellow+red into the existing "RIVAL TRIBES" stat box; the minimap is the place to read the four-tribe picture at a glance.
+- Cache-bust now `?v=7`.
+
+## Performance follow-up (mostly addressed in step 3)
+
+- ✅ Per-frame `enemiesSnapshot` array now built once per tick rather than per warrior.
+- Still O(n²) inside warrior separation/targeting; bucket spatial grid is the next lever if we see jank at 400+ units.
+- 120 islands × per-island grass/tree/render cost. Camera culling already skips off-screen islands.
 
 ## Performance follow-up (deferred, watch for jank)
 
