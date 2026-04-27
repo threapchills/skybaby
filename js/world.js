@@ -8,7 +8,7 @@
      - Solid rock/soil cross-section at the world's bottom (topology v3)
 */
 
-import { getWorldGroundY, getWorldGroundThickness, WORLD_CEILING_Y } from './entities.js?v=10';
+import { getWorldGroundY, getWorldGroundThickness, WORLD_CEILING_Y } from './entities.js?v=11';
 
 export class Camera {
     constructor(viewportWidth, viewportHeight, worldWidth, worldHeight) {
@@ -209,13 +209,18 @@ class ParallaxLayer {
         ctx.globalAlpha = prevAlpha * a;
 
         const windOffset = (Date.now() / 1000) * this.autoScrollSpeed;
-        const totalX = -(camera.x * this.speed) - windOffset;
         const imgW = this._feathered.width;
-        const xPos = ((totalX % imgW) + imgW) % imgW - imgW;
+        const totalX = -(camera.x * this.speed) - windOffset;
 
-        const needed = Math.ceil(camera.effectiveW / imgW) + 2;
-        for (let i = 0; i < needed; i++) {
-            ctx.drawImage(this._feathered, xPos + imgW * i, this.yOffset);
+        // Tile across an inflated horizontal range so a fractional zoom or
+        // a shake-rotation can't expose a tile boundary inside the visible
+        // frame. Pads 1 image-width on each side.
+        const viewLeft  = -imgW;
+        const viewRight = camera.effectiveW + imgW;
+        const xBase = ((totalX % imgW) + imgW) % imgW - imgW;
+        for (let x = xBase; x < viewRight; x += imgW) {
+            if (x + imgW < viewLeft) continue;
+            ctx.drawImage(this._feathered, x, this.yOffset);
         }
         ctx.globalAlpha = prevAlpha;
     }
@@ -244,26 +249,33 @@ class SkyVariant {
         if (!this.loaded) return;
         const ih = this.image.height;
         const iw = this.image.width;
-        // Scale up so we mostly see the painted top half of the image — the
-        // horizon line that lives in the lower portion stays below the viewport.
-        const scale = (camera.effectiveH * 1.7) / ih;
+        // Scale up so the painting comfortably overshoots the viewport in
+        // every direction. 2.0x viewport height gives us a fat vertical
+        // buffer so a wedge of canvas can never show through during camera
+        // shake/rotation or at extreme aspect ratios.
+        const scale = (camera.effectiveH * 2.0) / ih;
         const sw = iw * scale;
         const sh = ih * scale;
-        // Anchor sky a little above the viewport top — view sits in the
-        // upper third of the painting (clouds), well clear of the horizon.
-        const yPos = -sh * 0.02;
+        // Centre the painted sky vertically on the viewport so equal margins
+        // of buffer sit above and below — full bleed at every zoom.
+        const yPos = (camera.effectiveH - sh) * 0.5;
         const speed = 0.03;
 
+        // Cover a touch wider than the viewport (5% on each side) so the
+        // horizontal seam between mirrored tiles never sits inside the visible
+        // frame, even during shake-rotation or fractional zoom levels.
+        const padX = camera.effectiveW * 0.05;
+        const viewLeft  = -padX;
+        const viewRight = camera.effectiveW + padX;
+
         const shift = -(camera.x * speed);
-        const firstTileIdx = Math.floor(-shift / sw);
-        const firstTileX = firstTileIdx * sw + shift;
-        const needed = Math.ceil(camera.effectiveW / sw) + 2;
+        const firstTileIdx = Math.floor((viewLeft - shift) / sw);
+        const lastTileIdx  = Math.ceil((viewRight - shift) / sw);
 
         const prev = ctx.globalAlpha;
         ctx.globalAlpha = prev * (alpha !== undefined ? alpha : 1);
-        for (let i = 0; i < needed; i++) {
-            const tileIdx = firstTileIdx + i;
-            const tileX = firstTileX + i * sw;
+        for (let tileIdx = firstTileIdx; tileIdx <= lastTileIdx; tileIdx++) {
+            const tileX = tileIdx * sw + shift;
             const flip = (((tileIdx % 2) + 2) % 2) === 1;
             if (flip) {
                 ctx.save();
@@ -387,9 +399,20 @@ export class World {
         const ew = cam.effectiveW;
         const eh = cam.effectiveH;
 
+        // Safety inflation. The drawBackground pass runs inside a context
+        // that's been scaled (zoom) AND optionally rotated (camera shake).
+        // A naked (0,0,ew,eh) rect rotates around its centre and exposes
+        // wedges of canvas-clear at the corners, which read as boxes.
+        // Painting every fill 8% wider/taller keeps coverage past any
+        // realistic shake angle and any sub-pixel rounding.
+        const padX = ew * 0.08;
+        const padY = eh * 0.08;
+        const fx = -padX, fy = -padY;
+        const fw = ew + padX * 2, fh = eh + padY * 2;
+
         // 1. Procedural sky gradient (under everything)
         const nightBlend = Math.max(0, -Math.sin(dayProgress || 0)) * 0.7;
-        const grad = ctx.createLinearGradient(0, 0, 0, eh);
+        const grad = ctx.createLinearGradient(0, fy, 0, fy + fh);
         const tint = this.skyMeta.tint;
 
         if (nightBlend < 0.3) {
@@ -403,7 +426,7 @@ export class World {
             grad.addColorStop(1, `rgb(${Math.floor(tint.r*0.4)},${Math.floor(tint.g*0.4)},${Math.floor(tint.b*0.5)})`);
         }
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, ew, eh);
+        ctx.fillRect(fx, fy, fw, fh);
 
         // 2. Painted sky variant (full canvas, very slow parallax)
         const dayDim = 1 - nightBlend * 0.55;
@@ -416,24 +439,25 @@ export class World {
         // 4. Background fg cloud bank (still behind entities)
         this.fgCloudsBack.draw(ctx, cam, winterDim);
 
-        // 5. Distant horizon haze — gradient spans the full canvas so its
-        // rectangle has no visible top edge. Stops are positioned so the
-        // haze starts fading in around 55% down and tops out at the bottom.
-        const horizonGrad = ctx.createLinearGradient(0, 0, 0, eh);
+        // 5. Distant horizon haze — gradient spans the inflated canvas so
+        // its rectangle has no visible top edge. Stops are positioned so
+        // the haze starts fading in around 55% down and tops out at the
+        // bottom.
+        const horizonGrad = ctx.createLinearGradient(0, fy, 0, fy + fh);
         horizonGrad.addColorStop(0.00, 'rgba(0,0,0,0)');
         horizonGrad.addColorStop(0.55, 'rgba(0,0,0,0)');
         horizonGrad.addColorStop(1.00, `rgba(${tint.r},${tint.g},${tint.b},0.45)`);
         ctx.fillStyle = horizonGrad;
-        ctx.fillRect(0, 0, ew, eh);
+        ctx.fillRect(fx, fy, fw, fh);
 
-        // 6. High-altitude haze — same trick: full-canvas rect, gradient
+        // 6. High-altitude haze — same trick, inflated rect, gradient
         // controls visibility, no chance of a hard rectangle edge.
-        const topGrad = ctx.createLinearGradient(0, 0, 0, eh);
+        const topGrad = ctx.createLinearGradient(0, fy, 0, fy + fh);
         topGrad.addColorStop(0.00, `rgba(${tint.r},${tint.g},${tint.b},0.25)`);
         topGrad.addColorStop(0.35, 'rgba(0,0,0,0)');
         topGrad.addColorStop(1.00, 'rgba(0,0,0,0)');
         ctx.fillStyle = topGrad;
-        ctx.fillRect(0, 0, ew, eh);
+        ctx.fillRect(fx, fy, fw, fh);
 
         // 7. God rays (additive, only when sky has warm tint)
         if (this.skyMeta.mood === 'sunset' || this.skyMeta.mood === 'pastel' || this.skyMeta.mood === 'crimson') {

@@ -3,9 +3,9 @@
    2.5D rendering pipeline, and Populous-inspired gameplay.
 */
 
-import { InputHandler } from './input.js?v=10';
-import { ResourceManager } from './resources.js?v=10';
-import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=10';
+import { InputHandler } from './input.js?v=11';
+import { ResourceManager } from './resources.js?v=11';
+import { World, getBackgroundProgress, getSkyVariantImage, pickRandomSkyVariant } from './world.js?v=11';
 import {
     Player, Island, Villager, Warrior, Priest, Tokobu, Projectile,
     Pig, Leaf, Snowflake, Assets, Fireball, StoneWall,
@@ -14,26 +14,30 @@ import {
     getAssetProgress,
     WORLD_CEILING_Y, getWorldGroundY,
     TEAMS, TEAM_PALETTE, teamColor
-} from './entities.js?v=10';
-import { AudioManager } from './audio.js?v=10';
+} from './entities.js?v=11';
+import { AudioManager } from './audio.js?v=11';
 
-/* DYNAMIC DIFFICULTY MANAGER (v4 — four-team aware, no allies)
-   Design constraints carried over from v3:
+/* DYNAMIC DIFFICULTY MANAGER (v5 — responsive, four-team aware, no allies)
+   Design constraints:
      1. Adjustments must be invisible to the player.
-     2. Wide DEADBAND around equilibrium where nothing happens.
-     3. Modulation HELPS the underdog. The dominant side gets a tiny nudge.
-     4. Hard cap on every lever (±15–20% from baseline).
-     5. Single primary signal (tent delta).
-   v4 changes:
-     - The player's opposition is the strongest CURRENT rival, not blue
-       specifically. Score = green tents - max(blue, yellow, red) tents.
-       This recovers the v3 calibration: in two-team play blue WAS the
-       max rival; nothing changes there. In four-team play, the system
-       now reacts to whichever rival tribe is leading.
-     - Tent-flip momentum tracks gains against the leading rival, losses
-       to whichever rival is currently advancing.
-     - Boost levers cascade to all rivals equally (no allies, every tribe
-       gets the same lift when the player is dominating).
+     2. Modulation always favours equilibrium — boost the underdog, nudge
+        the dominant side back.
+     3. Hard cap on every lever so a runaway never spirals (±35% max).
+     4. Reacts in near-real-time: short eval window, fast lerp toward target.
+     5. Kill-streak signal feeds in fast — the moment a player starts mowing
+        rivals down, aggression climbs without waiting for tent capture to
+        catch up.
+   v5 changes from v4:
+     - Wider effective range (±0.35 vs ±0.15) so the system can actually
+       fight back when the player runs away with the game.
+     - Faster evaluation (1.5s vs 3.0s) and a stronger lerp (0.5 vs 0.20)
+       so swings register within seconds, not tens of seconds.
+     - Kill streak tracking — fresh kills feed a short-window signal that
+       raises rival aggression immediately (tents are too slow on their own).
+     - Aggression now plumbs into warriors too, not just chiefs (warriors
+       were on flat baseline, which is why dominating felt easy).
+     - Smaller deadband (1 vs 2) so close-but-tilted situations still
+       trigger gentle correction.
 */
 class DifficultyManager {
     constructor() {
@@ -42,19 +46,22 @@ class DifficultyManager {
 
         this._t = 0;
         this._evalTimer = 0;
-        this._evalInterval = 3.0;
+        this._evalInterval = 1.5;
         this._lastTents = { green: -1, blue: -1, yellow: -1, red: -1 };
         this.captureEvents = [];
         this.lossEvents = [];
         this.deathEvents = [];
+        this.killEvents = [];
         this.windowSec = 20;
+        // Kill streak window is much shorter — we want fast reactions to
+        // a player going on a tear.
+        this.killWindowSec = 8;
 
-        // Deadband — within ±N tent delta the system is fully neutral
-        this.deadbandTents = 2;
-        this.fullSwingTents = 6; // |tent delta| of 6 → |score| of 1.0
+        this.deadbandTents = 1;
+        this.fullSwingTents = 5;
     }
 
-    notePlayerKill()  { /* noise — not used */ }
+    notePlayerKill()  { this.killEvents.push(this._t); }
     notePlayerDeath() { this.deathEvents.push(this._t); }
 
     update(dt, greenTents, teamTents, greenPop, teamPops, _playerHp) {
@@ -82,10 +89,12 @@ class DifficultyManager {
         this._lastTents.yellow = yellow;
         this._lastTents.red    = red;
 
-        const cutoff = this._t - this.windowSec;
+        const cutoff     = this._t - this.windowSec;
+        const killCutoff = this._t - this.killWindowSec;
         this.captureEvents = this.captureEvents.filter(t => t > cutoff);
         this.lossEvents    = this.lossEvents.filter(t => t > cutoff);
         this.deathEvents   = this.deathEvents.filter(t => t > cutoff);
+        this.killEvents    = this.killEvents.filter(t => t > killCutoff);
 
         this._evalTimer += dt;
         if (this._evalTimer >= this._evalInterval) {
@@ -93,40 +102,41 @@ class DifficultyManager {
             this._recomputeTarget(greenTents, maxRivalTents, greenPop || 0, maxRivalPop);
         }
 
-        this.score += (this.targetScore - this.score) * 0.20 * dt;
+        // Stronger lerp — score follows target within a couple of seconds.
+        this.score += (this.targetScore - this.score) * 0.50 * dt;
     }
 
     _recomputeTarget(greenTents, maxRivalTents, greenPop, maxRivalPop) {
-        // Tent signal — slow, territorial.
         const tentDelta = greenTents - maxRivalTents;
         const absTentDelta = Math.abs(tentDelta);
 
         // Population signal — fast ground-truth. Normalised so a 2x lead
-        // saturates around ±0.7. Prevents the runaway boost loop where
-        // green has 5x more units but is briefly behind on tents (the v3
-        // "I did nothing and won massively" failure mode).
+        // saturates around ±0.7.
         const denomPop = Math.max(20, maxRivalPop);
         const popRatio = greenPop / denomPop;
         const popContribution = Math.max(-1, Math.min(1, (popRatio - 1) * 0.7));
 
         let s;
         if (absTentDelta <= this.deadbandTents) {
-            // Tents balanced — let pop drive the score, but lightly.
             s = popContribution * 0.6;
-            // Death events still pull toward "ease up" if they're piling up.
             s -= Math.min(0.4, this.deathEvents.length * 0.18);
         } else {
             const past = absTentDelta - this.deadbandTents;
             const range = this.fullSwingTents - this.deadbandTents;
             const tentMag = Math.min(1, past / range);
             const tentScore = Math.sign(tentDelta) * tentMag;
-            // Blend: 60% tent (slow reliable), 40% population (sanity check).
             s = 0.6 * tentScore + 0.4 * popContribution;
         }
 
+        // Kill streak — anything over 3 kills in 8 seconds is a "rampage"
+        // signal and raises aggression fast. Capped so a single combo
+        // doesn't peg the system.
+        const killStreak = this.killEvents.length;
+        if (killStreak > 3) s += Math.min(0.4, (killStreak - 3) * 0.08);
+
         const flipMomentum = (this.captureEvents.length - this.lossEvents.length) * 0.04;
         s += flipMomentum;
-        s -= this.deathEvents.length * 0.12;
+        s -= this.deathEvents.length * 0.14;
 
         if (s > 1) s = 1;
         if (s < -1) s = -1;
@@ -134,22 +144,24 @@ class DifficultyManager {
     }
 
     // === LEVERS — invisible to the player, hard-capped ===
-    // Player support (>=1.0). Boosts kick in only when score < -0.3.
+    // Player support (>=1.0). Boosts kick in only when score < -0.25.
     playerSupport() {
         const s = -this.score;          // positive when player struggling
-        if (s < 0.3) return 1.0;
-        return 1.0 + Math.min(0.20, (s - 0.3) * 0.40);
+        if (s < 0.25) return 1.0;
+        return 1.0 + Math.min(0.30, (s - 0.25) * 0.50);
     }
-    // Enemy aggression (>=1.0). Tiny boost only when player is clearly ahead.
+    // Enemy aggression (>=1.0). Now reaches up to +35% above baseline so
+    // dominating the game actually meets pushback. Threshold is also
+    // lower (0.20 vs 0.30) so the response feels prompt, not delayed.
     enemyAggression() {
         const s = this.score;            // positive when player dominant
-        if (s < 0.3) return 1.0;
-        return 1.0 + Math.min(0.15, (s - 0.3) * 0.30);
+        if (s < 0.20) return 1.0;
+        return 1.0 + Math.min(0.35, (s - 0.20) * 0.55);
     }
     // Boolean: should green islands spawn an extra unit this batch?
-    shouldBoostPlayerSpawn() { return this.score < -0.45; }
-    // Boolean: should blue islands spawn an extra unit this batch?
-    shouldBoostEnemySpawn()  { return this.score > 0.55; }
+    shouldBoostPlayerSpawn() { return this.score < -0.40; }
+    // Boolean: should rival islands spawn an extra unit this batch?
+    shouldBoostEnemySpawn()  { return this.score >  0.40; }
 }
 
 class Game {
@@ -166,8 +178,18 @@ class Game {
         this.worldHeight = 8000;
         this.uiState = 'LOADING';
 
-        this.titleImg = new Image(); this.titleImg.src = 'assets/title.png';
-        this.tooltipImg = new Image(); this.tooltipImg.src = 'assets/tooltip.png';
+        // Tutorial state — replaces the old title.png + tooltip.png splash
+        // screens. Shown contextually in-game so players learn by doing.
+        // Steps: 0 = movement, 1 = combat, 2 = dismissed.
+        this._tutorialStep = 0;
+        this._tutorialMoved = false;
+        this._tutorialFlew = false;
+        this._tutorialShot = false;
+        this._tutorialScrolled = false;
+        this._tutorialCast = false;
+        this._tutorialFadeIn = 0;       // 0..1, eases overlay opacity in
+        this._tutorialStepReadyAt = 0;  // when step 0 conditions met, time when we advance
+        this._tutorialDismissAt = 0;    // when step 1 conditions met, time when we hide
 
         // Pick a sky variant up-front so the loading screen can use it.
         this.loadingSkyMeta = pickRandomSkyVariant();
@@ -182,6 +204,10 @@ class Game {
         this.input = new InputHandler();
         this.resources = new ResourceManager();
         this.world = new World(this.worldWidth, this.worldHeight);
+        // Sync the camera viewport to the actual canvas now that the world
+        // exists. Without this, snapTo() and the first frame use the camera's
+        // default 800x600 viewport and the player ends up framed in a corner.
+        this.resizeCanvas();
         this.audio = new AudioManager();
         this.audioReady = false;
         this.audio.loadAll().then(() => { this.audioReady = true; });
@@ -203,7 +229,10 @@ class Game {
             });
         }
 
-        this.input.onScroll((delta) => this.resources.cycleSpell(delta > 0 ? 1 : -1));
+        this.input.onScroll((delta) => {
+            this.resources.cycleSpell(delta > 0 ? 1 : -1);
+            this._tutorialScrolled = true;
+        });
 
         // Four chiefs: the player (green) plus three rival AI chiefs (blue,
         // yellow, red). Positioned above each tribe's home island, one per
@@ -287,19 +316,189 @@ class Game {
         window.addEventListener('keydown', handler);
     }
 
-    _handleScreenNav() {
-        if (this.uiState === 'LOADING') {
-            // Only advance from LOADING once everything is ready
-            if (this._loadDone) {
-                this.uiState = 'TITLE';
-                this.navCooldown = true;
-                setTimeout(() => { this.navCooldown = false; }, 200);
+    // Tutorial — two-step in-game overlay that replaces the old splash
+    // screens. Detects the player demonstrating each control set and
+    // advances when they've understood. Once dismissed, never returns.
+    _updateTutorial(realDt) {
+        if (this._tutorialStep >= 2) {
+            this._tutorialFadeIn = Math.max(0, this._tutorialFadeIn - realDt * 2);
+            return;
+        }
+        // Eased fade-in for the current overlay; resets on step transition.
+        this._tutorialFadeIn = Math.min(1, this._tutorialFadeIn + realDt * 1.6);
+
+        const k = this.input.keys;
+        if (k.a || k.d || k.s) this._tutorialMoved = true;
+        // Flying counts as Space or W pressed once the player is airborne.
+        if ((k.space || k.w) && !this.player.isGrounded) this._tutorialFlew = true;
+
+        if (this._tutorialStep === 0) {
+            if (this._tutorialMoved && this._tutorialFlew) {
+                if (this._tutorialStepReadyAt === 0) this._tutorialStepReadyAt = performance.now();
+                // Brief celebration delay before the next card slides in.
+                if (performance.now() - this._tutorialStepReadyAt > 900) {
+                    this._tutorialStep = 1;
+                    this._tutorialFadeIn = 0;
+                    this._tutorialStepReadyAt = 0;
+                }
             }
-        } else if (this.uiState === 'TITLE' && !this.navCooldown) {
-            this.uiState = 'TOOLTIP';
-            this.navCooldown = true;
-            setTimeout(() => { this.navCooldown = false; }, 200);
-        } else if (this.uiState === 'TOOLTIP' && !this.navCooldown) {
+            return;
+        }
+
+        // Step 1 — combat. Track left-click, scroll, right-click.
+        if (this.input.mouse.leftDown) this._tutorialShot = true;
+        if (this.input.mouse.rightDown) this._tutorialCast = true;
+
+        const allDone = this._tutorialShot && this._tutorialScrolled && this._tutorialCast;
+        if (allDone && this._tutorialDismissAt === 0) {
+            this._tutorialDismissAt = performance.now() + 800;
+        }
+        // Failsafe — if the player never demonstrates everything, dismiss
+        // after they've been in step 1 for a while so the overlay doesn't
+        // overstay its welcome.
+        if (this._tutorialDismissAt === 0 && this._tutorialFadeIn >= 1) {
+            this._tutorialStep1Timer = (this._tutorialStep1Timer || 0) + realDt;
+            if (this._tutorialStep1Timer > 14) this._tutorialDismissAt = performance.now();
+        }
+        if (this._tutorialDismissAt > 0 && performance.now() >= this._tutorialDismissAt) {
+            this._tutorialStep = 2;
+        }
+    }
+
+    _drawTutorial(ctx) {
+        if (this._tutorialFadeIn <= 0.001) return;
+
+        const W = this.canvas.width;
+        const H = this.canvas.height;
+        const a = this._tutorialFadeIn;
+
+        // Card geometry — bottom-centred, generous margin above HUD bar.
+        const cardW = Math.min(560, W * 0.7);
+        const cardH = 92;
+        const cardX = (W - cardW) * 0.5;
+        const cardY = H - cardH - 80;
+
+        ctx.save();
+        // Card background — glassy dark slab with copper rim, matches HUD.
+        ctx.globalAlpha = a * 0.85;
+        ctx.fillStyle = 'rgba(8, 10, 14, 0.78)';
+        this._roundRect(ctx, cardX, cardY, cardW, cardH, 10);
+        ctx.fill();
+        ctx.globalAlpha = a * 0.55;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(201, 122, 61, 0.55)';
+        this._roundRect(ctx, cardX, cardY, cardW, cardH, 10);
+        ctx.stroke();
+        ctx.globalAlpha = a;
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        if (this._tutorialStep === 0) {
+            const cy = cardY + cardH * 0.5;
+
+            ctx.fillStyle = 'rgba(232, 184, 114, 0.95)';
+            ctx.font = '600 11px "Segoe UI", Tahoma, sans-serif';
+            ctx.fillText('STEP 1 OF 2', W * 0.5, cy - 22);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+            ctx.font = '500 17px "Segoe UI", Tahoma, sans-serif';
+            this._drawTutorialLine(ctx, [
+                { kind: 'key',  text: 'WASD' },
+                { kind: 'text', text: ' to move ' },
+                { kind: 'key',  text: 'SPACE' },
+                { kind: 'text', text: ' or ' },
+                { kind: 'key',  text: 'W' },
+                { kind: 'text', text: ' to fly' },
+            ], W * 0.5, cy + 4);
+
+            // Tiny progress dots — fill once each requirement is met.
+            this._drawTutorialDots(ctx, W * 0.5, cy + 28, [
+                this._tutorialMoved,
+                this._tutorialFlew,
+            ]);
+        } else if (this._tutorialStep === 1) {
+            const cy = cardY + cardH * 0.5;
+
+            ctx.fillStyle = 'rgba(124, 208, 194, 0.95)';
+            ctx.font = '600 11px "Segoe UI", Tahoma, sans-serif';
+            ctx.fillText('STEP 2 OF 2', W * 0.5, cy - 22);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+            ctx.font = '500 16px "Segoe UI", Tahoma, sans-serif';
+            this._drawTutorialLine(ctx, [
+                { kind: 'key',  text: 'CLICK' },
+                { kind: 'text', text: ' to shoot · ' },
+                { kind: 'key',  text: 'WHEEL' },
+                { kind: 'text', text: ' to switch · ' },
+                { kind: 'key',  text: 'R-CLICK' },
+                { kind: 'text', text: ' to cast' },
+            ], W * 0.5, cy + 4);
+
+            this._drawTutorialDots(ctx, W * 0.5, cy + 28, [
+                this._tutorialShot,
+                this._tutorialScrolled,
+                this._tutorialCast,
+            ]);
+        }
+
+        ctx.restore();
+    }
+
+    _drawTutorialLine(ctx, segments, cx, y) {
+        // Two-pass render: measure first, then paint centred. Each "key"
+        // segment becomes a soft chip; each "text" segment is plain copy.
+        const padX = 6;
+        const chipH = 22;
+        let totalW = 0;
+        const measured = segments.map(seg => {
+            const w = ctx.measureText(seg.text).width + (seg.kind === 'key' ? padX * 2 : 0);
+            totalW += w + (seg.kind === 'key' ? 4 : 0);
+            return { ...seg, w };
+        });
+        let x = cx - totalW * 0.5;
+        for (const seg of measured) {
+            if (seg.kind === 'key') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+                this._roundRect(ctx, x + 2, y - chipH * 0.5, seg.w, chipH, 4);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+                ctx.lineWidth = 1;
+                this._roundRect(ctx, x + 2, y - chipH * 0.5, seg.w, chipH, 4);
+                ctx.stroke();
+                ctx.restore();
+                ctx.fillStyle = 'rgba(255, 240, 200, 1)';
+                ctx.fillText(seg.text, x + 2 + seg.w * 0.5, y);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+                x += seg.w + 4;
+            } else {
+                ctx.fillText(seg.text, x + seg.w * 0.5, y);
+                x += seg.w;
+            }
+        }
+    }
+
+    _drawTutorialDots(ctx, cx, y, states) {
+        const r = 3;
+        const gap = 14;
+        const total = states.length;
+        const startX = cx - ((total - 1) * gap) * 0.5;
+        for (let i = 0; i < total; i++) {
+            ctx.beginPath();
+            ctx.arc(startX + i * gap, y, r, 0, Math.PI * 2);
+            ctx.fillStyle = states[i]
+                ? 'rgba(124, 208, 194, 0.95)'
+                : 'rgba(255, 255, 255, 0.18)';
+            ctx.fill();
+        }
+    }
+
+    _handleScreenNav() {
+        // Skip the old title/tooltip splash screens entirely. Loading hands
+        // off straight into PLAYING once assets are decoded — controls are
+        // taught by the in-game tutorial overlay instead.
+        if (this.uiState === 'LOADING' && this._loadDone) {
             this.uiState = 'PLAYING';
             const lt = document.getElementById('loading-text');
             if (lt) lt.style.display = 'none';
@@ -456,6 +655,8 @@ class Game {
         if (this.input.keys.digit3) this.resources.setSpell(2);
         if (this.input.keys.digit4) this.resources.setSpell(3);
 
+        this._updateTutorial(realDt);
+
         this._updateTotemLogic(dt);
         this._updateIslandDynamics(dt);
 
@@ -495,6 +696,11 @@ class Game {
             red:    this.redChief,
         };
 
+        // Cache the current aggression lever once per tick. Rival warriors
+        // read it through difficultyScale; the player's tribe stays at 1.0
+        // so the scaling only ever bites the AI, never the green warriors.
+        const aggro = this.difficulty.enemyAggression();
+
         // Villagers
         // Dispatch tree:
         //   Tokobu (extends Warrior)  → updateLogic with melee override
@@ -505,6 +711,7 @@ class Game {
             const v = this.villagers[i];
             if (v.dead) continue;
             if (v instanceof Warrior) {
+                v.difficultyScale = (v.team === this.player.team) ? 1.0 : aggro;
                 v.updateLogic(dt, this.islands, enemiesSnapshot,
                     this._unitSpawn,
                     this.worldWidth, this.worldHeight, this.audio,
@@ -1333,9 +1540,8 @@ class Game {
         // Treat audio as one bundle worth ~10 image-equivalents so it weighs in
         const audioWeight = 10;
         const audioReady = this.audioReady ? audioWeight : 0;
-        const titleReady = (this.titleImg.complete ? 1 : 0) + (this.tooltipImg.complete ? 1 : 0);
-        const totalReady = ap.ready + bp.ready + audioReady + titleReady;
-        const totalNeed  = ap.total + bp.total + audioWeight + 2;
+        const totalReady = ap.ready + bp.ready + audioReady;
+        const totalNeed  = ap.total + bp.total + audioWeight;
         const target = totalNeed > 0 ? totalReady / totalNeed : 1;
 
         // Smooth the progress bar so it doesn't jitter or jump
@@ -1506,33 +1712,6 @@ class Game {
         if (this.uiState === 'LOADING') {
             this._updateLoadProgress(realDt);
             this._drawLoadingScreen(ctx, realDt);
-            return;
-        }
-
-        // Title / Tooltip screens
-        if (this.uiState === 'TITLE') {
-            this.uiLayer.style.display = 'none';
-            if (this.titleImg.complete) {
-                ctx.drawImage(this.titleImg, 0, 0, this.canvas.width, this.canvas.height);
-            } else {
-                ctx.fillStyle = '#0a0a1a';
-                ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 40px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText("SOAR: MYSTIK SKIES", this.canvas.width * 0.5, this.canvas.height * 0.5);
-                ctx.font = '18px sans-serif';
-                ctx.fillStyle = '#888';
-                ctx.fillText("Click to begin", this.canvas.width * 0.5, this.canvas.height * 0.5 + 50);
-            }
-            return;
-        }
-
-        if (this.uiState === 'TOOLTIP') {
-            this.uiLayer.style.display = 'none';
-            if (this.tooltipImg && this.tooltipImg.complete) {
-                ctx.drawImage(this.tooltipImg, 0, 0, this.canvas.width, this.canvas.height);
-            }
             return;
         }
 
@@ -1801,6 +1980,11 @@ class Game {
         // rounded planet. Player sits at the top of the disc, world rotates
         // around them; rock crust at the centre, ozone band at the rim.
         this._drawMinimap(ctx);
+
+        // In-game tutorial overlay — replaces the legacy title/tooltip
+        // splash screens. Drawn over everything else so the cards always
+        // sit above the action when active.
+        this._drawTutorial(ctx);
 
         // FPS / debug strip — kept minimal; difficulty intentionally hidden.
         ctx.fillStyle = 'rgba(255,255,255,0.3)';

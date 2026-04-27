@@ -1530,11 +1530,16 @@ export class Warrior extends Villager {
             if (Math.abs(targetEnemy.x - this.x) < 400) this.vx *= 0.8;
 
             if (this.attackCooldown <= 0) {
-                // Baseline cooldown and damage for both teams.
-                this.attackCooldown = 1.5 + Math.random();
+                // Difficulty scales reload speed and accuracy for rival
+                // warriors. Player-side warriors stay flat at 1.0 (set
+                // externally each tick by the dispatcher).
+                const scale = this.difficultyScale || 1.0;
+                this.attackCooldown = (1.5 + Math.random()) / scale;
                 const dx = targetEnemy.x - this.x;
                 const dy = (targetEnemy.y - 20) - this.y;
-                const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.25;
+                // Inverse spread: more aggressive = tighter shot.
+                const spread = 0.25 / scale;
+                const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * spread;
                 spawn.projectile(this.x, this.y, angle, this.team, 10);
             }
 
